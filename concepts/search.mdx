@@ -1,0 +1,72 @@
+---
+title: "Search"
+description: "Full-text, vector, and structured metadata search in KiwiFS."
+icon: "magnifying-glass"
+---
+
+KiwiFS provides three tiers of search, from zero-dependency to AI-powered.
+
+## Search tiers
+
+```bash
+kiwifs serve --search grep      # Tier 1: zero deps, exact match
+kiwifs serve --search sqlite    # Tier 2: SQLite FTS5, BM25 ranked (default)
+kiwifs serve                    # Tier 3: + vector search (if configured)
+```
+
+## Full-text search (FTS5)
+
+SQLite FTS5 with BM25 ranking. Supports boolean operators and phrase search:
+
+```
+GET /api/kiwi/search?q=payment+timeout           → BM25 ranked results
+GET /api/kiwi/search?q="connection reset" AND ws  → boolean + phrase search
+```
+
+## Vector search
+
+Semantic similarity search using embeddings. Pluggable — mix any embedder with any vector store:
+
+| Embedder | Vector Store |
+|---|---|
+| OpenAI, Ollama, Cohere, Vertex AI, Bedrock, custom HTTP | sqlite-vec (default), Qdrant, pgvector, Pinecone, Weaviate, Milvus |
+
+Default setup (sqlite-vec + OpenAI) needs one env var and zero infrastructure:
+
+```toml
+[search.vector]
+enabled = true
+
+[search.vector.embedder]
+provider = "openai"
+model = "text-embedding-3-small"
+api_key = "${OPENAI_API_KEY}"
+
+[search.vector.store]
+provider = "sqlite-vec"
+```
+
+For fully offline setups, use Ollama + sqlite-vec — everything runs locally.
+
+```
+POST /api/kiwi/search/semantic
+Content-Type: application/json
+
+{"query": "how does authentication work?", "limit": 10}
+```
+
+## Structured metadata queries
+
+Frontmatter from every markdown file is mirrored into a SQLite `file_meta` table:
+
+```
+GET /api/kiwi/meta?where=$.status=published&where=$.priority=high&sort=$.updated&order=desc
+```
+
+## Trust-ranked search
+
+Pages marked `status: verified` or `source-of-truth: true` in frontmatter rank higher in search results:
+
+```
+GET /api/kiwi/search/verified?q=authentication
+```

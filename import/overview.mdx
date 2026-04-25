@@ -1,0 +1,83 @@
+---
+title: "Data Import"
+description: "Import data from 16+ sources into your KiwiFS knowledge base."
+icon: "download"
+---
+
+KiwiFS can import data from databases, files, and SaaS platforms — converting each row/record into a markdown page with structured frontmatter.
+
+```bash
+kiwifs import --from <source> [options] --root ./knowledge
+```
+
+## Supported sources
+
+<CardGroup cols={3}>
+  <Card title="PostgreSQL" icon="database" href="/import/databases">
+    `--from postgres`
+  </Card>
+  <Card title="MySQL" icon="database" href="/import/databases">
+    `--from mysql`
+  </Card>
+  <Card title="SQLite" icon="database" href="/import/databases">
+    `--from sqlite`
+  </Card>
+  <Card title="MongoDB" icon="database" href="/import/databases">
+    `--from mongodb`
+  </Card>
+  <Card title="CSV" icon="file-csv" href="/import/files">
+    `--from csv`
+  </Card>
+  <Card title="JSON" icon="file-code" href="/import/files">
+    `--from json`
+  </Card>
+  <Card title="YAML" icon="file-code" href="/import/files">
+    `--from yaml`
+  </Card>
+  <Card title="Excel" icon="file-excel" href="/import/files">
+    `--from excel`
+  </Card>
+  <Card title="Notion" icon="n" href="/import/saas">
+    `--from notion`
+  </Card>
+  <Card title="Airtable" icon="table" href="/import/saas">
+    `--from airtable`
+  </Card>
+  <Card title="Google Sheets" icon="table" href="/import/saas">
+    `--from gsheets`
+  </Card>
+  <Card title="Firestore" icon="fire" href="/import/databases">
+    `--from firestore`
+  </Card>
+</CardGroup>
+
+Plus: JSONL, Obsidian vaults, Confluence exports, DynamoDB, Redis, Elasticsearch.
+
+## Key features
+
+- **Idempotent** — re-importing the same data skips unchanged records
+- **Column filtering** — `--columns "name,email,status"` to include only specific fields
+- **Dry run** — `--dry-run` to preview what would be imported
+- **Limit** — `--limit 100` to import a subset
+- **Custom queries** — `--query "SELECT * FROM users WHERE active = true"`
+
+## How it works
+
+Each record becomes a markdown file with frontmatter:
+
+```markdown
+---
+_imported_at: "2026-04-25T18:46:15Z"
+_source: users
+_source_id: pg:users:42
+name: Jane Doe
+email: jane@example.com
+role: admin
+---
+
+# Jane Doe
+
+> Auto-imported from users (row pg:users:42)
+```
+
+The `_source_id` field enables idempotent re-imports — KiwiFS compares field values and skips records that haven't changed.

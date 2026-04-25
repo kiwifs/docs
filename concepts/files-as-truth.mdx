@@ -1,0 +1,46 @@
+---
+title: "Files as Truth"
+description: "Why KiwiFS uses plain markdown files instead of a database."
+icon: "file"
+---
+
+This is the core design decision. Every other choice follows from it.
+
+**Files are the only format that is simultaneously human-readable, agent-native, and tool-agnostic.** `cat file.md` works in every shell, every container, every sandbox, every CI pipeline. No driver. No connection string. No SDK. The agent doesn't need to learn your API — it already knows the filesystem from training data.
+
+A Postgres table is invisible to both agents and humans without custom tooling. A JSON blob requires parsing. A proprietary format requires a client library. Markdown files require nothing.
+
+## What files alone don't give you
+
+Raw files aren't enough. You need versioning, search, concurrency control, a web UI. KiwiFS layers database-like guarantees **on top of** files:
+
+| Need | How KiwiFS solves it |
+|---|---|
+| **Versioning** | Git — every write is an atomic commit. Crash recovery, blame, diff, point-in-time restore. |
+| **Search** | SQLite FTS5 (BM25 ranked) + pluggable vector search. Rebuildable from files anytime. |
+| **Concurrency** | Optimistic locking via ETags (git blob hash). Standard HTTP `If-Match` / `409 Conflict`. |
+| **Structured queries** | Frontmatter → SQLite `file_meta` table. Query by field, sort, filter. |
+| **Audit trail** | Git commit log. SHA-1 hash chain. Tamper = broken chain. |
+| **Real-time sync** | SSE broadcast on every write/delete. UI updates live. |
+
+The files are the truth. Everything else is a derivative index you can rebuild with `kiwifs reindex`.
+
+## The LLM Wiki pattern
+
+KiwiFS implements [Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) as production infrastructure. The pattern: raw sources in, compiled wiki out, agent maintains it over time.
+
+```
+knowledge/
+├── SCHEMA.md          # Agent instructions: ingest, query, lint
+├── index.md           # Auto-maintained table of contents
+├── log.md             # Append-only chronological record
+├── concepts/          # One page per concept (agent-created)
+├── entities/          # One page per named entity
+└── reports/           # Chronological reports
+```
+
+The agent reads `SCHEMA.md` to understand how to maintain the wiki:
+
+- **Ingest** — process a new source, create/update wiki pages, update index + log
+- **Query** — search the wiki to answer a question
+- **Lint** — audit for orphan pages, broken links, contradictions, stale content

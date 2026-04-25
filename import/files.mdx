@@ -1,0 +1,72 @@
+---
+title: "File Import"
+description: "Import from CSV, JSON, JSONL, YAML, Excel, Obsidian vaults, and Confluence exports."
+icon: "file"
+---
+
+## CSV
+
+```bash
+kiwifs import --from csv \
+  --file /path/to/data.csv \
+  --root ./knowledge --prefix "data/" \
+  --id-column Name
+```
+
+## JSON
+
+```bash
+kiwifs import --from json \
+  --file /path/to/users.json \
+  --root ./knowledge --prefix "users/" \
+  --id-column name
+```
+
+Expects an array of objects: `[{"name": "Alice", ...}, ...]`
+
+## JSONL
+
+```bash
+kiwifs import --from jsonl \
+  --file /path/to/data.jsonl \
+  --root ./knowledge --prefix "data/"
+```
+
+One JSON object per line.
+
+## YAML
+
+```bash
+kiwifs import --from yaml \
+  --file /path/to/data.yaml \
+  --root ./knowledge --prefix "data/"
+```
+
+## Excel
+
+```bash
+kiwifs import --from excel \
+  --file /path/to/students.xlsx \
+  --sheet "Sheet1" \
+  --root ./knowledge --prefix "students/"
+```
+
+## Obsidian vault
+
+Import an existing Obsidian vault, preserving wiki links and frontmatter:
+
+```bash
+kiwifs import --from obsidian \
+  --path /path/to/vault \
+  --root ./knowledge --prefix "imported/"
+```
+
+## Confluence export
+
+Import from a Confluence HTML/XML export:
+
+```bash
+kiwifs import --from confluence \
+  --path /path/to/export \
+  --root ./knowledge --prefix "confluence/"
+```

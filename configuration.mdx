@@ -1,0 +1,91 @@
+---
+title: "Configuration"
+description: "Configure KiwiFS via TOML config file, CLI flags, or environment variables."
+icon: "gear"
+---
+
+KiwiFS reads configuration from `.kiwi/config.toml` in your knowledge root. CLI flags override config values. Environment variables override both.
+
+```toml
+# .kiwi/config.toml
+
+[server]
+port = 3333
+host = "0.0.0.0"
+public_url = "https://wiki.mycompany.com"  # enables permalinks
+
+[storage]
+root = "/data/knowledge"
+
+[search]
+engine = "sqlite"                # grep | sqlite | vector
+
+[search.vector]
+enabled = true
+
+[search.vector.embedder]
+provider = "openai"              # openai | ollama | cohere | bedrock | vertex | http
+model = "text-embedding-3-small"
+api_key = "${OPENAI_API_KEY}"
+
+[search.vector.store]
+provider = "sqlite-vec"          # sqlite-vec | qdrant | pgvector | pinecone | weaviate | milvus
+
+[versioning]
+strategy = "git"                 # git | cow | none
+
+[auth]
+type = "none"                    # none | apikey | perspace | oidc
+```
+
+## CLI overrides
+
+Any config value can be set via CLI flags:
+
+```bash
+kiwifs serve --port 4000 --search sqlite --versioning git
+```
+
+## Environment variables
+
+| Variable | Maps to |
+|---|---|
+| `KIWI_PORT` | `[server] port` |
+| `KIWI_PUBLIC_URL` | `[server] public_url` |
+| `KIWI_SEARCH_ENGINE` | `[search] engine` |
+| `OPENAI_API_KEY` | `[search.vector.embedder] api_key` |
+| `KIWI_AUTH_TYPE` | `[auth] type` |
+
+## Authentication
+
+| Type | Description |
+|---|---|
+| `none` | No authentication (default) |
+| `apikey` | Global Bearer token |
+| `perspace` | Per-space API keys |
+| `oidc` | OpenID Connect (SSO) |
+
+## Vector search providers
+
+<Tabs>
+  <Tab title="Embedders">
+    | Provider | Config value | Notes |
+    |---|---|---|
+    | OpenAI | `openai` | Default. Needs `OPENAI_API_KEY` |
+    | Ollama | `ollama` | Fully offline. Needs local Ollama server |
+    | Cohere | `cohere` | Needs `COHERE_API_KEY` |
+    | Vertex AI | `vertex` | Google Cloud |
+    | AWS Bedrock | `bedrock` | AWS credentials |
+    | Custom HTTP | `http` | Any OpenAI-compatible endpoint |
+  </Tab>
+  <Tab title="Vector stores">
+    | Provider | Config value | Notes |
+    |---|---|---|
+    | sqlite-vec | `sqlite-vec` | Default. Zero infrastructure |
+    | Qdrant | `qdrant` | Self-hosted or Qdrant Cloud |
+    | pgvector | `pgvector` | PostgreSQL extension |
+    | Pinecone | `pinecone` | Managed cloud |
+    | Weaviate | `weaviate` | Self-hosted or Weaviate Cloud |
+    | Milvus | `milvus` | Self-hosted or Zilliz Cloud |
+  </Tab>
+</Tabs>

@@ -1,0 +1,106 @@
+---
+title: "Database Import"
+description: "Import from PostgreSQL, MySQL, SQLite, MongoDB, Firestore, DynamoDB, Redis, and Elasticsearch."
+icon: "database"
+---
+
+## PostgreSQL
+
+```bash
+kiwifs import --from postgres \
+  --dsn "postgres://user:pass@host:5432/dbname" \
+  --table users \
+  --root ./knowledge \
+  --prefix "users/"
+```
+
+Use `--query` to import a custom SQL result set:
+
+```bash
+kiwifs import --from postgres \
+  --dsn "postgres://user:pass@host/db" \
+  --query "SELECT id, name, email FROM users WHERE active = true" \
+  --root ./knowledge --prefix "active-users/"
+```
+
+## MySQL
+
+```bash
+kiwifs import --from mysql \
+  --dsn "user:pass@tcp(host:3306)/dbname" \
+  --table products \
+  --root ./knowledge --prefix "products/"
+```
+
+## SQLite
+
+```bash
+kiwifs import --from sqlite \
+  --db /path/to/data.db \
+  --table books \
+  --root ./knowledge --prefix "books/"
+```
+
+## MongoDB
+
+```bash
+kiwifs import --from mongodb \
+  --uri "mongodb://host:27017" \
+  --database mydb \
+  --collection students \
+  --root ./knowledge --prefix "students/"
+```
+
+## Firestore
+
+```bash
+kiwifs import --from firestore \
+  --project my-gcp-project \
+  --collection students \
+  --root ./knowledge --prefix "students/"
+```
+
+Requires Google Cloud credentials (Application Default Credentials or service account key).
+
+## DynamoDB
+
+```bash
+kiwifs import --from dynamodb \
+  --region us-east-1 \
+  --table students \
+  --root ./knowledge --prefix "students/"
+```
+
+Uses standard AWS credential chain (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` or IAM role).
+
+## Redis
+
+```bash
+kiwifs import --from redis \
+  --addr localhost:6379 \
+  --pattern "students:*" \
+  --root ./knowledge --prefix "students/"
+```
+
+Imports JSON-encoded hash values matching the key pattern.
+
+## Elasticsearch
+
+```bash
+kiwifs import --from elasticsearch \
+  --url http://localhost:9200 \
+  --index students \
+  --root ./knowledge --prefix "students/"
+```
+
+Uses scroll API for efficient pagination of large indices.
+
+## Common options
+
+| Flag | Description |
+|---|---|
+| `--columns "a,b,c"` | Only include specific fields |
+| `--id-column name` | Use a specific column as the filename |
+| `--limit 100` | Import at most N records |
+| `--dry-run` | Preview without writing |
+| `--prefix "dir/"` | Path prefix in KiwiFS |

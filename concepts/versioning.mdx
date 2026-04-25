@@ -1,0 +1,45 @@
+---
+title: "Git Versioning"
+description: "Every write is an atomic git commit. Crash recovery, audit trail, tamper detection."
+icon: "code-branch"
+---
+
+Every write to KiwiFS is an atomic git commit. Users never see Git — the API abstracts it.
+
+## Why Git?
+
+Instead of building a custom write-ahead log, KiwiFS uses Git as its WAL. This gives you:
+
+- **Crash recovery** — incomplete writes are never committed
+- **Immutable audit trail** — SHA-1 hash chain, tamper = broken chain
+- **Point-in-time restore** — check out any previous state
+- **Replication** — `git push` to any remote for off-site backup
+- **Attribution** — `git blame` shows who wrote every line
+
+## API
+
+```
+GET /api/kiwi/versions?path=concepts/auth.md   → commit history
+GET /api/kiwi/version?path=auth.md&version=a1b → content at a specific commit
+GET /api/kiwi/diff?path=auth.md&from=a1b&to=c3d → unified diff
+GET /api/kiwi/blame?path=concepts/auth.md       → per-line attribution
+```
+
+## Attribution
+
+Every write includes an actor for git attribution:
+
+```bash
+curl -X PUT 'localhost:3333/api/kiwi/file?path=auth.md' \
+  -H "X-Actor: agent:exec_abc" \
+  -d "# Auth..."
+```
+
+The `X-Actor` header becomes the git commit author, visible in `blame` and `versions`.
+
+## Backup & restore
+
+```bash
+kiwifs backup --remote git@github.com:myorg/knowledge.git
+kiwifs restore --from git@github.com:myorg/knowledge.git
+```

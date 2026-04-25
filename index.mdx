@@ -1,133 +1,65 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
-icon: 'star'
+title: "KiwiFS"
+description: "The knowledge server — PocketBase for Knowledge. One Go binary, zero config."
+icon: "kiwi-bird"
 ---
 
-## Setting up
+KiwiFS is a **knowledge server** that gives you Obsidian's file-first philosophy with a web UI, agent-native filesystem access, Git versioning, and full-text + vector search — all in a single Go binary.
 
-Get your documentation site up and running in minutes.
+```bash
+curl -fsSL https://raw.githubusercontent.com/kiwifs/kiwifs/main/install.sh | sh
+kiwifs init ./knowledge && kiwifs serve --root ./knowledge
+# Open http://localhost:3333
+```
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+## Why KiwiFS?
 
-## Make it yours
+Every agent memory project gives you **storage** — a database table, a vector index, a key-value store. But storage is only one layer. In practice you need:
 
-Design a docs site that looks great and empowers your users.
+- **An agent interface** — agents already know `cat`, `grep`, `ls`. They don't need a custom SDK.
+- **A human interface** — someone has to review what the agent wrote. A wiki UI, not pgAdmin.
+- **An audit trail** — who changed what, when, and why. Cryptographic, not "trust the vendor."
+- **Search** — full-text (BM25) and semantic (vector), over the same files.
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+No existing tool does all four. KiwiFS is the full stack.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install and run in under 2 minutes.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Core Concepts" icon="lightbulb" href="/concepts/files-as-truth">
+    Why files, not a database.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Data Import" icon="download" href="/import/overview">
+    Import from PostgreSQL, MySQL, MongoDB, CSV, and 12 more sources.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="API Reference" icon="terminal" href="/api/overview">
+    Full REST API documentation.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## How it works
 
-Everything you need to create world-class documentation.
+```
+AGENT                              HUMAN
+─────                              ─────
+cat /kiwi/concepts/auth.md         Web UI (wiki links,
+grep -r "timeout" /kiwi/            graph view, search)
+echo "# Report" > /kiwi/r.md
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+       ↕                                ↕
+     ┌──────────────────────────────────────┐
+     │       Markdown files in folders      │
+     │       (the single source of truth)   │
+     └──────────────────────────────────────┘
+       ↕                ↕              ↕
+    Git versioning   FTS5 + vector   SSE events
+    (audit trail)    (search index)  (live updates)
+```
 
-## Make your content agent ready
+## Who this is for
 
-Make your docs work for humans and AI agents alike.
-
-<Columns cols={2}>
-  <Card
-    title="Prompt component"
-    icon="robot"
-    href="/agent-ready/prompt"
-  >
-    Embed shareable AI prompts readers can copy or open in Cursor.
-  </Card>
-  <Card
-    title="Visibility"
-    icon="eye"
-    href="/agent-ready/visibility"
-  >
-    Show different content to humans and agents reading your docs.
-  </Card>
-  <Card
-    title="Contextual menu"
-    icon="bolt"
-    href="/agent-ready/contextual"
-  >
-    Give readers one-click access to Claude, ChatGPT, Cursor, and more.
-  </Card>
-  <Card
-    title="AI coding tools"
-    icon="wand-magic-sparkles"
-    href="/ai-tools/claude-code"
-  >
-    Set up Claude Code, Cursor, or Windsurf with Mintlify's skill.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+- **AI agent builders** — Give your agent persistent, searchable memory it accesses with `cat`. Users browse the same files in a web UI with wiki links and graph view.
+- **Teams replacing Confluence / Notion** — Obsidian's file-first philosophy with a web UI. `git clone` your entire wiki. Self-hosted.
+- **Compliance-heavy industries** — Every change is a git commit with SHA-1 hash chain. `git blame` for per-line attribution.
+- **DevOps / platform teams** — Runbooks that agents update after every incident. Humans review in the UI.

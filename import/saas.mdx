@@ -1,0 +1,40 @@
+---
+title: "SaaS Import"
+description: "Import from Notion, Airtable, and Google Sheets."
+icon: "cloud"
+---
+
+## Notion
+
+```bash
+export NOTION_API_KEY="secret_..."
+kiwifs import --from notion \
+  --database-id abc123def456 \
+  --root ./knowledge --prefix "notion/"
+```
+
+Create an [internal integration](https://www.notion.so/my-integrations) and share the database with it.
+
+## Airtable
+
+```bash
+export AIRTABLE_API_KEY="pat..."
+kiwifs import --from airtable \
+  --base-id appXXXXXXXXXX \
+  --table-id tblYYYYYYYYYY \
+  --root ./knowledge --prefix "airtable/"
+```
+
+Get your base ID from the Airtable URL and create a [personal access token](https://airtable.com/create/tokens).
+
+## Google Sheets
+
+```bash
+kiwifs import --from gsheets \
+  --spreadsheet-id "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms" \
+  --sheet "Sheet1" \
+  --credentials /path/to/service-account.json \
+  --root ./knowledge --prefix "gsheets/"
+```
+
+Requires a [Google Cloud service account](https://cloud.google.com/iam/docs/service-accounts-create) with the Sheets API enabled. Share the spreadsheet with the service account email.
