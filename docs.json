@@ -3,11 +3,41 @@
   "theme": "maple",
   "name": "KiwiFS",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#22C55E",
-    "dark": "#15803D"
+    "primary": "#6cbe45",
+    "light": "#7dd356",
+    "dark": "#4a8a2a"
   },
   "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg",
+    "href": "https://github.com/kiwifs/kiwifs"
+  },
+  "appearance": {
+    "default": "system"
+  },
+  "background": {
+    "decoration": "gradient"
+  },
+  "fonts": {
+    "heading": {
+      "family": "Inter",
+      "weight": 600
+    },
+    "body": {
+      "family": "Inter",
+      "weight": 400
+    }
+  },
+  "search": {
+    "prompt": "Search KiwiFS docs..."
+  },
+  "seo": {
+    "indexing": "navigable"
+  },
+  "metadata": {
+    "timestamp": true
+  },
   "navigation": {
     "tabs": [
       {
@@ -90,15 +120,12 @@
       ]
     }
   },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
   "navbar": {
     "links": [
       {
         "label": "GitHub",
-        "href": "https://github.com/kiwifs/kiwifs"
+        "href": "https://github.com/kiwifs/kiwifs",
+        "type": "github"
       }
     ]
   },
