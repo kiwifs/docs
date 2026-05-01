@@ -1,7 +1,254 @@
 ---
-title: "Analytics"
-description: "Knowledge health and analytics endpoints."
+title: "Analytics and health"
+description: "Knowledge health dashboard, per-page health checks, comments, sharing, and real-time events."
 icon: "chart-bar"
 ---
 
-Coming soon.
+## Health dashboard
+
+Get an overview of your knowledge base health.
+
+```bash
+curl 'http://localhost:3333/api/kiwi/analytics'
+```
+
+```json
+{
+  "total_pages": 142,
+  "stale_pages": 8,
+  "orphan_pages": 5,
+  "broken_links": 3,
+  "empty_pages": 1,
+  "pages_without_frontmatter": 12,
+  "link_coverage_pct": 96.5,
+  "recently_updated": [
+    {"path": "concepts/auth.md", "updated": "2026-04-25T14:30:00Z"},
+    {"path": "concepts/billing.md", "updated": "2026-04-24T09:15:00Z"}
+  ]
+}
+```
+
+<ResponseField name="total_pages" type="integer">Total number of pages.</ResponseField>
+<ResponseField name="stale_pages" type="integer">Pages past their `review-by` date in frontmatter.</ResponseField>
+<ResponseField name="orphan_pages" type="integer">Pages with no incoming backlinks.</ResponseField>
+<ResponseField name="broken_links" type="integer">Wiki links pointing to nonexistent pages.</ResponseField>
+<ResponseField name="empty_pages" type="integer">Pages with no content beyond frontmatter.</ResponseField>
+<ResponseField name="pages_without_frontmatter" type="integer">Pages missing YAML frontmatter.</ResponseField>
+<ResponseField name="link_coverage_pct" type="number">Percentage of wiki links that resolve to existing pages.</ResponseField>
+<ResponseField name="recently_updated" type="array">Most recently modified pages.</ResponseField>
+
+## Per-page health check
+
+Analyze the health of a single page.
+
+<ParamField query="path" type="string" required>
+  File path to check.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/health-check?path=concepts/auth.md'
+```
+
+```json
+{
+  "path": "concepts/auth.md",
+  "word_count": 342,
+  "link_count": 5,
+  "backlink_count": 8,
+  "days_since_update": 2,
+  "issues": []
+}
+```
+
+When issues are detected, they appear in the `issues` array:
+
+```json
+{
+  "issues": [
+    {"type": "stale", "message": "Page is 45 days past its review date"},
+    {"type": "broken_link", "message": "Link [[payments-v1]] does not resolve"}
+  ]
+}
+```
+
+## Stale pages
+
+List pages that are past their review date.
+
+```bash
+curl 'http://localhost:3333/api/kiwi/stale'
+```
+
+```json
+[
+  {
+    "path": "concepts/legacy-auth.md",
+    "title": "Legacy Authentication",
+    "review_by": "2026-03-01",
+    "days_overdue": 55
+  }
+]
+```
+
+## Contradictions
+
+Detect pages with potentially conflicting claims.
+
+```bash
+curl 'http://localhost:3333/api/kiwi/contradictions'
+```
+
+```json
+[
+  {
+    "pages": ["concepts/auth.md", "runbooks/login-flow.md"],
+    "claim": "session timeout duration",
+    "details": "auth.md says 30 minutes, login-flow.md says 1 hour"
+  }
+]
+```
+
+## Janitor scan
+
+Run a full knowledge health scan across the entire knowledge base.
+
+```bash
+curl 'http://localhost:3333/api/kiwi/janitor'
+```
+
+```json
+{
+  "stale": 8,
+  "orphans": 5,
+  "broken_links": 3,
+  "empty": 1,
+  "missing_frontmatter": 12,
+  "recommendations": [
+    "Link orphan page concepts/caching.md from a parent topic",
+    "Update stale page runbooks/deploy-v1.md (90 days overdue)",
+    "Fix broken link [[payments-v1]] in concepts/billing.md"
+  ]
+}
+```
+
+---
+
+## Comments
+
+Add, list, resolve, and delete inline comments on pages.
+
+### List comments
+
+<ParamField query="path" type="string" required>
+  File path to list comments for.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/comments?path=concepts/auth.md'
+```
+
+```json
+[
+  {
+    "id": "cmt_01",
+    "path": "concepts/auth.md",
+    "line": 15,
+    "author": "agent:reviewer",
+    "body": "Should this mention refresh tokens?",
+    "resolved": false,
+    "created": "2026-04-25T10:00:00Z"
+  }
+]
+```
+
+### Add a comment
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/comments?path=concepts/auth.md' \
+  -H "Content-Type: application/json" \
+  -H "X-Actor: agent:reviewer" \
+  -d '{"line": 15, "body": "Should this mention refresh tokens?"}'
+```
+
+### Resolve a comment
+
+```bash
+curl -X PATCH 'http://localhost:3333/api/kiwi/comments/cmt_01' \
+  -H "Content-Type: application/json" \
+  -d '{"resolved": true}'
+```
+
+### Delete a comment
+
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/comments/cmt_01'
+```
+
+---
+
+## Sharing
+
+Create and manage share links for pages.
+
+### Create a share link
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/share' \
+  -H "Content-Type: application/json" \
+  -d '{"path": "concepts/auth.md", "expires_in": "7d", "password": "optional-secret"}'
+```
+
+```json
+{
+  "id": "shr_abc123",
+  "url": "http://localhost:3333/s/shr_abc123",
+  "path": "concepts/auth.md",
+  "expires": "2026-05-02T14:30:00Z"
+}
+```
+
+### List share links
+
+```bash
+curl 'http://localhost:3333/api/kiwi/share'
+```
+
+### Revoke a share link
+
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/share/shr_abc123'
+```
+
+---
+
+## Real-time events (SSE)
+
+Subscribe to a Server-Sent Events stream that emits events on every write and delete. Use this for real-time UI updates or external integrations.
+
+```bash
+curl -N 'http://localhost:3333/api/kiwi/events'
+```
+
+```
+event: write
+data: {"path":"concepts/auth.md","actor":"agent:docs-writer","timestamp":"2026-04-25T14:30:00Z"}
+
+event: delete
+data: {"path":"concepts/old-page.md","actor":"agent:cleanup","timestamp":"2026-04-25T14:31:00Z"}
+
+event: write
+data: {"path":"concepts/billing.md","actor":"agent:importer","timestamp":"2026-04-25T14:32:00Z"}
+```
+
+<Note>
+The SSE connection stays open indefinitely. Use `curl -N` (no-buffer) to see events as they arrive. In production, implement reconnection logic with the `Last-Event-ID` header.
+</Note>
+
+### Event types
+
+| Event | Trigger |
+|---|---|
+| `write` | A file was created or updated |
+| `delete` | A file was deleted |
+| `bulk` | A bulk write completed |
+| `import` | An import completed |
