@@ -1,46 +1,79 @@
 ---
-title: "Files as Truth"
-description: "Why KiwiFS uses plain markdown files instead of a database."
-icon: "file"
+title: "Files as truth"
+description: "Why KiwiFS uses plain markdown files as the source of truth."
+icon: "file-lines"
 ---
 
-This is the core design decision. Every other choice follows from it.
+In KiwiFS, every page is a **plain markdown file** with optional YAML frontmatter. There is no database, no proprietary format, no schema migration. The filesystem _is_ the database.
 
-**Files are the only format that is simultaneously human-readable, agent-native, and tool-agnostic.** `cat file.md` works in every shell, every container, every sandbox, every CI pipeline. No driver. No connection string. No SDK. The agent doesn't need to learn your API — it already knows the filesystem from training data.
+## Why files?
 
-A Postgres table is invisible to both agents and humans without custom tooling. A JSON blob requires parsing. A proprietary format requires a client library. Markdown files require nothing.
+- **Universal** — every language, tool, and agent can read and write files.
+- **Durable** — files outlast databases, SaaS tools, and proprietary formats.
+- **Diffable** — git gives you full history, blame, and merge for free.
+- **Inspectable** — `cat`, `grep`, `find`, `tree` work out of the box.
+- **Portable** — copy the directory to move your knowledge anywhere.
 
-## What files alone don't give you
+## Frontmatter as structured data
 
-Raw files aren't enough. You need versioning, search, concurrency control, a web UI. KiwiFS layers database-like guarantees **on top of** files:
+Each file can include YAML frontmatter for structured metadata:
 
-| Need | How KiwiFS solves it |
-|---|---|
-| **Versioning** | Git — every write is an atomic commit. Crash recovery, blame, diff, point-in-time restore. |
-| **Search** | SQLite FTS5 (BM25 ranked) + pluggable vector search. Rebuildable from files anytime. |
-| **Concurrency** | Optimistic locking via ETags (git blob hash). Standard HTTP `If-Match` / `409 Conflict`. |
-| **Structured queries** | Frontmatter → SQLite `file_meta` table. Query by field, sort, filter. |
-| **Audit trail** | Git commit log. SHA-1 hash chain. Tamper = broken chain. |
-| **Real-time sync** | SSE broadcast on every write/delete. UI updates live. |
+```markdown
+---
+title: Authentication
+status: verified
+tags: [security, oauth]
+author: agent:docs-writer
+updated: 2026-04-25
+---
 
-The files are the truth. Everything else is a derivative index you can rebuild with `kiwifs reindex`.
+# Authentication
 
-## The LLM Wiki pattern
+OAuth2 + JWT based authentication system...
+```
 
-KiwiFS implements [Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) as production infrastructure. The pattern: raw sources in, compiled wiki out, agent maintains it over time.
+KiwiFS indexes this frontmatter into SQLite, making it queryable via [DQL](/concepts/dql) and the [metadata API](/api/metadata).
+
+## The `.kiwi/` directory
+
+KiwiFS stores its configuration and internal data in a `.kiwi/` directory at the root of your knowledge base:
 
 ```
 knowledge/
-├── SCHEMA.md          # Agent instructions: ingest, query, lint
-├── index.md           # Auto-maintained table of contents
-├── log.md             # Append-only chronological record
-├── concepts/          # One page per concept (agent-created)
-├── entities/          # One page per named entity
-└── reports/           # Chronological reports
+├── .kiwi/
+│   ├── config.toml       # Server configuration
+│   ├── comments/         # Inline comment storage
+│   └── playbook.md       # Agent instructions
+├── SCHEMA.md             # Knowledge base schema
+├── index.md              # Root index page
+├── pages/                # Your knowledge pages
+│   └── getting-started.md
+└── episodes/             # Episodic memory (optional)
+    └── example-episode.md
 ```
 
-The agent reads `SCHEMA.md` to understand how to maintain the wiki:
+## Git versioning
 
-- **Ingest** — process a new source, create/update wiki pages, update index + log
-- **Query** — search the wiki to answer a question
-- **Lint** — audit for orphan pages, broken links, contradictions, stale content
+When `versioning = "git"` (the default), every write — via REST, MCP, NFS, or filesystem — creates a git commit. The commit author is set from the `X-Actor` header or MCP `actor` parameter.
+
+```bash
+$ git log --oneline
+e4f5g6h agent:docs-writer update concepts/auth.md
+a1b2c3d agent:importer    create concepts/auth.md
+```
+
+This gives you:
+- **Full history** for every page
+- **Blame** to trace which agent wrote which line
+- **Diff** between any two versions
+- **Rollback** to any previous state
+
+## Implications
+
+Because files are the source of truth:
+
+1. **Backup** is `git push` or `rsync`.
+2. **Import** adds files; **export** reads them.
+3. **Migration** is copying a directory.
+4. **Multiple tools** can operate on the same knowledge base (KiwiFS, git, editors, scripts).
+5. **No vendor lock-in** — if you stop using KiwiFS, your markdown files remain.

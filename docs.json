@@ -1,13 +1,13 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "maple",
-  "name": "KiwiFS",
+  "name": "KiwiFS — PocketBase for Knowledge",
   "colors": {
     "primary": "#6cbe45",
     "light": "#7dd356",
     "dark": "#4a8a2a"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "/logo/light.svg",
   "logo": {
     "light": "/logo/light.svg",
     "dark": "/logo/dark.svg",
@@ -58,6 +58,8 @@
               "concepts/agent-interface",
               "concepts/search",
               "concepts/versioning",
+              "concepts/dql",
+              "concepts/wiki-links",
               "concepts/mcp"
             ]
           },

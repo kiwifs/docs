@@ -1,0 +1,88 @@
+---
+title: "Wiki links"
+description: "Link pages with [[wiki-link]] syntax and explore the knowledge graph."
+icon: "diagram-project"
+---
+
+KiwiFS supports `[[wiki-link]]` syntax in markdown files. Wiki links create navigable connections between pages and power the knowledge graph.
+
+## Syntax
+
+| Syntax | Description |
+|---|---|
+| `[[page-name]]` | Link to a page by filename. KiwiFS resolves the target using fuzzy matching. |
+| `[[path/to/page]]` | Link to a page by its full path. |
+| `[[page-name\|Display text]]` | Link with custom display text. |
+
+```markdown
+See [[authentication]] for details on token validation.
+
+Related: [[concepts/rate-limiting|Rate limiting]] and [[concepts/caching|Caching]].
+```
+
+## Link resolution
+
+KiwiFS resolves wiki links using fuzzy matching. You do not need exact paths. `[[auth]]` resolves to `concepts/authentication.md` if that is the closest match.
+
+Resolve links programmatically:
+
+```
+POST /api/kiwi/resolve-links
+Content-Type: application/json
+
+{"links": ["auth", "rate-limiting"]}
+```
+
+## Backlinks
+
+Every page shows a "Linked from" panel listing all pages that link to it. You can query backlinks via the API:
+
+```
+GET /api/kiwi/backlinks?path=concepts/auth.md
+```
+
+This returns an array of pages that contain a wiki link pointing to `concepts/auth.md`.
+
+## Knowledge graph
+
+The web UI includes a full knowledge graph visualization built with Sigma.js and the ForceAtlas2 layout algorithm. Open it from the graph icon in the sidebar.
+
+Each node is a page. Each edge is a wiki link. The graph updates in real time as you create, edit, or delete pages.
+
+Fetch the raw graph data:
+
+```
+GET /api/kiwi/graph
+```
+
+The response contains all nodes (pages) and edges (links) in the knowledge base.
+
+## Orphan detection
+
+Pages with no incoming links are flagged as orphans in the analytics dashboard. Orphans are often pages that were created but never referenced, or pages whose referring pages were deleted.
+
+Find orphans via the API or CLI:
+
+<CodeGroup>
+
+```bash CLI
+kiwifs analytics
+```
+
+```bash API
+GET /api/kiwi/analytics
+```
+
+</CodeGroup>
+
+## Broken link detection
+
+Links pointing to non-existent pages are tracked and reported in analytics. Run `kiwifs lint` to check for broken links across the entire knowledge base:
+
+```bash
+kiwifs lint
+```
+
+<Info>
+Broken links do not prevent pages from rendering. They appear as plain text in the web UI and are flagged in the lint report.
+</Info>

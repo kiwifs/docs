@@ -1,65 +1,52 @@
 ---
-title: "KiwiFS"
-description: "The knowledge server — PocketBase for Knowledge. One Go binary, zero config."
-icon: "kiwi-bird"
+title: "Introduction"
+description: "KiwiFS is a knowledge filesystem that agents can write to, search, query, and trust."
+icon: "house"
 ---
 
-KiwiFS is a **knowledge server** that gives you Obsidian's file-first philosophy with a web UI, agent-native filesystem access, Git versioning, and full-text + vector search — all in a single Go binary.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kiwifs/kiwifs/main/install.sh | sh
-kiwifs init ./knowledge && kiwifs serve --root ./knowledge
-# Open http://localhost:3333
-```
+KiwiFS is a **knowledge filesystem server** — one Go binary that turns markdown on disk into a searchable, queryable, versioned knowledge base accessible via REST, MCP, NFS, S3, WebDAV, and FUSE.
 
 ## Why KiwiFS?
 
-Every agent memory project gives you **storage** — a database table, a vector index, a key-value store. But storage is only one layer. In practice you need:
+AI agents need somewhere to store and retrieve knowledge. Traditional databases require schemas and drivers. File-based wikis lack search and structure. KiwiFS gives you both:
 
-- **An agent interface** — agents already know `cat`, `grep`, `ls`. They don't need a custom SDK.
-- **A human interface** — someone has to review what the agent wrote. A wiki UI, not pgAdmin.
-- **An audit trail** — who changed what, when, and why. Cryptographic, not "trust the vendor."
-- **Search** — full-text (BM25) and semantic (vector), over the same files.
-
-No existing tool does all four. KiwiFS is the full stack.
-
-<CardGroup cols={2}>
-  <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Install and run in under 2 minutes.
-  </Card>
-  <Card title="Core Concepts" icon="lightbulb" href="/concepts/files-as-truth">
-    Why files, not a database.
-  </Card>
-  <Card title="Data Import" icon="download" href="/import/overview">
-    Import from PostgreSQL, MySQL, MongoDB, CSV, and 12 more sources.
-  </Card>
-  <Card title="API Reference" icon="terminal" href="/api/overview">
-    Full REST API documentation.
-  </Card>
-</CardGroup>
+- **Files are the truth** — every page is a plain markdown file with YAML frontmatter. No proprietary format, no lock-in.
+- **Agents already know the API** — `cat`, `grep`, `echo` work out of the box. No SDK needed.
+- **Every write is a git commit** — full history, blame, diff, and rollback for free.
+- **Full-text + vector search** — BM25 via SQLite FTS5 out of the box, with pluggable vector embeddings.
+- **Query language (DQL)** — SQL-like queries over frontmatter metadata.
+- **Web UI included** — wiki links, knowledge graph, block editor, comments, dark mode.
+- **Single binary, zero config** — download and run. No Node, no Docker required (Docker optional).
 
 ## How it works
 
 ```
-AGENT                              HUMAN
-─────                              ─────
-cat /kiwi/concepts/auth.md         Web UI (wiki links,
-grep -r "timeout" /kiwi/            graph view, search)
-echo "# Report" > /kiwi/r.md
-
-       ↕                                ↕
-     ┌──────────────────────────────────────┐
-     │       Markdown files in folders      │
-     │       (the single source of truth)   │
-     └──────────────────────────────────────┘
-       ↕                ↕              ↕
-    Git versioning   FTS5 + vector   SSE events
-    (audit trail)    (search index)  (live updates)
+┌─────────────────────────────────────────┐
+│              KiwiFS Server              │
+│                                         │
+│  REST API  │  NFS   │  S3    │ WebDAV   │
+│   :3333    │ :2049  │ :3334  │  :3335   │
+│            └────┬───┘        │          │
+│       ──────────┴────────────┘          │
+│    Storage → Git → Index → SSE          │
+└─────────────────────────────────────────┘
 ```
 
-## Who this is for
+All protocols flow through the same storage layer. Every write — regardless of how it enters — gets a git commit, a search index update, and an SSE broadcast.
 
-- **AI agent builders** — Give your agent persistent, searchable memory it accesses with `cat`. Users browse the same files in a web UI with wiki links and graph view.
-- **Teams replacing Confluence / Notion** — Obsidian's file-first philosophy with a web UI. `git clone` your entire wiki. Self-hosted.
-- **Compliance-heavy industries** — Every change is a git commit with SHA-1 hash chain. `git blame` for per-line attribution.
-- **DevOps / platform teams** — Runbooks that agents update after every incident. Humans review in the UI.
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install and run KiwiFS in 60 seconds.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Configure search, auth, versioning, and more.
+  </Card>
+  <Card title="Agent Interface" icon="robot" href="/concepts/agent-interface">
+    How AI agents read and write knowledge.
+  </Card>
+  <Card title="MCP" icon="plug" href="/concepts/mcp">
+    Connect Claude, Cursor, and other AI tools.
+  </Card>
+</CardGroup>

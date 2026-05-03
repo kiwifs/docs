@@ -1,91 +1,203 @@
 ---
 title: "Configuration"
-description: "Configure KiwiFS via TOML config file, CLI flags, or environment variables."
+description: "Configure KiwiFS via .kiwi/config.toml — search, auth, versioning, vector embeddings, and more."
 icon: "gear"
 ---
 
-KiwiFS reads configuration from `.kiwi/config.toml` in your knowledge root. CLI flags override config values. Environment variables override both.
+KiwiFS is configured via `.kiwi/config.toml` inside your knowledge root directory. All settings are optional — KiwiFS runs with sensible defaults out of the box.
+
+Environment variables in the form `${VAR}` are expanded in all string values.
+
+## Server
 
 ```toml
-# .kiwi/config.toml
-
 [server]
-port = 3333
 host = "0.0.0.0"
-public_url = "https://wiki.mycompany.com"  # enables permalinks
+port = 3333
+cors_origins = ["https://app.example.com"]
+public_url = "https://wiki.example.com"
+```
 
-[storage]
-root = "/data/knowledge"
+The `public_url` is used for permalink generation. Override via `KIWI_PUBLIC_URL` env var.
 
+## Search
+
+```toml
 [search]
-engine = "sqlite"                # grep | sqlite | vector
+engine = "sqlite"        # "sqlite" (default) or "grep"
+async_index = true
+index_window_ms = 200
+index_batch_max = 50
+```
 
+### Vector search
+
+Enable semantic search by configuring an embedder and a vector store.
+
+```toml
 [search.vector]
 enabled = true
+chunk = 512
+worker_count = 4
 
 [search.vector.embedder]
-provider = "openai"              # openai | ollama | cohere | bedrock | vertex | http
+provider = "openai"      # openai | ollama | cohere | http | bedrock | vertex
 model = "text-embedding-3-small"
 api_key = "${OPENAI_API_KEY}"
+dimensions = 1536
 
 [search.vector.store]
-provider = "sqlite-vec"          # sqlite-vec | qdrant | pgvector | pinecone | weaviate | milvus
+provider = "sqlite-vec"  # sqlite-vec | qdrant | pgvector | pinecone | weaviate | milvus
+```
 
+<AccordionGroup>
+<Accordion title="Embedder providers">
+
+| Provider | Required fields |
+|----------|----------------|
+| `openai` | `api_key`, `model` |
+| `ollama` | `base_url`, `model` |
+| `cohere` | `api_key`, `model` |
+| `http` | `url` (custom endpoint) |
+| `bedrock` | `region`, `model` |
+| `vertex` | `project`, `location`, `model` |
+
+</Accordion>
+<Accordion title="Vector store providers">
+
+| Provider | Notes |
+|----------|-------|
+| `sqlite-vec` | Zero-config, embedded (default when vector is enabled) |
+| `qdrant` | Requires separate Qdrant server |
+| `pgvector` | Requires PostgreSQL with pgvector extension |
+| `pinecone` | Cloud-hosted |
+| `weaviate` | Self-hosted or cloud |
+| `milvus` | Self-hosted or cloud |
+
+</Accordion>
+</AccordionGroup>
+
+## Versioning
+
+```toml
 [versioning]
-strategy = "git"                 # git | cow | none
-
-[auth]
-type = "none"                    # none | apikey | perspace | oidc
+strategy = "git"          # "git" (default), "cow", or "none"
+async_commit = true
+batch_window_ms = 200
+batch_max_size = 50
+max_versions = 100        # only for "cow" strategy
 ```
 
-## CLI overrides
-
-Any config value can be set via CLI flags:
-
-```bash
-kiwifs serve --port 4000 --search sqlite --versioning git
-```
-
-## Environment variables
-
-| Variable | Maps to |
-|---|---|
-| `KIWI_PORT` | `[server] port` |
-| `KIWI_PUBLIC_URL` | `[server] public_url` |
-| `KIWI_SEARCH_ENGINE` | `[search] engine` |
-| `OPENAI_API_KEY` | `[search.vector.embedder] api_key` |
-| `KIWI_AUTH_TYPE` | `[auth] type` |
+- **git** — every write is a real git commit. Full history, blame, diff.
+- **cow** — copy-on-write snapshots without git. Lighter, limited history.
+- **none** — no versioning. Writes overwrite in place.
 
 ## Authentication
 
-| Type | Description |
-|---|---|
-| `none` | No authentication (default) |
-| `apikey` | Global Bearer token |
-| `perspace` | Per-space API keys |
-| `oidc` | OpenID Connect (SSO) |
+```toml
+[auth]
+type = "none"             # "none", "apikey", "perspace", or "oidc"
+api_key = "kiwi_sk_..."   # for type = "apikey"
 
-## Vector search providers
+# Per-space keys
+[[auth.api_keys]]
+key = "kiwi_sk_eng_..."
+space = "engineering"
+actor = "eng-team"
 
-<Tabs>
-  <Tab title="Embedders">
-    | Provider | Config value | Notes |
-    |---|---|---|
-    | OpenAI | `openai` | Default. Needs `OPENAI_API_KEY` |
-    | Ollama | `ollama` | Fully offline. Needs local Ollama server |
-    | Cohere | `cohere` | Needs `COHERE_API_KEY` |
-    | Vertex AI | `vertex` | Google Cloud |
-    | AWS Bedrock | `bedrock` | AWS credentials |
-    | Custom HTTP | `http` | Any OpenAI-compatible endpoint |
-  </Tab>
-  <Tab title="Vector stores">
-    | Provider | Config value | Notes |
-    |---|---|---|
-    | sqlite-vec | `sqlite-vec` | Default. Zero infrastructure |
-    | Qdrant | `qdrant` | Self-hosted or Qdrant Cloud |
-    | pgvector | `pgvector` | PostgreSQL extension |
-    | Pinecone | `pinecone` | Managed cloud |
-    | Weaviate | `weaviate` | Self-hosted or Weaviate Cloud |
-    | Milvus | `milvus` | Self-hosted or Zilliz Cloud |
-  </Tab>
-</Tabs>
+# OIDC
+[auth.oidc]
+issuer = "https://accounts.google.com"
+client_id = "your-client-id"
+```
+
+Auth is hot-reloadable — send `SIGHUP` to the server process to reload auth configuration from disk without restarting.
+
+## Assets
+
+```toml
+[assets]
+max_file_size = "10MB"
+allowed_types = ["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"]
+```
+
+## UI
+
+```toml
+[ui]
+theme_locked = false      # when true, users cannot change the theme
+```
+
+## Backup
+
+```toml
+[backup]
+remote = "git@github.com:org/knowledge.git"
+interval = "5m"
+branch = "main"
+```
+
+Override via env: `KIWI_BACKUP_REMOTE`, `KIWI_BACKUP_INTERVAL`.
+
+## Janitor
+
+The janitor periodically scans for stale pages, orphans, and broken links.
+
+```toml
+[janitor]
+interval = "1h"
+stale_days = 30
+startup_scan = true
+```
+
+## DataView
+
+```toml
+[dataview]
+max_scan_rows = 10000
+query_timeout = "5s"
+max_auto_indexes = 20
+computed_fields = true
+
+[dataview.custom_fields]
+age_days = "days_since(updated)"
+is_long = "len(body) > 5000"
+```
+
+## Memory
+
+```toml
+[memory]
+episodes_path_prefix = "episodes/"
+```
+
+## Tracing
+
+Query tracing is enabled by default and writes structured JSON records of what KiwiFS did during each request.
+
+```toml
+[tracing]
+enabled = true            # default true; set false to suppress
+output = "stderr"         # "stderr" (default) or "file"
+file = "/var/log/kiwifs-trace.jsonl"
+```
+
+## Multi-space
+
+Run multiple independent knowledge bases from one server.
+
+```toml
+[[spaces]]
+name = "engineering"
+root = "/data/eng-wiki"
+
+[[spaces]]
+name = "product"
+root = "/data/product-wiki"
+```
+
+Each space gets its own set of API endpoints under `/api/kiwi/{name}/...`.
+
+<Tip>
+You can also add spaces via CLI flags: `kiwifs serve --space eng=/data/eng --space product=/data/product`.
+</Tip>

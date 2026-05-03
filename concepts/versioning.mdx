@@ -1,45 +1,92 @@
 ---
-title: "Git Versioning"
-description: "Every write is an atomic git commit. Crash recovery, audit trail, tamper detection."
+title: "Versioning"
+description: "Git-backed versioning strategies: full git, copy-on-write, or none."
 icon: "code-branch"
 ---
 
-Every write to KiwiFS is an atomic git commit. Users never see Git — the API abstracts it.
+KiwiFS versions every write so you never lose knowledge. Choose the strategy that fits your use case.
 
-## Why Git?
+## Strategies
 
-Instead of building a custom write-ahead log, KiwiFS uses Git as its WAL. This gives you:
-
-- **Crash recovery** — incomplete writes are never committed
-- **Immutable audit trail** — SHA-1 hash chain, tamper = broken chain
-- **Point-in-time restore** — check out any previous state
-- **Replication** — `git push` to any remote for off-site backup
-- **Attribution** — `git blame` shows who wrote every line
-
-## API
-
-```
-GET /api/kiwi/versions?path=concepts/auth.md   → commit history
-GET /api/kiwi/version?path=auth.md&version=a1b → content at a specific commit
-GET /api/kiwi/diff?path=auth.md&from=a1b&to=c3d → unified diff
-GET /api/kiwi/blame?path=concepts/auth.md       → per-line attribution
-```
-
-## Attribution
-
-Every write includes an actor for git attribution:
+Configure via CLI flag or `.kiwi/config.toml`:
 
 ```bash
-curl -X PUT 'localhost:3333/api/kiwi/file?path=auth.md' \
-  -H "X-Actor: agent:exec_abc" \
-  -d "# Auth..."
+kiwifs serve --versioning git
 ```
 
-The `X-Actor` header becomes the git commit author, visible in `blame` and `versions`.
+```toml
+[versioning]
+strategy = "git"
+```
 
-## Backup & restore
+### git (default)
+
+Every write creates a real git commit. You get full `git log`, `git blame`, `git diff`, and `git revert` for free. The `X-Actor` header becomes the commit author.
 
 ```bash
-kiwifs backup --remote git@github.com:myorg/knowledge.git
-kiwifs restore --from git@github.com:myorg/knowledge.git
+$ git log --oneline knowledge/
+e4f5g6h agent:docs-writer update concepts/auth.md
+a1b2c3d agent:importer    create concepts/auth.md
 ```
+
+Best for: production, audit trails, multi-agent environments.
+
+### cow (copy-on-write)
+
+Lighter-weight versioning that stores snapshots without a real git repo. Useful when you want rollback capability but don't need the full git workflow.
+
+```toml
+[versioning]
+strategy = "cow"
+max_versions = 100    # max snapshots per file
+```
+
+Best for: high-write environments, embedded use cases.
+
+### none
+
+No versioning at all. Writes overwrite files in place. Use this for ephemeral or scratch knowledge bases.
+
+Best for: development, temporary data, CI pipelines.
+
+## Async batching
+
+To reduce git overhead under high write volume, KiwiFS batches commits:
+
+```toml
+[versioning]
+async_commit = true
+batch_window_ms = 200    # collect writes for 200ms
+batch_max_size = 50      # then commit up to 50 paths in one commit
+```
+
+Multiple writes within the batch window are combined into a single git commit. This dramatically improves throughput while preserving atomicity per batch.
+
+## Optimistic locking
+
+The versioning system powers optimistic concurrency control via ETags. When you read a file, the response includes an `ETag` header containing the git blob SHA.
+
+```bash
+# Read and capture ETag
+curl -i 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md'
+# ETag: "a1b2c3d4..."
+
+# Write with If-Match
+curl -X PUT 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
+  -H "If-Match: a1b2c3d4..." \
+  -d "updated content"
+```
+
+If the file was modified between your read and write, you get a `409 Conflict` response.
+
+## API endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/kiwi/versions` | GET | Version history for a file |
+| `/api/kiwi/version` | GET | Read a specific version |
+| `/api/kiwi/diff` | GET | Unified diff between two versions |
+| `/api/kiwi/blame` | GET | Per-line git blame |
+| `/api/kiwi/changes` | GET | List recent changes across the knowledge base |
+
+See the [Versioning API reference](/api/versioning) for detailed endpoint documentation.

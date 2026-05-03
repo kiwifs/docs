@@ -14,6 +14,9 @@ kiwifs mcp --root ~/knowledge
 
 # Proxy mode (connects to a running KiwiFS server)
 kiwifs mcp --remote http://host:3333
+
+# Streamable HTTP transport (instead of default stdio)
+kiwifs mcp --root ~/knowledge --http --port 8181
 ```
 
 ## Configure Claude Desktop / Cursor
@@ -35,21 +38,26 @@ Add to your MCP configuration:
 
 | Tool | Description |
 |---|---|
-| `kiwi_read` | Read a file's content (with optional wiki link resolution) |
+| `kiwi_read` | Read a file's content (with optional wiki link resolution, metadata-only mode, ETag caching) |
 | `kiwi_write` | Write/update a file (creates git commit, supports provenance) |
-| `kiwi_search` | Full-text search across all pages |
+| `kiwi_search` | Full-text search across all pages (BM25, pagination, path prefix filter) |
 | `kiwi_tree` | List directory structure (with optional permalinks and depth) |
-| `kiwi_query_meta` | Query frontmatter metadata (filters, sort, pagination) |
+| `kiwi_query_meta` | Query frontmatter metadata (AND/OR filters, sort, pagination) |
 | `kiwi_query` | Run DQL queries (TABLE, LIST, COUNT, DISTINCT) |
+| `kiwi_view_refresh` | Force-regenerate a computed view file |
 | `kiwi_delete` | Delete a file (git commit preserves history) |
-| `kiwi_bulk_write` | Write multiple files in a single commit |
-| `kiwi_rename` | Atomically move/rename a file |
+| `kiwi_rename` | Atomically move/rename a file (auto-rewrites wiki links) |
+| `kiwi_bulk_write` | Write multiple files in a single atomic commit |
 | `kiwi_aggregate` | Group by field with count, avg, sum, min, max |
 | `kiwi_import` | Import from external sources (databases, files, SaaS) |
 | `kiwi_export` | Export to JSONL/CSV with optional embeddings |
+| `kiwi_changes` | List files changed since a checkpoint (incremental sync) |
+| `kiwi_append` | Atomically append content to a file (no read-modify-write race) |
+| `kiwi_search_semantic` | Vector similarity search using embeddings |
+| `kiwi_backlinks` | List all pages that link to a given page via wiki links |
 | `kiwi_analytics` | Knowledge health metrics (stale pages, orphans, broken links) |
 | `kiwi_memory_report` | Episodic memory coverage (merged-from references) |
-| `kiwi_view_refresh` | Force-regenerate a computed view file |
+| `kiwi_context` | Get schema, playbook, and index in one call (call this first) |
 | `kiwi_health_check` | Per-page health diagnostics (word count, link count, issues) |
 
 ## Resources

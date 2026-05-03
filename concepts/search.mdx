@@ -1,37 +1,48 @@
 ---
 title: "Search"
-description: "Full-text, vector, and structured metadata search in KiwiFS."
+description: "Three tiers of search: grep, SQLite FTS5, and vector embeddings."
 icon: "magnifying-glass"
 ---
 
-KiwiFS provides three tiers of search, from zero-dependency to AI-powered.
+KiwiFS provides three tiers of search, from zero-dependency grep to semantic vector similarity. You can start simple and scale up without changing your data or workflow.
 
-## Search tiers
+## Tier 1: grep
+
+Zero dependencies. Exact string matching. Works everywhere.
 
 ```bash
-kiwifs serve --search grep      # Tier 1: zero deps, exact match
-kiwifs serve --search sqlite    # Tier 2: SQLite FTS5, BM25 ranked (default)
-kiwifs serve                    # Tier 3: + vector search (if configured)
+kiwifs serve --search grep
 ```
 
-## Full-text search (FTS5)
+Best for small knowledge bases or environments where SQLite isn't available.
 
-SQLite FTS5 with BM25 ranking. Supports boolean operators and phrase search:
+## Tier 2: SQLite FTS5 (default)
 
+BM25-ranked full-text search powered by SQLite FTS5. Supports boolean operators, phrase matching, and path prefix filtering.
+
+```bash
+kiwifs serve --search sqlite
 ```
-GET /api/kiwi/search?q=payment+timeout           → BM25 ranked results
-GET /api/kiwi/search?q="connection reset" AND ws  → boolean + phrase search
-```
 
-## Vector search
+This is the default. KiwiFS builds and maintains a FTS5 index automatically. Searches are fast even with thousands of pages.
 
-Semantic similarity search using embeddings. Pluggable — mix any embedder with any vector store:
+### Query syntax
 
-| Embedder | Vector Store |
-|---|---|
-| OpenAI, Ollama, Cohere, Vertex AI, Bedrock, custom HTTP | sqlite-vec (default), Qdrant, pgvector, Pinecone, Weaviate, Milvus |
+| Syntax | Example | Behavior |
+|---|---|---|
+| Keywords | `payment timeout` | Match pages containing both terms |
+| Boolean AND | `payment AND timeout` | Explicit AND |
+| Boolean OR | `payment OR billing` | Match pages containing either term |
+| Boolean NOT | `payment NOT refund` | Exclude pages containing a term |
+| Phrase | `"payment timeout"` | Match the exact phrase |
 
-Default setup (sqlite-vec + OpenAI) needs one env var and zero infrastructure:
+### Trust-ranked search
+
+KiwiFS also offers trust-ranked search at `/api/kiwi/search/verified`. Pages with `status: verified` or `source-of-truth: true` in their frontmatter are boosted in results.
+
+## Tier 3: Vector search
+
+Semantic similarity search using pluggable embedder providers and vector stores. Enable it in `.kiwi/config.toml`:
 
 ```toml
 [search.vector]
@@ -46,27 +57,44 @@ api_key = "${OPENAI_API_KEY}"
 provider = "sqlite-vec"
 ```
 
-For fully offline setups, use Ollama + sqlite-vec — everything runs locally.
+### Supported embedders
 
-```
-POST /api/kiwi/search/semantic
-Content-Type: application/json
+| Provider | Notes |
+|----------|-------|
+| OpenAI | `text-embedding-3-small`, `text-embedding-3-large` |
+| Ollama | Local models, no API key needed |
+| Cohere | `embed-english-v3.0`, multilingual variants |
+| Vertex AI | Google Cloud embeddings |
+| Bedrock | AWS embeddings |
+| Custom HTTP | Any endpoint returning a vector array |
 
-{"query": "how does authentication work?", "limit": 10}
-```
+### Supported vector stores
 
-## Structured metadata queries
+| Store | Notes |
+|-------|-------|
+| sqlite-vec | Embedded, zero config (default) |
+| Qdrant | Self-hosted or cloud |
+| pgvector | PostgreSQL extension |
+| Pinecone | Cloud-hosted |
+| Weaviate | Self-hosted or cloud |
+| Milvus | Self-hosted or cloud |
 
-Frontmatter from every markdown file is mirrored into a SQLite `file_meta` table:
+## API endpoints
 
-```
-GET /api/kiwi/meta?where=$.status=published&where=$.priority=high&sort=$.updated&order=desc
-```
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/kiwi/search` | GET | Full-text search |
+| `/api/kiwi/search/verified` | GET | Trust-ranked search |
+| `/api/kiwi/search/semantic` | GET, POST | Vector similarity search |
+| `/api/kiwi/meta` | GET | Frontmatter metadata query |
 
-## Trust-ranked search
+## MCP tools
 
-Pages marked `status: verified` or `source-of-truth: true` in frontmatter rank higher in search results:
+| Tool | Description |
+|------|-------------|
+| `kiwi_search` | Full-text search with pagination |
+| `kiwi_search_semantic` | Vector similarity search |
+| `kiwi_query_meta` | Frontmatter metadata query |
+| `kiwi_query` | DQL queries over metadata |
 
-```
-GET /api/kiwi/search/verified?q=authentication
-```
+See the [Search API reference](/api/search) for detailed endpoint documentation.

@@ -1,7 +1,191 @@
 ---
-title: "Data Export"
+title: "Data export"
 description: "Export your knowledge base as JSONL or CSV."
 icon: "upload"
 ---
 
-Coming soon.
+KiwiFS can export your entire knowledge base (or a subset of it) as JSONL or CSV. You can export from the CLI or the REST API.
+
+## Formats
+
+<Tabs>
+<Tab title="JSONL">
+Each line is a JSON object representing one file. Fields come from frontmatter.
+
+```json
+{"path":"concepts/auth.md","title":"Authentication","status":"published","updated":"2026-04-20T10:00:00Z"}
+```
+
+With `--include-content`, each object includes the full markdown body.
+
+```json
+{"path":"concepts/auth.md","title":"Authentication","status":"published","content":"# Authentication\n\nOverview of auth mechanisms.\n"}
+```
+
+With `--include-links`, each object includes link data.
+
+```json
+{"path":"concepts/auth.md","title":"Authentication","outgoing_links":["concepts/oauth.md","concepts/jwt.md"],"incoming_links":["guides/security.md"]}
+```
+
+With `--include-embeddings`, each object includes a vector embedding array. A `.schema.json` sidecar file is also written alongside the output file, describing the embedding model and dimensions.
+
+```json
+{"path":"concepts/auth.md","title":"Authentication","embedding":[0.0123,-0.0456,0.0789]}
+```
+</Tab>
+<Tab title="CSV">
+Standard CSV with one row per file. The first row contains headers. Specify which frontmatter fields to include with `--columns`.
+
+```csv
+path,name,status,grade
+students/alice.md,Alice,active,A
+students/bob.md,Bob,active,B+
+students/carol.md,Carol,graduated,A-
+```
+</Tab>
+</Tabs>
+
+## CLI usage
+
+Use the `kiwifs export` command to export from the command line.
+
+<CodeGroup>
+```bash Export all files as JSONL
+kiwifs export --format jsonl --output knowledge.jsonl
+```
+
+```bash Export with full content
+kiwifs export --format jsonl --include-content --output full.jsonl
+```
+
+```bash Export a subdirectory as CSV
+kiwifs export --format csv --path students/ --columns name,status,grade -o students.csv
+```
+
+```bash Pipe to jq
+kiwifs export --format jsonl | jq '.title'
+```
+
+```bash Include vector embeddings
+kiwifs export --format jsonl --include-embeddings -o vectors.jsonl
+```
+</CodeGroup>
+
+### CLI flags
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--root` | `-r` | `./knowledge` | Knowledge root directory |
+| `--format` | | `jsonl` | Output format: `jsonl` or `csv` |
+| `--output` | `-o` | stdout | Output file path |
+| `--path` | | | Scope export to a subdirectory |
+| `--columns` | | | Comma-separated frontmatter fields to include |
+| `--include-content` | | `false` | Include the full markdown body |
+| `--include-links` | | `false` | Include outgoing and incoming link arrays |
+| `--include-embeddings` | | `false` | Include vector embeddings |
+| `--limit` | | `0` | Max files to export (0 = unlimited) |
+
+## REST API
+
+Export your knowledge base over HTTP using the `/api/kiwi/export` endpoint.
+
+<CodeGroup>
+```bash JSONL with content
+curl "http://localhost:3333/api/kiwi/export?format=jsonl&include-content=true" \
+  -o knowledge.jsonl
+```
+
+```bash CSV with specific columns
+curl "http://localhost:3333/api/kiwi/export?format=csv&columns=name,status&path=students/" \
+  -o students.csv
+```
+
+```bash With API key auth
+curl "http://localhost:3333/api/kiwi/export?format=jsonl" \
+  -H "Authorization: Bearer my-api-key" \
+  -o knowledge.jsonl
+```
+</CodeGroup>
+
+### Query parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `format` | `jsonl` | Output format: `jsonl` or `csv` |
+| `path` | | Scope to a subdirectory |
+| `columns` | | Comma-separated frontmatter fields |
+| `include-content` | `false` | Include markdown body |
+| `include-links` | `false` | Include link arrays |
+| `include-embeddings` | `false` | Include vector embeddings |
+| `limit` | `0` | Max files (0 = unlimited) |
+
+The response streams as `application/x-ndjson` (JSONL) or `text/csv` (CSV) with chunked transfer encoding. You can pipe the response directly into downstream tools.
+
+## Embeddings sidecar
+
+When you export with `--include-embeddings`, KiwiFS writes a `.schema.json` sidecar file next to the output file. This file describes the embedding model used and the vector dimensions.
+
+```json vectors.schema.json
+{
+  "embedding_model": "text-embedding-3-small",
+  "dimensions": 1536,
+  "distance_metric": "cosine"
+}
+```
+
+<Note>
+Embeddings are only available if you have configured a vector search provider (such as pgvector with an OpenAI API key).
+</Note>
+
+## Common recipes
+
+<AccordionGroup>
+
+<Accordion title="Back up metadata to git">
+Export frontmatter as JSONL and commit it alongside your knowledge base for a searchable metadata snapshot.
+
+```bash
+kiwifs export --format jsonl -o .kiwi/metadata.jsonl
+cd knowledge && git add .kiwi/metadata.jsonl && git commit -m "Update metadata export"
+```
+</Accordion>
+
+<Accordion title="Build a static search index">
+Export with content and embeddings, then feed the output into your static site search pipeline.
+
+```bash
+kiwifs export --format jsonl --include-content --include-embeddings -o search-index.jsonl
+```
+</Accordion>
+
+<Accordion title="Sync to a data warehouse">
+Export as CSV and load into your warehouse using standard ETL tools.
+
+```bash
+kiwifs export --format csv --columns title,status,updated,author -o export.csv
+# Load into your warehouse
+bq load --source_format=CSV mydataset.knowledge export.csv
+```
+</Accordion>
+
+<Accordion title="Filter with jq">
+Pipe JSONL output to `jq` for ad-hoc filtering and transformation.
+
+```bash
+# Find all draft documents
+kiwifs export --format jsonl | jq 'select(.status == "draft")'
+
+# Extract just titles and paths
+kiwifs export --format jsonl | jq '{path, title}'
+
+# Count documents by status
+kiwifs export --format jsonl | jq -s 'group_by(.status) | map({status: .[0].status, count: length})'
+```
+</Accordion>
+
+</AccordionGroup>
+
+<Tip>
+For large knowledge bases, use `--path` to scope the export to a subdirectory and `--limit` to cap the number of files. This keeps export times predictable.
+</Tip>

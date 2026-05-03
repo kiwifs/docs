@@ -1,7 +1,204 @@
 ---
-title: "Go Embed"
+title: "Go embed"
 description: "Embed KiwiFS in your Go application."
 icon: "code"
 ---
 
-Coming soon.
+You can embed KiwiFS directly in any Go application using the `pkg/kiwi` package. This gives you a fully functional knowledge server without running a separate process.
+
+## Installation
+
+```bash
+go get github.com/kiwifs/kiwifs/pkg/kiwi
+```
+
+## Quick start
+
+Create a KiwiFS server, configure it with options, and start serving.
+
+```go
+package main
+
+import (
+    "log"
+
+    "github.com/kiwifs/kiwifs/pkg/kiwi"
+)
+
+func main() {
+    srv, err := kiwi.New("/data/knowledge",
+        kiwi.WithSearch("sqlite"),
+        kiwi.WithVersioning("git"),
+        kiwi.WithAuth("apikey", "my-secret"),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer srv.Close()
+
+    log.Println("KiwiFS listening on :3333")
+    log.Fatal(srv.ListenAndServe(":3333"))
+}
+```
+
+## Options
+
+Configure KiwiFS behavior by passing option functions to `kiwi.New`.
+
+| Option | Description |
+|--------|-------------|
+| `kiwi.WithSearch(engine)` | Search engine. `"sqlite"` for full-text search or `"grep"` for simple string matching. |
+| `kiwi.WithVersioning(strategy)` | Version control strategy. `"git"` for git history, `"cow"` for copy-on-write snapshots, or `"none"` to disable. |
+| `kiwi.WithAuth(authType, key)` | Authentication. Set `authType` to `"apikey"` and provide the key, or `"none"` to disable. |
+| `kiwi.WithCORSOrigins(origins...)` | Allowed CORS origins. Pass one or more origin URLs. |
+
+```go
+srv, err := kiwi.New("/data/knowledge",
+    kiwi.WithSearch("sqlite"),
+    kiwi.WithVersioning("git"),
+    kiwi.WithAuth("apikey", "my-secret"),
+    kiwi.WithCORSOrigins("https://app.example.com", "http://localhost:3000"),
+)
+```
+
+## Methods
+
+The `kiwi.Server` type provides these methods.
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `Handler` | `Handler() http.Handler` | Returns the HTTP handler. Use this to mount KiwiFS alongside other routes. |
+| `Pipeline` | `Pipeline() *pipeline.Pipeline` | Returns the pipeline for programmatic file operations. |
+| `ListenAndServe` | `ListenAndServe(addr string) error` | Start the HTTP server on the given address. |
+| `Shutdown` | `Shutdown(ctx context.Context) error` | Gracefully shut down the server. In-flight requests complete before the method returns. |
+| `Close` | `Close() error` | Release all resources (search indexes, file watchers, git locks). |
+
+## Mount alongside an existing server
+
+Use `srv.Handler()` to mount KiwiFS as a route within your existing HTTP application.
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+
+    "github.com/kiwifs/kiwifs/pkg/kiwi"
+)
+
+func main() {
+    // Create the KiwiFS server
+    kiwifsSrv, err := kiwi.New("/data/knowledge",
+        kiwi.WithSearch("sqlite"),
+        kiwi.WithVersioning("git"),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer kiwifsSrv.Close()
+
+    // Set up your application router
+    mux := http.NewServeMux()
+
+    // Mount KiwiFS under /knowledge/
+    mux.Handle("/knowledge/", http.StripPrefix("/knowledge", kiwifsSrv.Handler()))
+
+    // Your own routes
+    mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusOK)
+        w.Write([]byte("ok"))
+    })
+
+    log.Println("App listening on :8080")
+    log.Fatal(http.ListenAndServe(":8080", mux))
+}
+```
+
+<Note>
+When mounting under a subpath, use `http.StripPrefix` so KiwiFS receives paths relative to its root.
+</Note>
+
+## Programmatic file operations
+
+Use `srv.Pipeline()` to read and write files without going through HTTP.
+
+```go
+pipe := srv.Pipeline()
+
+// Write a file
+err := pipe.Write("concepts/auth.md", []byte(`---
+title: Authentication
+status: draft
+---
+
+# Authentication
+
+Overview of auth mechanisms.
+`))
+
+// Read a file
+content, err := pipe.Read("concepts/auth.md")
+
+// List files
+files, err := pipe.List("concepts/")
+```
+
+<Tip>
+The pipeline respects the same versioning and indexing rules as the HTTP API. Writes trigger git commits (if versioning is enabled) and update the search index automatically.
+</Tip>
+
+## Graceful shutdown
+
+Handle OS signals to shut down KiwiFS cleanly. This flushes pending async commits and releases file locks.
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "os"
+    "os/signal"
+    "syscall"
+    "time"
+
+    "github.com/kiwifs/kiwifs/pkg/kiwi"
+)
+
+func main() {
+    srv, err := kiwi.New("/data/knowledge",
+        kiwi.WithSearch("sqlite"),
+        kiwi.WithVersioning("git"),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Start server in a goroutine
+    go func() {
+        if err := srv.ListenAndServe(":3333"); err != nil {
+            log.Printf("server stopped: %v", err)
+        }
+    }()
+
+    // Wait for interrupt signal
+    quit := make(chan os.Signal, 1)
+    signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+    <-quit
+
+    // Graceful shutdown with timeout
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    if err := srv.Shutdown(ctx); err != nil {
+        log.Printf("shutdown error: %v", err)
+    }
+    srv.Close()
+    log.Println("server stopped")
+}
+```
+
+<Warning>
+Always call `srv.Close()` or `srv.Shutdown(ctx)` before your program exits. Skipping this can leave stale git lock files or incomplete search indexes.
+</Warning>

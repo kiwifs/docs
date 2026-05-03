@@ -1,40 +1,103 @@
 ---
-title: "SaaS Import"
-description: "Import from Notion, Airtable, and Google Sheets."
-icon: "cloud"
+title: "SaaS imports"
+description: "Import data from Notion, Airtable, and other SaaS platforms into KiwiFS."
+icon: "cloud-arrow-down"
 ---
+
+KiwiFS can import data from third-party SaaS platforms, converting records into markdown pages.
 
 ## Notion
 
+Import pages from a Notion database.
+
 ```bash
-export NOTION_API_KEY="secret_..."
 kiwifs import --from notion \
-  --database-id abc123def456 \
-  --root ./knowledge --prefix "notion/"
+  --prefix knowledge/ \
+  --root ./knowledge
 ```
 
-Create an [internal integration](https://www.notion.so/my-integrations) and share the database with it.
+| Flag | Description |
+|------|-------------|
+| `--database-id` | Notion database ID (required for MCP) |
+| `--prefix` | Path prefix in KiwiFS |
+| `--limit` | Max records to import |
+| `--dry-run` | Preview without writing |
+
+### Setup
+
+1. Create a [Notion integration](https://www.notion.so/my-integrations) and copy the API key.
+2. Share your database with the integration.
+3. Set the `NOTION_API_KEY` environment variable.
+
+```bash
+export NOTION_API_KEY="ntn_..."
+kiwifs import --from notion --root ./knowledge
+```
+
+### MCP usage
+
+```json
+{
+  "tool": "kiwi_import",
+  "arguments": {
+    "from": "notion",
+    "database_id": "abc123...",
+    "prefix": "notion-pages/"
+  }
+}
+```
 
 ## Airtable
 
+Import records from an Airtable base.
+
+```bash
+kiwifs import --from airtable \
+  --prefix records/ \
+  --root ./knowledge
+```
+
+| Flag | Description |
+|------|-------------|
+| `--base-id` | Airtable base ID (required for MCP) |
+| `--table-id` | Airtable table ID (required for MCP) |
+| `--prefix` | Path prefix in KiwiFS |
+| `--limit` | Max records to import |
+
+### Setup
+
+1. Create a [personal access token](https://airtable.com/create/tokens) in Airtable.
+2. Set the `AIRTABLE_API_KEY` environment variable.
+
 ```bash
 export AIRTABLE_API_KEY="pat..."
-kiwifs import --from airtable \
-  --base-id appXXXXXXXXXX \
-  --table-id tblYYYYYYYYYY \
-  --root ./knowledge --prefix "airtable/"
+kiwifs import --from airtable --root ./knowledge
 ```
 
-Get your base ID from the Airtable URL and create a [personal access token](https://airtable.com/create/tokens).
+### MCP usage
 
-## Google Sheets
+```json
+{
+  "tool": "kiwi_import",
+  "arguments": {
+    "from": "airtable",
+    "base_id": "app...",
+    "table_id": "tbl...",
+    "prefix": "airtable/"
+  }
+}
+```
+
+## Re-import behavior
+
+All SaaS imports are idempotent. KiwiFS uses `_source_id` in frontmatter to track which records have been imported. Re-running an import:
+
+- **Skips** records that haven't changed
+- **Updates** records with new field values
+- **Creates** new records that weren't imported before
+
+Use `--dry-run` to preview changes before writing:
 
 ```bash
-kiwifs import --from gsheets \
-  --spreadsheet-id "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms" \
-  --sheet "Sheet1" \
-  --credentials /path/to/service-account.json \
-  --root ./knowledge --prefix "gsheets/"
+kiwifs import --from notion --dry-run
 ```
-
-Requires a [Google Cloud service account](https://cloud.google.com/iam/docs/service-accounts-create) with the Sheets API enabled. Share the spreadsheet with the service account email.

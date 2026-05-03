@@ -1,7 +1,139 @@
 ---
-title: "Metadata"
-description: "Structured frontmatter queries."
+title: "Metadata and graph"
+description: "DQL queries, aggregations, backlinks, and knowledge graph endpoints."
 icon: "tags"
 ---
 
-Coming soon.
+KiwiFS treats frontmatter as structured metadata you can query, aggregate, and graph. The metadata API provides a DataView Query Language (DQL) engine, SQL-style aggregations, and a full wiki-link graph.
+
+## DQL queries
+
+Query pages using DataView Query Language. DQL operates over frontmatter fields and supports multiple output modes.
+
+<ParamField query="q" type="string" required>
+  DQL query string.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/query?q=TABLE+title,+status+FROM+"concepts"+WHERE+status+=+"draft"'
+```
+
+```json
+{
+  "mode": "TABLE",
+  "headers": ["path", "title", "status"],
+  "rows": [
+    ["concepts/billing.md", "Billing", "draft"],
+    ["concepts/users.md", "Users", "draft"]
+  ]
+}
+```
+
+### Query modes
+
+| Mode | Description | Example |
+|---|---|---|
+| `TABLE` | Tabular results with selected fields | `TABLE title, status FROM "concepts"` |
+| `LIST` | Flat list of matching page paths | `LIST FROM "concepts" WHERE status = "verified"` |
+| `COUNT` | Count of matching pages | `COUNT FROM "concepts" WHERE status = "draft"` |
+| `DISTINCT` | Unique values for a field | `DISTINCT status FROM "concepts"` |
+
+<CodeGroup>
+```bash Table query
+curl 'http://localhost:3333/api/kiwi/query?q=TABLE+title,+status+FROM+"concepts"+WHERE+status+=+"draft"'
+```
+
+```bash Count query
+curl 'http://localhost:3333/api/kiwi/query?q=COUNT+FROM+"concepts"+WHERE+status+=+"draft"'
+```
+
+```bash Distinct values
+curl 'http://localhost:3333/api/kiwi/query?q=DISTINCT+status+FROM+"concepts"'
+```
+</CodeGroup>
+
+## Aggregations
+
+SQL-style aggregation queries over frontmatter fields.
+
+<ParamField query="group" type="string" required>
+  Frontmatter field to group by.
+</ParamField>
+<ParamField query="calc" type="string" required>
+  Comma-separated aggregation functions. Format: `function` or `function:field`.
+</ParamField>
+
+Supported functions: `count`, `avg`, `sum`, `min`, `max`.
+
+```bash
+curl 'http://localhost:3333/api/kiwi/query/aggregate?group=status&calc=count,avg:priority'
+```
+
+```json
+[
+  {"status": "draft", "count": 12, "avg_priority": 2.3},
+  {"status": "verified", "count": 45, "avg_priority": 1.8},
+  {"status": "stale", "count": 3, "avg_priority": 3.0}
+]
+```
+
+## Refresh computed views
+
+Trigger a refresh of all computed views (materialized DQL queries).
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/view/refresh'
+```
+
+```json
+{"refreshed": 4, "duration_ms": 120}
+```
+
+<Note>
+Views refresh automatically on file writes. Use this endpoint to force a manual refresh after bulk imports or direct filesystem changes.
+</Note>
+
+## Backlinks
+
+Get all pages that link to a given page via wiki links.
+
+<ParamField query="path" type="string" required>
+  File path to find backlinks for.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/backlinks?path=concepts/auth.md'
+```
+
+```json
+[
+  {"path": "concepts/users.md", "title": "Users", "context": "...uses [[auth]] for login..."},
+  {"path": "concepts/api-keys.md", "title": "API Keys", "context": "...see [[auth]] for details..."}
+]
+```
+
+## Knowledge graph
+
+Retrieve the full wiki-link graph as JSON. This powers the graph visualization in the web UI.
+
+```bash
+curl 'http://localhost:3333/api/kiwi/graph'
+```
+
+```json
+{
+  "nodes": [
+    {"id": "concepts/auth.md", "title": "Authentication", "group": "concepts"},
+    {"id": "concepts/users.md", "title": "Users", "group": "concepts"},
+    {"id": "concepts/billing.md", "title": "Billing", "group": "concepts"}
+  ],
+  "edges": [
+    {"source": "concepts/users.md", "target": "concepts/auth.md"},
+    {"source": "concepts/billing.md", "target": "concepts/users.md"}
+  ]
+}
+```
+
+<Tip>
+Use the graph endpoint to build custom visualizations or to analyze the connectivity of your knowledge base. Orphan pages (nodes with no edges) are candidates for linking or removal.
+</Tip>

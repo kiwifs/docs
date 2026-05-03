@@ -1,7 +1,198 @@
 ---
 title: "Files"
-description: "Read, write, and delete files."
+description: "Read, write, delete, and bulk-manage files through the KiwiFS REST API."
 icon: "file"
 ---
 
-Coming soon.
+## Directory tree
+
+Retrieve the directory tree as a JSON array.
+
+<ParamField query="path" type="string" default="/">
+  Root path to list. Omit to list the entire knowledge base.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/tree?path=concepts'
+```
+
+<ResponseField name="response" type="array">
+  Array of tree nodes.
+  <ResponseField name="path" type="string">Full path relative to root.</ResponseField>
+  <ResponseField name="name" type="string">File or directory name.</ResponseField>
+  <ResponseField name="isDir" type="boolean">Whether this node is a directory.</ResponseField>
+  <ResponseField name="size" type="integer">File size in bytes (0 for directories).</ResponseField>
+  <ResponseField name="children" type="array">Nested tree nodes (directories only).</ResponseField>
+</ResponseField>
+
+```json
+[
+  {
+    "path": "concepts",
+    "name": "concepts",
+    "isDir": true,
+    "size": 0,
+    "children": [
+      {"path": "concepts/auth.md", "name": "auth.md", "isDir": false, "size": 1420, "children": null}
+    ]
+  }
+]
+```
+
+## Read a file
+
+Retrieve raw markdown content. The response includes an `ETag` header containing the git blob SHA for optimistic locking.
+
+<ParamField query="path" type="string" required>
+  File path relative to the knowledge root.
+</ParamField>
+
+```bash
+curl -i 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md'
+```
+
+```
+HTTP/1.1 200 OK
+Content-Type: text/markdown
+ETag: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+
+# Authentication
+
+OAuth2 + JWT based authentication system...
+```
+
+## Write a file
+
+Create or update a file. The request body is raw markdown. KiwiFS creates a git commit for each write.
+
+<ParamField query="path" type="string" required>
+  File path relative to the knowledge root.
+</ParamField>
+<ParamField header="X-Actor" type="string">
+  Git commit author attribution (e.g. `agent:my-agent`).
+</ParamField>
+<ParamField header="X-Provenance" type="string">
+  Lineage tracking (e.g. `run:run-249`).
+</ParamField>
+<ParamField header="If-Match" type="string">
+  ETag from a previous read. If the file has changed since your read, the server returns `409 Conflict`.
+</ParamField>
+
+<CodeGroup>
+```bash Create a new file
+curl -X PUT 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
+  -H "Content-Type: text/markdown" \
+  -H "X-Actor: agent:docs-writer" \
+  -d '# Authentication
+
+OAuth2 + JWT based authentication system.'
+```
+
+```bash Update with optimistic locking
+curl -X PUT 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
+  -H "Content-Type: text/markdown" \
+  -H "X-Actor: agent:docs-writer" \
+  -H "If-Match: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2" \
+  -d '# Authentication (updated)
+
+Revised content here.'
+```
+</CodeGroup>
+
+<Warning>
+If you pass `If-Match` and the file has been modified since your read, the server returns `409 Conflict` with an error message. Fetch the latest version, merge your changes, and retry.
+</Warning>
+
+## Delete a file
+
+Delete a file and create a git commit recording the deletion.
+
+<ParamField query="path" type="string" required>
+  File path to delete.
+</ParamField>
+
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
+  -H "X-Actor: agent:cleanup"
+```
+
+## Bulk write
+
+Write multiple files in a single git commit. This is more efficient than individual writes and keeps your git history clean.
+
+<ParamField header="X-Actor" type="string">
+  Git commit author attribution.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/bulk' \
+  -H "Content-Type: application/json" \
+  -H "X-Actor: agent:importer" \
+  -d '{
+    "files": [
+      {"path": "concepts/auth.md", "content": "# Authentication\n\nOAuth2 flow."},
+      {"path": "concepts/billing.md", "content": "# Billing\n\nStripe integration."},
+      {"path": "concepts/users.md", "content": "# Users\n\nUser management."}
+    ]
+  }'
+```
+
+<Tip>
+Use bulk writes when importing data or making batch updates. All files are committed atomically in a single git commit.
+</Tip>
+
+## Upload assets
+
+Upload binary files (images, PDFs, etc.) as multipart form data.
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/assets' \
+  -F "file=@diagram.png" \
+  -H "X-Actor: agent:uploader"
+```
+
+The response returns the asset path you can reference in markdown:
+
+```json
+{"path": "assets/diagram.png"}
+```
+
+## Table of contents
+
+Get the heading outline for a file.
+
+<ParamField query="path" type="string" required>
+  File path to extract headings from.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/toc?path=concepts/auth.md'
+```
+
+```json
+[
+  {"level": 1, "text": "Authentication", "slug": "authentication"},
+  {"level": 2, "text": "OAuth2 flow", "slug": "oauth2-flow"},
+  {"level": 2, "text": "JWT tokens", "slug": "jwt-tokens"}
+]
+```
+
+## Resolve wiki links
+
+Resolve `[[wiki-links]]` to their canonical file paths and permalinks.
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/resolve-links' \
+  -H "Content-Type: application/json" \
+  -d '{"links": ["auth", "billing", "nonexistent"]}'
+```
+
+```json
+{
+  "resolved": {
+    "auth": {"path": "concepts/auth.md", "title": "Authentication"},
+    "billing": {"path": "concepts/billing.md", "title": "Billing"}
+  },
+  "unresolved": ["nonexistent"]
+}
+```

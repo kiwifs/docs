@@ -1,7 +1,126 @@
 ---
-title: "Import & Export"
-description: "Bulk data import and export endpoints."
+title: "Import and export"
+description: "Bulk import and flexible export endpoints for moving data in and out of KiwiFS."
 icon: "arrows-rotate"
 ---
 
-Coming soon.
+## Import
+
+Bulk import data into your knowledge base. The import endpoint accepts the same source configuration options as the `kiwifs import` CLI command.
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/import' \
+  -H "Content-Type: application/json" \
+  -H "X-Actor: agent:importer" \
+  -d '{
+    "source": "postgres",
+    "connection": "postgres://user:pass@localhost:5432/mydb",
+    "query": "SELECT id, title, body FROM articles WHERE updated_at > '\''2026-01-01'\''",
+    "mapping": {
+      "path": "articles/{{id}}.md",
+      "title": "{{title}}",
+      "content": "{{body}}"
+    }
+  }'
+```
+
+```json
+{"imported": 42, "skipped": 0, "errors": []}
+```
+
+<AccordionGroup>
+  <Accordion title="Source types">
+    | Source | Config value | Description |
+    |---|---|---|
+    | PostgreSQL | `postgres` | Import from PostgreSQL queries |
+    | MySQL | `mysql` | Import from MySQL queries |
+    | MongoDB | `mongodb` | Import from MongoDB collections |
+    | SQLite | `sqlite` | Import from SQLite databases |
+    | CSV | `csv` | Import from CSV files |
+    | JSON | `json` | Import from JSON or JSONL files |
+    | Notion | `notion` | Import from Notion workspace |
+    | Confluence | `confluence` | Import from Confluence spaces |
+    | Google Docs | `gdocs` | Import from Google Docs |
+  </Accordion>
+  <Accordion title="Mapping template syntax">
+    Use double-brace templates to map source fields to KiwiFS file paths and frontmatter:
+
+    ```json
+    {
+      "path": "concepts/{{slug}}.md",
+      "title": "{{name}}",
+      "content": "{{body}}",
+      "frontmatter": {
+        "source": "postgres",
+        "source_id": "{{id}}",
+        "status": "draft"
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+Large imports can take time. The endpoint responds synchronously. For very large datasets, consider using the CLI `kiwifs import` command with progress output.
+</Warning>
+
+## Export
+
+Export your knowledge base in structured formats.
+
+<ParamField query="format" type="string" required>
+  Output format: `jsonl` or `csv`.
+</ParamField>
+<ParamField query="path" type="string">
+  Scope export to a subdirectory (e.g. `concepts`).
+</ParamField>
+<ParamField query="columns" type="string">
+  Comma-separated frontmatter fields to include as columns.
+</ParamField>
+<ParamField query="include-content" type="boolean" default="false">
+  Include the full markdown body in the export.
+</ParamField>
+<ParamField query="include-links" type="boolean" default="false">
+  Include outgoing wiki links for each page.
+</ParamField>
+<ParamField query="include-embeddings" type="boolean" default="false">
+  Include vector embeddings (if available).
+</ParamField>
+<ParamField query="limit" type="integer">
+  Maximum number of pages to export.
+</ParamField>
+
+<CodeGroup>
+```bash Export as JSONL
+curl 'http://localhost:3333/api/kiwi/export?format=jsonl&path=concepts&include-content=true'
+```
+
+```bash Export as CSV
+curl 'http://localhost:3333/api/kiwi/export?format=csv&columns=title,status,updated&path=concepts'
+```
+
+```bash Export with links and embeddings
+curl 'http://localhost:3333/api/kiwi/export?format=jsonl&include-content=true&include-links=true&include-embeddings=true'
+```
+</CodeGroup>
+
+### JSONL output
+
+Each line is a JSON object representing one page:
+
+```json
+{"path":"concepts/auth.md","title":"Authentication","status":"verified","content":"# Authentication\n\nOAuth2 + JWT...","links":["users","billing"]}
+{"path":"concepts/billing.md","title":"Billing","status":"draft","content":"# Billing\n\nStripe integration...","links":["users"]}
+```
+
+### CSV output
+
+```csv
+path,title,status,updated
+concepts/auth.md,Authentication,verified,2026-04-25
+concepts/billing.md,Billing,draft,2026-04-20
+```
+
+<Tip>
+Use JSONL export with `include-content=true` to create backups or to feed your knowledge base into external pipelines.
+</Tip>

@@ -1,29 +1,25 @@
 ---
 title: "Quickstart"
-description: "Install KiwiFS and start a knowledge server in under 2 minutes."
+description: "Install and run KiwiFS in 60 seconds."
 icon: "rocket"
 ---
 
 ## 1. Install
 
 <Tabs>
-  <Tab title="One-line install">
+  <Tab title="Shell">
     ```bash
     curl -fsSL https://raw.githubusercontent.com/kiwifs/kiwifs/main/install.sh | sh
     ```
   </Tab>
-  <Tab title="Build from source">
-    Requires Go 1.25+ and Node.js 20+:
+  <Tab title="Go">
     ```bash
-    git clone https://github.com/kiwifs/kiwifs.git && cd kiwifs
-    cd ui && npm install && npm run build && cd ..
-    go build -o kiwifs .
+    go install github.com/kiwifs/kiwifs@latest
     ```
   </Tab>
   <Tab title="Docker">
     ```bash
-    docker build -t kiwifs .
-    docker run -v ./knowledge:/data -p 3333:3333 kiwifs
+    docker pull ameliaanhlam/kiwifs
     ```
   </Tab>
 </Tabs>
@@ -34,19 +30,11 @@ icon: "rocket"
 kiwifs init --template knowledge --root ./knowledge
 ```
 
-This creates a structured knowledge base:
+This creates a directory with starter files, a schema, and an agent playbook.
 
-```
-knowledge/
-├── SCHEMA.md          # Agent instructions: ingest, query, lint
-├── index.md           # Auto-maintained table of contents
-├── log.md             # Append-only chronological record
-├── concepts/          # One page per concept
-├── entities/          # One page per named entity
-└── reports/           # Chronological reports
-```
-
-Other templates: `wiki`, `runbook`, `research`, or start blank with `kiwifs init`.
+<Tip>
+Templates available: `knowledge` (default), `wiki`, `runbook`, `research`, `blank`.
+</Tip>
 
 ## 3. Start the server
 
@@ -54,54 +42,64 @@ Other templates: `wiki`, `runbook`, `research`, or start blank with `kiwifs init
 kiwifs serve --root ./knowledge
 ```
 
-Open [http://localhost:3333](http://localhost:3333) for the web UI.
+KiwiFS is now running at `http://localhost:3333`. Open it in your browser to see the web UI.
 
-## 4. Write from an agent
+## 4. Write from your agent
 
-<Tabs>
-  <Tab title="Filesystem">
-    ```bash
-    echo "# Authentication\n\nOAuth2 + JWT..." > ./knowledge/concepts/auth.md
-    ```
-  </Tab>
-  <Tab title="REST API">
-    ```bash
-    curl -X PUT 'localhost:3333/api/kiwi/file?path=concepts/auth.md' \
-      -H "X-Actor: my-agent" \
-      -d "# Authentication\n\nOAuth2 + JWT..."
-    ```
-  </Tab>
-  <Tab title="MCP">
-    ```json
-    {
-      "mcpServers": {
-        "kiwifs": {
-          "command": "kiwifs",
-          "args": ["mcp", "--root", "/path/to/knowledge"]
-        }
-      }
+<CodeGroup>
+```bash Via REST
+curl -X PUT 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
+  -H "X-Actor: my-agent" \
+  -d "# Authentication
+
+OAuth2 + JWT based authentication system."
+```
+
+```bash Via filesystem
+echo "# Authentication" > ./knowledge/concepts/auth.md
+```
+
+```bash Via MCP
+kiwifs mcp --root ./knowledge
+```
+</CodeGroup>
+
+## 5. Search
+
+```bash
+curl 'http://localhost:3333/api/kiwi/search?q=authentication'
+```
+
+## Connect an AI agent
+
+Add KiwiFS as an MCP server in Claude Desktop or Cursor:
+
+```json
+{
+  "mcpServers": {
+    "kiwifs": {
+      "command": "kiwifs",
+      "args": ["mcp", "--root", "/path/to/knowledge"]
     }
-    ```
-  </Tab>
-</Tabs>
+  }
+}
+```
 
-## 5. Browse in the web UI
-
-Open `http://localhost:3333`. See your page rendered with wiki links, backlinks, table of contents, and graph view.
+Your agent now has access to 21 tools for reading, writing, searching, and querying your knowledge base. See [MCP](/concepts/mcp) for the full tool reference.
 
 ## Next steps
 
 <CardGroup cols={2}>
-  <Card title="Files as truth" icon="file" href="/concepts/files-as-truth">
-    Understand the core design decision.
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Auth, search, versioning, vector embeddings, and more.
   </Card>
-  <Card title="Import data" icon="download" href="/import/overview">
-    Bring in data from PostgreSQL, CSV, MongoDB, and more.
+  <Card title="Agent Interface" icon="robot" href="/concepts/agent-interface">
+    Filesystem, REST, and MCP access patterns.
   </Card>
-  <Card title="Configure search" icon="magnifying-glass" href="/concepts/search">
-    Set up full-text and vector search.
+  <Card title="DQL" icon="database" href="/concepts/dql">
+    Query frontmatter metadata with a SQL-like language.
   </Card>
-  <Card title="Deploy" icon="cloud" href="/deploy/docker">
-    Run in Docker or Kubernetes.
+  <Card title="Deploy with Docker" icon="docker" href="/deploy/docker">
+    Production deployment with Docker Compose.
   </Card>
 </CardGroup>

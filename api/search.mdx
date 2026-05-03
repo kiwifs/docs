@@ -1,7 +1,152 @@
 ---
 title: "Search"
-description: "Full-text and vector search endpoints."
+description: "Full-text, trust-ranked, vector, and metadata search endpoints."
 icon: "magnifying-glass"
 ---
 
-Coming soon.
+KiwiFS provides multiple search strategies. You can use full-text search for keyword matching, vector search for semantic similarity, or metadata queries for structured filtering.
+
+## Full-text search
+
+BM25-ranked full-text search powered by SQLite FTS5.
+
+<ParamField query="q" type="string" required>
+  Search query. Supports boolean operators and phrase matching.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/search?q=payment+timeout'
+```
+
+```json
+[
+  {
+    "path": "concepts/payments.md",
+    "title": "Payments",
+    "snippet": "...handles <mark>payment</mark> retries after a <mark>timeout</mark>...",
+    "score": 4.82
+  }
+]
+```
+
+### Query syntax
+
+| Syntax | Example | Behavior |
+|---|---|---|
+| Keywords | `payment timeout` | Match pages containing both terms |
+| Boolean AND | `payment AND timeout` | Explicit AND (same as space-separated) |
+| Boolean OR | `payment OR billing` | Match pages containing either term |
+| Boolean NOT | `payment NOT refund` | Exclude pages containing a term |
+| Phrase | `"payment timeout"` | Match the exact phrase |
+
+<CodeGroup>
+```bash Boolean search
+curl 'http://localhost:3333/api/kiwi/search?q=payment+AND+timeout'
+```
+
+```bash Phrase search
+curl 'http://localhost:3333/api/kiwi/search?q=%22payment+timeout%22'
+```
+
+```bash Exclusion
+curl 'http://localhost:3333/api/kiwi/search?q=payment+NOT+refund'
+```
+</CodeGroup>
+
+## Trust-ranked search
+
+Search results weighted by trust signals in frontmatter. Pages marked as verified or source-of-truth rank higher.
+
+<ParamField query="q" type="string" required>
+  Search query (same syntax as full-text search).
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/search/verified?q=auth'
+```
+
+```json
+[
+  {
+    "path": "concepts/auth.md",
+    "title": "Authentication",
+    "snippet": "...OAuth2 <mark>auth</mark> flow...",
+    "score": 8.91,
+    "trust": {"status": "verified", "source-of-truth": true}
+  }
+]
+```
+
+<Tip>
+Add `status: verified` or `source-of-truth: true` to your page frontmatter to boost that page in trust-ranked results.
+</Tip>
+
+## Semantic search
+
+Vector similarity search using embeddings. Requires a vector search provider configured in `.kiwi/config.toml`.
+
+<ParamField body="query" type="string" required>
+  Natural language query.
+</ParamField>
+<ParamField body="limit" type="integer" default="10">
+  Maximum number of results to return.
+</ParamField>
+
+<CodeGroup>
+```bash POST
+curl -X POST 'http://localhost:3333/api/kiwi/search/semantic' \
+  -H "Content-Type: application/json" \
+  -d '{"query": "how does auth work?", "limit": 10}'
+```
+
+```bash GET
+curl 'http://localhost:3333/api/kiwi/search/semantic?query=how+does+auth+work&limit=10'
+```
+</CodeGroup>
+
+```json
+[
+  {
+    "path": "concepts/auth.md",
+    "title": "Authentication",
+    "snippet": "OAuth2 + JWT based authentication system...",
+    "similarity": 0.92
+  }
+]
+```
+
+<Note>
+Semantic search requires vector embeddings. Configure an embedder provider (OpenAI, Ollama, Cohere, etc.) in your `.kiwi/config.toml` under `[search.vector]`.
+</Note>
+
+## Metadata query
+
+Query pages by their frontmatter fields using JSON path syntax.
+
+<ParamField query="where" type="string" required>
+  JSON path filter expression (e.g. `$.status=draft`).
+</ParamField>
+<ParamField query="sort" type="string">
+  JSON path to the field to sort by (e.g. `$.updated`).
+</ParamField>
+<ParamField query="order" type="string" default="asc">
+  Sort order: `asc` or `desc`.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/meta?where=$.status=draft&sort=$.updated&order=desc'
+```
+
+```json
+[
+  {
+    "path": "concepts/billing.md",
+    "title": "Billing",
+    "metadata": {"status": "draft", "updated": "2026-04-20", "author": "agent:writer"}
+  }
+]
+```
+
+<Tip>
+Combine metadata queries with the [DQL endpoint](/api/metadata) for more complex structured queries across your knowledge base.
+</Tip>

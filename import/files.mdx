@@ -1,72 +1,116 @@
 ---
-title: "File Import"
-description: "Import from CSV, JSON, JSONL, YAML, Excel, Obsidian vaults, and Confluence exports."
-icon: "file"
+title: "File imports"
+description: "Import data from CSV, JSON, and JSONL files into KiwiFS."
+icon: "file-csv"
 ---
+
+KiwiFS can import structured data from local files, converting each record into a markdown page with frontmatter.
 
 ## CSV
 
 ```bash
 kiwifs import --from csv \
-  --file /path/to/data.csv \
-  --root ./knowledge --prefix "data/" \
-  --id-column Name
+  --file data.csv \
+  --prefix people/ \
+  --root ./knowledge
+```
+
+| Flag | Description |
+|------|-------------|
+| `--file` | Path to CSV file (required) |
+| `--columns` | Comma-separated fields to include |
+| `--id-column` | Column to use as filename |
+| `--prefix` | Path prefix in KiwiFS |
+| `--limit` | Max records to import |
+| `--dry-run` | Preview without writing |
+
+The first row of the CSV is treated as column headers. Each subsequent row becomes a markdown file.
+
+### Example
+
+Given a CSV:
+
+```csv
+name,email,department
+Jane Doe,jane@example.com,Engineering
+Bob Smith,bob@example.com,Product
+```
+
+After import:
+
+```markdown
+---
+_imported_at: "2026-04-25T18:46:15Z"
+_source: data.csv
+name: Jane Doe
+email: jane@example.com
+department: Engineering
+---
+
+# Jane Doe
+
+> Auto-imported from data.csv
 ```
 
 ## JSON
 
 ```bash
 kiwifs import --from json \
-  --file /path/to/users.json \
-  --root ./knowledge --prefix "users/" \
-  --id-column name
+  --file data.json \
+  --prefix items/
 ```
 
-Expects an array of objects: `[{"name": "Alice", ...}, ...]`
+Expects a JSON file containing an array of objects:
+
+```json
+[
+  {"name": "Item A", "status": "active"},
+  {"name": "Item B", "status": "draft"}
+]
+```
 
 ## JSONL
 
 ```bash
 kiwifs import --from jsonl \
-  --file /path/to/data.jsonl \
-  --root ./knowledge --prefix "data/"
+  --file data.jsonl \
+  --prefix items/
 ```
 
-One JSON object per line.
+Each line is a JSON object:
 
-## YAML
+```jsonl
+{"name": "Item A", "status": "active"}
+{"name": "Item B", "status": "draft"}
+```
+
+JSONL is ideal for large datasets — KiwiFS streams lines without loading the entire file into memory.
+
+## MCP usage
+
+File imports are available via the `kiwi_import` MCP tool:
+
+```json
+{
+  "tool": "kiwi_import",
+  "arguments": {
+    "from": "csv",
+    "file": "/path/to/data.csv",
+    "prefix": "people/"
+  }
+}
+```
+
+<Note>
+MCP file imports require local mode (`kiwifs mcp --root`). The file path must be accessible to the KiwiFS process.
+</Note>
+
+## Column filtering
+
+Use `--columns` to import only specific fields:
 
 ```bash
-kiwifs import --from yaml \
-  --file /path/to/data.yaml \
-  --root ./knowledge --prefix "data/"
+kiwifs import --from csv --file data.csv --columns "name,email,status" --prefix people/
 ```
 
-## Excel
-
-```bash
-kiwifs import --from excel \
-  --file /path/to/students.xlsx \
-  --sheet "Sheet1" \
-  --root ./knowledge --prefix "students/"
-```
-
-## Obsidian vault
-
-Import an existing Obsidian vault, preserving wiki links and frontmatter:
-
-```bash
-kiwifs import --from obsidian \
-  --path /path/to/vault \
-  --root ./knowledge --prefix "imported/"
-```
-
-## Confluence export
-
-Import from a Confluence HTML/XML export:
-
-```bash
-kiwifs import --from confluence \
-  --path /path/to/export \
-  --root ./knowledge --prefix "confluence/"
-```
+Fields not listed are excluded from the frontmatter.

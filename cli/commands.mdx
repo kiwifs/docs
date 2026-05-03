@@ -1,7 +1,452 @@
 ---
-title: "CLI Commands"
+title: "CLI commands"
 description: "KiwiFS command-line reference."
 icon: "terminal"
 ---
 
-Coming soon.
+All commands use the `kiwifs` binary. Run `kiwifs --help` to list available commands, or `kiwifs <command> --help` for details on a specific command.
+
+## Core commands
+
+<AccordionGroup>
+
+<Accordion title="serve — Start the KiwiFS server">
+
+Start the KiwiFS HTTP server and serve your knowledge base.
+
+```bash
+kiwifs serve [flags]
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--root` | `-r` | `./knowledge` | Knowledge root directory |
+| `--port` | `-p` | `3333` | HTTP port |
+| `--host` | | `0.0.0.0` | Bind address |
+| `--search` | | `sqlite` | Search engine: `sqlite` or `grep` |
+| `--versioning` | | `git` | Versioning strategy: `git`, `cow`, or `none` |
+| `--auth` | | `none` | Auth type: `none`, `apikey`, `perspace`, or `oidc` |
+| `--api-key` | | | API key (required if `auth=apikey`) |
+| `--oidc-issuer` | | | OIDC issuer URL |
+| `--oidc-client-id` | | | OIDC client ID |
+| `--async-commit` | | `true` | Enable async batched commits |
+| `--batch-window` | | `200` | Async commit batch window in milliseconds |
+| `--batch-max-size` | | `50` | Max paths per batch |
+| `--no-watch` | | `false` | Disable fsnotify watcher |
+
+**Protocol flags**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--nfs` | `false` | Enable userspace NFSv3 server |
+| `--nfs-port` | `2049` | NFS port |
+| `--nfs-allow` | | CIDRs allowed to mount NFS |
+| `--s3` | `false` | Enable S3-compatible API |
+| `--s3-port` | `3334` | S3 port |
+| `--webdav` | `false` | Enable WebDAV server |
+| `--webdav-port` | `3335` | WebDAV port |
+| `--space` | | Register additional space (repeatable, format: `name=path`) |
+
+<CodeGroup>
+```bash Basic
+kiwifs serve --root ./my-docs --port 8080
+```
+
+```bash With auth
+kiwifs serve --auth apikey --api-key my-secret-key
+```
+
+```bash With NFS and S3
+kiwifs serve --nfs --nfs-allow 10.0.0.0/8 --s3
+```
+
+```bash Multi-space
+kiwifs serve --space team=./team-docs --space personal=./my-notes
+```
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="init — Initialize a knowledge directory">
+
+Create a new knowledge directory with an optional template.
+
+```bash
+kiwifs init [flags]
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--root` | `-r` | `./knowledge` | Directory to initialize |
+| `--template` | | `knowledge` | Template: `knowledge`, `wiki`, `runbook`, `research`, or `blank` |
+
+<CodeGroup>
+```bash Default template
+kiwifs init
+```
+
+```bash Wiki template in a custom directory
+kiwifs init --root ./wiki --template wiki
+```
+
+```bash Blank starting point
+kiwifs init --root ./docs --template blank
+```
+</CodeGroup>
+
+<Tip>
+Templates provide a starter directory structure with sample files. Use `blank` if you want an empty knowledge base.
+</Tip>
+
+</Accordion>
+
+<Accordion title="mcp — Start MCP server">
+
+Start a Model Context Protocol server over stdio transport. Use this to connect KiwiFS to AI agents and LLM tools.
+
+```bash
+kiwifs mcp [flags]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--root` | | Knowledge root (in-process mode) |
+| `--remote` | | KiwiFS server URL (proxy mode) |
+| `--api-key` | | API key for remote server |
+| `--space` | `default` | Space to scope to |
+| `--http` | `false` | Enable Streamable HTTP transport (instead of stdio) |
+| `--port` | `8181` | HTTP port (only with `--http`) |
+
+<Tabs>
+<Tab title="In-process (stdio)">
+Run KiwiFS directly within the MCP server process. Best for local development.
+
+```bash
+kiwifs mcp --root ./knowledge
+```
+</Tab>
+<Tab title="Proxy mode">
+Connect to a running KiwiFS server. Best for shared or remote setups.
+
+```bash
+kiwifs mcp --remote https://kiwi.example.com --api-key my-key
+```
+</Tab>
+<Tab title="HTTP transport">
+Serve MCP over Streamable HTTP instead of stdio.
+
+```bash
+kiwifs mcp --root ./knowledge --http --port 8181
+```
+</Tab>
+</Tabs>
+
+</Accordion>
+
+<Accordion title="mount — FUSE mount a remote KiwiFS">
+
+Mount a remote KiwiFS server as a local filesystem using FUSE.
+
+```bash
+kiwifs mount <mountpoint> [flags]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--remote` | | Remote KiwiFS server URL (required) |
+| `--api-key` | | API key (or `KIWIFS_API_KEY` env) |
+| `--bearer` | | Bearer token (or `KIWIFS_BEARER` env) |
+| `--basic-user` | | HTTP Basic auth username |
+| `--basic-pass` | | HTTP Basic auth password (or `KIWIFS_BASIC_PASS` env) |
+| `--space` | `default` | Space name |
+
+```bash
+kiwifs mount ~/mnt/kiwi --remote https://kiwi.example.com --api-key my-key
+```
+
+<Note>
+FUSE must be installed on your system. On macOS, install [macFUSE](https://osxfuse.github.io/). On Linux, install `fuse3`.
+</Note>
+
+</Accordion>
+
+</AccordionGroup>
+
+## Data commands
+
+<AccordionGroup>
+
+<Accordion title="import — Import data from external sources">
+
+Import data from databases, files, or third-party services into your knowledge base.
+
+```bash
+kiwifs import [flags]
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--from` | | | Source type (see list below) |
+| `--root` | `-r` | `./knowledge` | Knowledge root |
+| `--dsn` | | | Database connection string |
+| `--table` | | | Table or collection name |
+| `--query` | | | Custom SQL query |
+| `--file` | | | Path to data file |
+| `--prefix` | | | Path prefix in KiwiFS |
+| `--columns` | | | Comma-separated fields to include |
+| `--id-column` | | | Column to use as filename |
+| `--limit` | | | Max records to import |
+| `--dry-run` | | `false` | Preview without writing |
+
+**Supported sources**
+
+| Category | Sources |
+|----------|---------|
+| Databases | `postgres`, `mysql`, `sqlite`, `mongodb`, `firestore`, `dynamodb`, `redis`, `elasticsearch` |
+| Files | `csv`, `json`, `jsonl`, `yaml`, `excel` |
+| Services | `notion`, `airtable`, `gsheets`, `obsidian`, `confluence` |
+
+<CodeGroup>
+```bash Import from PostgreSQL
+kiwifs import --from postgres --dsn "postgres://user:pass@localhost/mydb" \
+  --table articles --id-column slug --prefix articles/
+```
+
+```bash Import from CSV
+kiwifs import --from csv --file data.csv --id-column name --prefix people/
+```
+
+```bash Dry run from Notion
+kiwifs import --from notion --dry-run
+```
+</CodeGroup>
+
+<Tip>
+Use `--dry-run` first to preview which files will be created before writing anything.
+</Tip>
+
+</Accordion>
+
+<Accordion title="export — Export knowledge base">
+
+Export your knowledge base as JSONL or CSV.
+
+```bash
+kiwifs export [flags]
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--root` | `-r` | `./knowledge` | Knowledge root |
+| `--format` | | `jsonl` | Output format: `jsonl` or `csv` |
+| `--output` | `-o` | stdout | Output file |
+| `--path` | | | Scope to subdirectory |
+| `--columns` | | | Comma-separated frontmatter fields |
+| `--include-content` | | `false` | Include full markdown body |
+| `--include-links` | | `false` | Include outgoing/incoming links |
+| `--include-embeddings` | | `false` | Include vector embeddings |
+| `--limit` | | `0` | Max files (0 = unlimited) |
+
+<CodeGroup>
+```bash Export as JSONL
+kiwifs export --format jsonl -o knowledge.jsonl
+```
+
+```bash Export as CSV with specific columns
+kiwifs export --format csv --path students/ --columns name,status,grade -o students.csv
+```
+
+```bash Pipe to jq
+kiwifs export --format jsonl | jq '.title'
+```
+</CodeGroup>
+
+See the [data export guide](/export/overview) for full details on output formats and the REST API.
+
+</Accordion>
+
+<Accordion title="query — Run a DQL query">
+
+Run a Dataview Query Language (DQL) query against your knowledge base.
+
+```bash
+kiwifs query "<query>" [flags]
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--root` | `-r` | `./knowledge` | Knowledge root |
+
+```bash
+kiwifs query "TABLE title, status FROM 'concepts' WHERE status = 'draft'"
+```
+
+</Accordion>
+
+<Accordion title="aggregate — SQL-style aggregation">
+
+Run aggregation queries against frontmatter fields.
+
+```bash
+kiwifs aggregate [flags]
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--root` | `-r` | | Knowledge root |
+| `--group` | | | Frontmatter field to group by |
+| `--calc` | | | Aggregation functions: `count`, `avg`, `sum`, `min`, `max` (with field, e.g. `avg:priority`) |
+
+```bash
+kiwifs aggregate --root ./knowledge --group status --calc count --calc avg:priority
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+## Maintenance commands
+
+<AccordionGroup>
+
+<Accordion title="analytics — Knowledge health dashboard">
+
+Display a dashboard summarizing the health and statistics of your knowledge base.
+
+```bash
+kiwifs analytics [flags]
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--root` | `-r` | | Knowledge root |
+
+```bash
+kiwifs analytics --root ./knowledge
+```
+
+</Accordion>
+
+<Accordion title="lint — Validate knowledge base">
+
+Check your knowledge base for issues such as broken links, missing frontmatter, or invalid YAML.
+
+```bash
+kiwifs lint [flags]
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--root` | `-r` | | Knowledge root |
+
+```bash
+kiwifs lint --root ./knowledge
+```
+
+</Accordion>
+
+<Accordion title="janitor — Full health scan">
+
+Run a comprehensive health scan that combines linting, analytics, and cleanup suggestions.
+
+```bash
+kiwifs janitor [flags]
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--root` | `-r` | | Knowledge root |
+
+```bash
+kiwifs janitor --root ./knowledge
+```
+
+</Accordion>
+
+<Accordion title="reindex — Rebuild search indexes">
+
+Rebuild all search indexes from scratch. Useful after bulk imports or if search results seem stale.
+
+```bash
+kiwifs reindex [flags]
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--root` | `-r` | | Knowledge root |
+
+```bash
+kiwifs reindex --root ./knowledge
+```
+
+<Note>
+Reindexing locks writes briefly. Run this during low-traffic periods on production servers.
+</Note>
+
+</Accordion>
+
+<Accordion title="view — Manage computed views">
+
+Create and manage computed views that aggregate data from your knowledge base.
+
+```bash
+kiwifs view [subcommand] [flags]
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--root` | `-r` | | Knowledge root |
+
+```bash
+kiwifs view --root ./knowledge
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+## Backup and restore
+
+<AccordionGroup>
+
+<Accordion title="backup — Push to git remote">
+
+Push your knowledge base to a git remote for backup.
+
+```bash
+kiwifs backup [flags]
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--root` | `-r` | | Knowledge root |
+| `--remote` | | | Git remote URL (overrides config) |
+| `--branch` | | | Branch to push |
+
+```bash
+kiwifs backup --root ./knowledge --remote git@github.com:org/knowledge.git
+```
+
+</Accordion>
+
+<Accordion title="restore — Clone from git remote">
+
+Clone a knowledge base from a git remote.
+
+```bash
+kiwifs restore [flags]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--from` | | Git remote URL (required) |
+| `--to` | | Local directory (required) |
+| `--branch` | | Branch to check out |
+
+```bash
+kiwifs restore --from git@github.com:org/knowledge.git --to ./knowledge
+```
+
+</Accordion>
+
+</AccordionGroup>

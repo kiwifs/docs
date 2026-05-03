@@ -1,0 +1,152 @@
+---
+title: "DQL"
+description: "A SQL-like query language for frontmatter metadata across your knowledge base."
+icon: "database"
+---
+
+DQL (DataView Query Language) lets you query frontmatter metadata across your entire knowledge base. It is inspired by Obsidian Dataview but runs server-side against the SQLite metadata index.
+
+## Query modes
+
+DQL supports four output modes.
+
+<CodeGroup>
+
+```sql TABLE
+TABLE title, status, priority FROM "concepts" WHERE status = "draft" SORT priority DESC
+```
+
+```sql LIST
+LIST FROM "reports"
+```
+
+```sql COUNT
+COUNT FROM "entities"
+```
+
+```sql DISTINCT
+DISTINCT author FROM "documents"
+```
+
+</CodeGroup>
+
+- **TABLE** returns tabular results with the fields you specify.
+- **LIST** returns a flat list of matching page paths.
+- **COUNT** returns the number of matching pages.
+- **DISTINCT** returns unique values for a single field.
+
+## Clauses
+
+| Clause | Description |
+|---|---|
+| `FROM "path/"` | Scope the query to a directory. |
+| `WHERE` | Filter with boolean logic (`AND`, `OR`, `NOT`), comparison operators (`=`, `!=`, `>`, `<`, `>=`, `<=`), `CONTAINS`, and `MATCHES` (regex). |
+| `SORT field ASC\|DESC` | Sort results by a field. |
+| `GROUP BY field` | Group results by a field. |
+| `FLATTEN field` | Expand array fields into multiple rows. |
+| `LIMIT n` | Cap the number of results. |
+
+## Implicit fields
+
+Every page exposes these fields without any frontmatter:
+
+| Field | Description |
+|---|---|
+| `_path` | File path relative to the knowledge base root. |
+| `_updated` | Last modified timestamp. |
+| `_size` | File size in bytes. |
+| `_words` | Word count of the page body. |
+
+```sql
+TABLE _path, _words FROM "concepts" WHERE _words > 1000 SORT _words DESC
+```
+
+## Expressions
+
+DQL supports arithmetic, function calls, string interpolation, comparisons, and boolean logic inside `WHERE` and computed field definitions.
+
+```sql
+TABLE title, $.priority * 10 + len($.tags) AS score FROM "concepts" SORT score DESC
+```
+
+## Built-in functions
+
+DQL ships with 27 functions:
+
+<AccordionGroup>
+
+<Accordion title="Date and time">
+`now()`, `date()`, `duration()`, `days_since()`, `format()`
+</Accordion>
+
+<Accordion title="String">
+`lower()`, `upper()`, `trim()`, `split()`, `join()`, `contains()`, `regextest()`
+</Accordion>
+
+<Accordion title="Math">
+`round()`, `floor()`, `ceil()`, `abs()`, `min()`, `max()`
+</Accordion>
+
+<Accordion title="Collection">
+`len()`, `sum()`, `avg()`, `first()`, `last()`, `sort()`, `reverse()`, `unique()`
+</Accordion>
+
+<Accordion title="Metadata">
+`meta()` — access implicit fields programmatically.
+</Accordion>
+
+</AccordionGroup>
+
+## CLI usage
+
+Run a DQL query from the command line:
+
+```bash
+kiwifs query "TABLE title, status FROM 'concepts' WHERE status = 'draft'"
+```
+
+## REST API
+
+Run a DQL query over HTTP:
+
+```
+GET /api/kiwi/query?q=TABLE title, status FROM "concepts" WHERE status = "draft"
+```
+
+## Aggregation
+
+Use the `aggregate` command to group and summarize metadata:
+
+```bash
+kiwifs aggregate --group status --calc count,avg:priority
+```
+
+Supported aggregation functions: `count`, `avg`, `sum`, `min`, `max`. You can group by any frontmatter field.
+
+## Computed views
+
+A markdown file with `kiwi-view: true` in its frontmatter becomes a computed view. KiwiFS auto-refreshes the file body from a DQL query embedded in the frontmatter.
+
+```yaml
+---
+kiwi-view: true
+query: "TABLE title, status FROM 'concepts' WHERE status = 'draft' SORT _updated DESC"
+---
+```
+
+The body of this file is overwritten with live query results on every index update. Think of it as a saved query that always shows current data.
+
+## Computed frontmatter fields
+
+You can define virtual fields in `.kiwi/config.toml` that are evaluated at index time. These fields are queryable like any other frontmatter field.
+
+```toml
+[dataview]
+computed_fields.age_days = "days_since(updated)"
+computed_fields.is_long = "len(body) > 5000"
+computed_fields.priority_score = "priority * 10 + len(tags)"
+```
+
+<Info>
+Computed fields are recalculated on every reindex. They do not modify your source files.
+</Info>

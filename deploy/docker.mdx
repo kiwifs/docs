@@ -4,4 +4,199 @@ description: "Deploy KiwiFS with Docker."
 icon: "docker"
 ---
 
-Coming soon.
+KiwiFS ships with a multi-stage Dockerfile and a `docker-compose.yml` that includes an optional pgvector sidecar for vector search.
+
+## Quick start
+
+Build the image and run a container with your knowledge directory mounted as a volume.
+
+```bash
+# Build the image
+docker build -t kiwifs .
+
+# Run KiwiFS
+docker run -v ./knowledge:/data -p 3333:3333 kiwifs
+```
+
+Your knowledge base is now available at `http://localhost:3333`.
+
+## Dockerfile
+
+The Dockerfile uses a three-stage build to produce a minimal runtime image.
+
+<Accordion title="Build stages">
+
+| Stage | Base image | Purpose |
+|-------|-----------|---------|
+| 1. Node.js | `node:22-alpine` | Builds the React UI |
+| 2. Go | `golang:1.25-alpine` | Compiles the Go binary with the UI embedded via `go:embed` |
+| 3. Runtime | `alpine:3.20` | Minimal image with `git` and `ca-certificates` |
+
+The final image contains only the compiled binary, `git` (for versioning), and root CA certificates.
+
+</Accordion>
+
+## Docker Compose
+
+The included `docker-compose.yml` runs KiwiFS alongside an optional pgvector database for vector search.
+
+```yaml docker-compose.yml
+services:
+  kiwifs:
+    build: .
+    ports:
+      - "3333:3333"
+      # Uncomment to expose additional protocols:
+      # - "2049:2049"   # NFS
+      # - "3334:3334"   # S3
+      # - "3335:3335"   # WebDAV
+    volumes:
+      - ./knowledge:/data
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - KIWI_PGVECTOR_DSN=postgres://kiwi:kiwi@db:5432/kiwi?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: kiwi
+      POSTGRES_PASSWORD: kiwi
+      POSTGRES_DB: kiwi
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kiwi"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
+```
+
+Start everything with a single command.
+
+```bash
+docker compose up -d
+```
+
+## Configuration
+
+### Environment variables
+
+Pass environment variables to configure KiwiFS and enable integrations.
+
+```bash
+docker run \
+  -v ./knowledge:/data \
+  -p 3333:3333 \
+  -e OPENAI_API_KEY=sk-... \
+  -e KIWI_PGVECTOR_DSN=postgres://user:pass@host:5432/db \
+  kiwifs
+```
+
+In `docker-compose.yml`, add variables under the `environment` key or use an `.env` file.
+
+```yaml
+services:
+  kiwifs:
+    env_file: .env
+```
+
+### Enable authentication
+
+Pass auth flags as command arguments.
+
+<CodeGroup>
+```bash API key auth
+docker run -v ./knowledge:/data -p 3333:3333 \
+  kiwifs serve --auth apikey --api-key my-secret-key
+```
+
+```bash OIDC auth
+docker run -v ./knowledge:/data -p 3333:3333 \
+  kiwifs serve --auth oidc \
+    --oidc-issuer https://accounts.google.com \
+    --oidc-client-id my-client-id
+```
+</CodeGroup>
+
+### Enable NFS, S3, and WebDAV
+
+Uncomment the relevant port mappings in `docker-compose.yml` and add the corresponding flags.
+
+```yaml
+services:
+  kiwifs:
+    build: .
+    ports:
+      - "3333:3333"
+      - "2049:2049"   # NFS
+      - "3334:3334"   # S3
+      - "3335:3335"   # WebDAV
+    volumes:
+      - ./knowledge:/data
+    command: ["serve", "--nfs", "--s3", "--webdav"]
+```
+
+<Note>
+The NFS server runs in userspace (NFSv3) and does not require the container to run in privileged mode.
+</Note>
+
+### Volumes and persistence
+
+The knowledge directory must be mounted as a volume so data persists across container restarts.
+
+```yaml
+volumes:
+  - ./knowledge:/data      # Knowledge files
+  - pgdata:/var/lib/postgresql/data  # Vector search database
+```
+
+<Warning>
+If you omit the volume mount, all knowledge data is lost when the container stops.
+</Warning>
+
+## Health checks
+
+KiwiFS exposes health endpoints you can use in your Docker configuration.
+
+```yaml
+services:
+  kiwifs:
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3333/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+```
+
+| Endpoint | Purpose |
+|----------|---------|
+| `/health` | Basic health check |
+| `/healthz` | Liveness probe |
+| `/readyz` | Readiness probe |
+
+## Production tips
+
+<Tip>
+Pin the image tag in production. Build with a version tag (`docker build -t kiwifs:1.2.0 .`) and reference it explicitly in your compose file.
+</Tip>
+
+- Set `--async-commit=true` (the default) for better write throughput under load.
+- Use `--search sqlite` for fast full-text search without external dependencies.
+- Mount the pgvector volume to a persistent disk if you use vector search.
+- Set resource limits in your compose file to prevent runaway memory usage.
+
+```yaml
+services:
+  kiwifs:
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+```

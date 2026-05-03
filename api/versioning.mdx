@@ -1,7 +1,147 @@
 ---
 title: "Versioning"
-description: "Git history, diff, and blame endpoints."
+description: "Git history, diff, and blame endpoints for tracking changes to your knowledge base."
 icon: "code-branch"
 ---
 
-Coming soon.
+Every write in KiwiFS creates a git commit. The versioning API exposes the full git history for any file, letting you view past versions, compare changes, and trace authorship.
+
+## Version history
+
+Get the git log for a specific file.
+
+<ParamField query="path" type="string" required>
+  File path relative to the knowledge root.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/versions?path=concepts/auth.md'
+```
+
+```json
+[
+  {
+    "hash": "e4f5g6h",
+    "author": "agent:docs-writer",
+    "message": "update concepts/auth.md",
+    "timestamp": "2026-04-25T14:30:00Z"
+  },
+  {
+    "hash": "a1b2c3d",
+    "author": "agent:importer",
+    "message": "create concepts/auth.md",
+    "timestamp": "2026-04-24T09:15:00Z"
+  }
+]
+```
+
+## Read a specific version
+
+Retrieve the file content at a specific commit.
+
+<ParamField query="path" type="string" required>
+  File path relative to the knowledge root.
+</ParamField>
+<ParamField query="version" type="string" required>
+  Git commit hash (full or abbreviated).
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/version?path=concepts/auth.md&version=a1b2c3d'
+```
+
+```
+# Authentication
+
+Original content from the first commit...
+```
+
+## Diff between versions
+
+Get a unified diff between two commits for a file.
+
+<ParamField query="path" type="string" required>
+  File path relative to the knowledge root.
+</ParamField>
+<ParamField query="from" type="string" required>
+  Starting commit hash.
+</ParamField>
+<ParamField query="to" type="string" required>
+  Ending commit hash.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/diff?path=concepts/auth.md&from=a1b2c3d&to=e4f5g6h'
+```
+
+```diff
+--- a/concepts/auth.md
++++ b/concepts/auth.md
+@@ -1,3 +1,5 @@
+ # Authentication
+
+-Original content from the first commit...
++OAuth2 + JWT based authentication system.
++
++Supports refresh token rotation.
+```
+
+## Blame
+
+Get per-line git blame attribution for a file. Each line maps to the commit that last modified it.
+
+<ParamField query="path" type="string" required>
+  File path relative to the knowledge root.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/blame?path=concepts/auth.md'
+```
+
+```json
+[
+  {
+    "line": 1,
+    "content": "# Authentication",
+    "hash": "a1b2c3d",
+    "author": "agent:importer",
+    "timestamp": "2026-04-24T09:15:00Z"
+  },
+  {
+    "line": 3,
+    "content": "OAuth2 + JWT based authentication system.",
+    "hash": "e4f5g6h",
+    "author": "agent:docs-writer",
+    "timestamp": "2026-04-25T14:30:00Z"
+  }
+]
+```
+
+<Tip>
+Use blame to trace which agent or user wrote each section. The `author` field corresponds to the `X-Actor` header set during the write.
+</Tip>
+
+## Optimistic locking with ETag
+
+The versioning system powers optimistic locking. When you read a file, the response includes an `ETag` header with the current git blob SHA. Pass this value in the `If-Match` header on writes to detect concurrent modifications.
+
+```bash
+# 1. Read the file and capture the ETag
+ETAG=$(curl -sI 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
+  | grep -i etag | awk '{print $2}' | tr -d '\r"')
+
+# 2. Write with If-Match to prevent conflicts
+curl -X PUT 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
+  -H "Content-Type: text/markdown" \
+  -H "X-Actor: agent:updater" \
+  -H "If-Match: $ETAG" \
+  -d '# Authentication (updated)
+
+Revised content.'
+```
+
+If another write occurred between your read and write, you receive a `409 Conflict` response:
+
+```json
+{"error": "conflict: file was modified since your last read"}
+```

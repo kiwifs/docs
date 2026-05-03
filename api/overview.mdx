@@ -1,7 +1,132 @@
 ---
-title: "API Overview"
-description: "KiwiFS REST API reference."
+title: "API overview"
+description: "Base URL, authentication, common headers, and error handling for the KiwiFS REST API."
 icon: "terminal"
 ---
 
-Coming soon.
+The KiwiFS REST API gives you full read/write access to your knowledge base over HTTP. Every operation available in the web UI and MCP interface is also available as a REST endpoint.
+
+## Base URL
+
+```
+http://localhost:3333/api/kiwi
+```
+
+All endpoints are prefixed with `/api/kiwi/`. In multi-space mode, endpoints include the space name:
+
+```
+/api/kiwi/{space}/file?path=concepts/auth.md
+```
+
+## Authentication
+
+Configure the auth type in `.kiwi/config.toml` under `[auth] type`.
+
+<Tabs>
+  <Tab title="none (default)">
+    No authentication required. Suitable for local development and trusted networks.
+
+    ```bash
+    curl http://localhost:3333/api/kiwi/tree
+    ```
+  </Tab>
+  <Tab title="apikey">
+    Pass a global API key via the `Authorization: Bearer` header.
+
+    ```bash
+    curl http://localhost:3333/api/kiwi/tree \
+      -H "Authorization: Bearer kiwi_sk_abc123"
+    ```
+  </Tab>
+  <Tab title="perspace">
+    Each space has its own API key. Use the same header format as `apikey` mode.
+
+    ```bash
+    curl http://localhost:3333/api/kiwi/engineering/tree \
+      -H "Authorization: Bearer kiwi_sk_eng_xyz789"
+    ```
+  </Tab>
+  <Tab title="oidc">
+    OpenID Connect authentication. Pass a JWT Bearer token issued by your identity provider.
+
+    ```bash
+    curl http://localhost:3333/api/kiwi/tree \
+      -H "Authorization: Bearer eyJhbGciOi..."
+    ```
+  </Tab>
+</Tabs>
+
+## Common headers
+
+| Header | Purpose | Example |
+|---|---|---|
+| `X-Actor` | Attribution for the git commit author | `agent:my-agent` |
+| `X-Provenance` | Lineage tracking for audit trails | `run:run-249` |
+| `If-Match` | Optimistic locking using ETag (git blob SHA) | `a1b2c3d4e5f6` |
+| `Content-Type` | Body format | `text/markdown` or `application/json` |
+
+<Tip>
+Always set `X-Actor` on write operations. KiwiFS uses this value as the git commit author, making it easy to trace which agent or user made each change.
+</Tip>
+
+## Error handling
+
+All errors return a JSON body with a single `error` field and a standard HTTP status code.
+
+```json
+{"error": "file not found: concepts/missing.md"}
+```
+
+| Status code | Meaning |
+|---|---|
+| `400` | Bad request (malformed query, missing required field) |
+| `401` | Unauthorized (missing or invalid credentials) |
+| `404` | Resource not found |
+| `409` | Conflict (ETag mismatch on optimistic lock) |
+| `422` | Unprocessable entity (validation error) |
+| `500` | Internal server error |
+
+## Health endpoints
+
+Use these endpoints for liveness and readiness probes in container orchestrators.
+
+<CodeGroup>
+```bash Health
+curl http://localhost:3333/health
+```
+
+```bash Liveness
+curl http://localhost:3333/healthz
+```
+
+```bash Readiness
+curl http://localhost:3333/readyz
+```
+</CodeGroup>
+
+All three return:
+
+```json
+{"status": "ok"}
+```
+
+## Rate limiting
+
+KiwiFS enforces a built-in rate limit of **100 requests/second** per IP with a burst allowance of **200**. Health and metrics endpoints are exempt. If you need stricter or more advanced rate limiting, place a reverse proxy (nginx, Caddy, Envoy) in front of the server.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="File operations" icon="file" href="/api/files">
+    Read, write, and delete files.
+  </Card>
+  <Card title="Search" icon="magnifying-glass" href="/api/search">
+    Full-text and vector search.
+  </Card>
+  <Card title="Versioning" icon="code-branch" href="/api/versioning">
+    Git history, diff, and blame.
+  </Card>
+  <Card title="Metadata" icon="tags" href="/api/metadata">
+    Structured queries and knowledge graph.
+  </Card>
+</CardGroup>
