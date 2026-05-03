@@ -8,15 +8,23 @@ KiwiFS ships with a multi-stage Dockerfile and a `docker-compose.yml` that inclu
 
 ## Quick start
 
-Build the image and run a container with your knowledge directory mounted as a volume.
+<Tabs>
+  <Tab title="Pre-built image">
+    Pull and run the pre-built image from Docker Hub.
 
-```bash
-# Build the image
-docker build -t kiwifs .
+    ```bash
+    docker run -p 3333:3333 -v ./knowledge:/data ameliaanhlam/kiwifs
+    ```
+  </Tab>
+  <Tab title="Build from source">
+    Build from the repo Dockerfile (includes the latest embedded UI).
 
-# Run KiwiFS
-docker run -v ./knowledge:/data -p 3333:3333 kiwifs
-```
+    ```bash
+    docker build -t kiwifs .
+    docker run -p 3333:3333 -v ./knowledge:/data kiwifs
+    ```
+  </Tab>
+</Tabs>
 
 Your knowledge base is now available at `http://localhost:3333`.
 
@@ -29,7 +37,7 @@ The Dockerfile uses a three-stage build to produce a minimal runtime image.
 | Stage | Base image | Purpose |
 |-------|-----------|---------|
 | 1. Node.js | `node:22-alpine` | Builds the React UI |
-| 2. Go | `golang:1.25-alpine` | Compiles the Go binary with the UI embedded via `go:embed` |
+| 2. Go | `golang:1.25.5-alpine` | Compiles the Go binary with the UI embedded via `go:embed` |
 | 3. Runtime | `alpine:3.20` | Minimal image with `git` and `ca-certificates` |
 
 The final image contains only the compiled binary, `git` (for versioning), and root CA certificates.

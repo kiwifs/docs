@@ -19,8 +19,12 @@ icon: "rocket"
   </Tab>
   <Tab title="Docker">
     ```bash
-    docker pull ameliaanhlam/kiwifs
+    docker run -p 3333:3333 -v ./knowledge:/data ameliaanhlam/kiwifs
     ```
+
+    <Note>
+    The Docker image runs `kiwifs serve` with default settings. Skip to step 4 — init and serve are handled automatically.
+    </Note>
   </Tab>
 </Tabs>
 
