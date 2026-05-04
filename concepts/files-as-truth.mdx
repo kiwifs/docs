@@ -38,19 +38,30 @@ KiwiFS indexes this frontmatter into SQLite, making it queryable via [DQL](/conc
 
 KiwiFS stores its configuration and internal data in a `.kiwi/` directory at the root of your knowledge base:
 
-```
-knowledge/
-├── .kiwi/
-│   ├── config.toml       # Server configuration
-│   ├── comments/         # Inline comment storage
-│   └── playbook.md       # Agent instructions
-├── SCHEMA.md             # Knowledge base schema
-├── index.md              # Root index page
-├── pages/                # Your knowledge pages
-│   └── getting-started.md
-└── episodes/             # Episodic memory (optional)
-    └── example-episode.md
-```
+<Tree>
+  <Tree.Folder name="knowledge" defaultOpen>
+    <Tree.Folder name=".kiwi" defaultOpen>
+      <Tree.File name="config.toml" />
+      <Tree.Folder name="comments" />
+      <Tree.File name="playbook.md" />
+      <Tree.File name="SCHEMA.md" />
+      <Tree.Folder name="schemas">
+        <Tree.File name="runbook.json" />
+      </Tree.Folder>
+      <Tree.Folder name="templates">
+        <Tree.File name="concept.md" />
+        <Tree.File name="runbook.md" />
+      </Tree.Folder>
+    </Tree.Folder>
+    <Tree.File name="index.md" />
+    <Tree.Folder name="pages" defaultOpen>
+      <Tree.File name="getting-started.md" />
+    </Tree.Folder>
+    <Tree.Folder name="episodes">
+      <Tree.File name="example-episode.md" />
+    </Tree.Folder>
+  </Tree.Folder>
+</Tree>
 
 ## Git versioning
 
