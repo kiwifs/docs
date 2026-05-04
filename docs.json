@@ -32,6 +32,9 @@
   "search": {
     "prompt": "Search KiwiFS docs..."
   },
+  "ai": {
+    "enabled": false
+  },
   "seo": {
     "indexing": "navigable",
     "metatags": {
