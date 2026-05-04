@@ -33,7 +33,10 @@
     "prompt": "Search KiwiFS docs..."
   },
   "seo": {
-    "indexing": "navigable"
+    "indexing": "navigable",
+    "metatags": {
+      "canonical": "https://docs.kiwifs.com"
+    }
   },
   "metadata": {
     "timestamp": true
