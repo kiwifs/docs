@@ -20,17 +20,25 @@ AI agents need somewhere to store and retrieve knowledge. Traditional databases 
 
 ## How it works
 
-```
-┌─────────────────────────────────────────┐
-│              KiwiFS Server              │
-│                                         │
-│  REST API  │  NFS   │  S3    │ WebDAV   │
-│   :3333    │ :2049  │ :3334  │  :3335   │
-│            └────┬───┘        │          │
-│       ──────────┴────────────┘          │
-│    Storage → Git → Index → SSE          │
-└─────────────────────────────────────────┘
-```
+<Mermaid>
+flowchart TD
+  subgraph Protocols
+    REST["REST API :3333"]
+    NFS["NFS :2049"]
+    S3["S3 :3334"]
+    WebDAV["WebDAV :3335"]
+    FUSE["FUSE mount"]
+    MCP["MCP stdio/HTTP"]
+  end
+
+  REST & NFS & S3 & WebDAV & FUSE & MCP --> Storage
+
+  subgraph KiwiFS["KiwiFS Server"]
+    Storage["Storage Layer"] --> Git["Git Commit"]
+    Git --> Index["Search Index"]
+    Index --> SSE["SSE Broadcast"]
+  end
+</Mermaid>
 
 All protocols flow through the same storage layer. Every write — regardless of how it enters — gets a git commit, a search index update, and an SSE broadcast.
 

@@ -121,6 +121,39 @@ curl 'http://localhost:3333/api/kiwi/blame?path=concepts/auth.md'
 Use blame to trace which agent or user wrote each section. The `author` field corresponds to the `X-Actor` header set during the write.
 </Tip>
 
+## Change feed
+
+Get a paginated feed of all changes across the knowledge base since a given commit. Useful for syncing external systems or building audit logs.
+
+```http
+GET /api/kiwi/changes
+```
+
+<ParamField query="since" type="string">
+  Git commit hash to start from. Omit to get the most recent changes.
+</ParamField>
+<ParamField query="limit" type="integer" default="50">
+  Max changes to return (capped at 500).
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/changes?limit=10'
+```
+
+```json
+{
+  "changes": [
+    {"seq": 1, "path": "concepts/auth.md", "action": "write", "actor": "agent:docs-writer", "timestamp": "2026-05-04T12:00:00Z"},
+    {"seq": 2, "path": "concepts/billing.md", "action": "delete", "actor": "agent:cleanup", "timestamp": "2026-05-04T12:01:00Z"}
+  ],
+  "last_seq": "e4f5g6h..."
+}
+```
+
+Pass `last_seq` as the `since` parameter on the next request to paginate forward.
+
+---
+
 ## Optimistic locking with ETag
 
 The versioning system powers optimistic locking. When you read a file, the response includes an `ETag` header with the current git blob SHA. Pass this value in the `If-Match` header on writes to detect concurrent modifications.

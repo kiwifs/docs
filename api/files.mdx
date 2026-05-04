@@ -177,6 +177,111 @@ curl 'http://localhost:3333/api/kiwi/toc?path=concepts/auth.md'
 ]
 ```
 
+## Append to a file
+
+Append content to an existing file without reading it first.
+
+```http
+POST /api/kiwi/file/append
+```
+
+<ParamField query="path" type="string" required>
+  File path to append to.
+</ParamField>
+<ParamField query="separator" type="string" default="\n">
+  String inserted between existing content and new content.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/file/append?path=log/agent.md' \
+  -H "X-Actor: agent:logger" \
+  -d '## Entry 42
+
+New finding from run 249.'
+```
+
+```json
+{"path": "log/agent.md", "etag": "b2c3d4e5f6..."}
+```
+
+<Tip>
+Append is useful for agent logs, episodic memory, and audit trails where you want to add content without read-modify-write cycles.
+</Tip>
+
+## Rename a file
+
+Rename or move a file. Wiki links pointing to the old path are automatically updated.
+
+```http
+POST /api/kiwi/rename
+```
+
+<ParamField body="from" type="string" required>Old file path.</ParamField>
+<ParamField body="to" type="string" required>New file path.</ParamField>
+<ParamField query="update_links" type="boolean" default="true">
+  Rewrite wiki links in other files that point to the old path.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/rename' \
+  -H "Content-Type: application/json" \
+  -d '{"from": "concepts/auth.md", "to": "concepts/authentication.md"}'
+```
+
+```json
+{
+  "from": "concepts/auth.md",
+  "to": "concepts/authentication.md",
+  "etag": "c3d4e5f6...",
+  "updated_links": 8
+}
+```
+
+## Rename a directory
+
+Move an entire directory and update all internal links.
+
+```http
+POST /api/kiwi/rename-dir
+```
+
+<ParamField body="from" type="string" required>Old directory path.</ParamField>
+<ParamField body="to" type="string" required>New directory path.</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/rename-dir' \
+  -H "Content-Type: application/json" \
+  -d '{"from": "concepts", "to": "docs/concepts"}'
+```
+
+```json
+{"from": "concepts", "to": "docs/concepts", "renamed": 15}
+```
+
+## Templates
+
+List and read page templates stored in `.kiwi/templates/`.
+
+### List templates
+
+```bash
+curl 'http://localhost:3333/api/kiwi/templates'
+```
+
+```json
+["runbook", "decision", "episode", "concept"]
+```
+
+### Read a template
+
+```bash
+curl 'http://localhost:3333/api/kiwi/templates?name=runbook'
+```
+
+```json
+{"name": "runbook", "content": "---\ntype: runbook\ntitle: \nstatus: draft\n---\n\n# Title\n\n## Steps\n\n1. ..."}
+```
+
 ## Resolve wiki links
 
 Resolve `[[wiki-links]]` to their canonical file paths and permalinks.

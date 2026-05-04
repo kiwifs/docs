@@ -1,0 +1,125 @@
+---
+title: "Webhooks"
+description: "Push real-time notifications to external services when pages change."
+icon: "webhook"
+---
+
+Webhooks let you push change events to external services whenever pages are created, updated, or deleted. Each webhook receives a signed HTTP POST with details about the change.
+
+## Enabling webhooks
+
+Add the `[webhooks]` section to your `.kiwi/config.toml`:
+
+```toml
+[webhooks]
+enabled = true
+max_workers = 4
+max_retries = 3
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `false` | Enable the webhook subsystem. |
+| `max_workers` | `4` | Concurrent dispatch goroutines. |
+| `max_retries` | `3` | Retries on delivery failure. |
+
+## Creating a webhook
+
+Register a webhook URL with an optional glob pattern to filter which paths trigger it.
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/webhooks' \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/hook", "path_glob": "concepts/**"}'
+```
+
+```json
+{
+  "id": "wh_abc123",
+  "url": "https://example.com/hook",
+  "path_glob": "concepts/**",
+  "secret": "whsec_k9x2m...",
+  "created_at": "2026-05-04T12:00:00Z",
+  "enabled": true
+}
+```
+
+<Warning>
+The `secret` is only returned once at creation time. Store it securely — you'll need it to verify webhook signatures.
+</Warning>
+
+## Path glob patterns
+
+| Pattern | Matches |
+|---------|---------|
+| `**` | All files (default) |
+| `concepts/**` | All files under `concepts/` |
+| `reports/*.md` | Markdown files directly in `reports/` |
+
+Glob matching uses Go's `filepath.Match` with an added `**` recursive wildcard.
+
+## Payload format
+
+Every webhook receives a JSON POST body:
+
+```json
+{
+  "type": "write",
+  "path": "concepts/auth.md",
+  "actor": "agent:docs-writer",
+  "timestamp": "2026-05-04T12:05:00Z"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `type` | Event type: `write`, `delete`, `bulk`, `import`. |
+| `path` | File path that changed. |
+| `actor` | The `X-Actor` header from the originating request. |
+| `timestamp` | ISO 8601 timestamp of the change. |
+
+## Signature verification
+
+Every webhook POST includes three headers for verification:
+
+| Header | Description |
+|--------|-------------|
+| `webhook-id` | Unique message ID for deduplication. |
+| `webhook-timestamp` | Unix timestamp of the dispatch. |
+| `webhook-signature` | `v1,<base64>` HMAC-SHA256 signature. |
+
+The signature is computed over `{webhook-id}.{webhook-timestamp}.{body}` using the webhook secret as the HMAC key.
+
+```python
+import hmac, hashlib, base64
+
+def verify(secret, msg_id, timestamp, body, signature):
+    signed_content = f"{msg_id}.{timestamp}.{body}"
+    expected = hmac.new(
+        base64.b64decode(secret),
+        signed_content.encode(),
+        hashlib.sha256
+    ).digest()
+    return hmac.compare_digest(
+        base64.b64encode(expected).decode(),
+        signature.removeprefix("v1,")
+    )
+```
+
+## Managing webhooks
+
+### List all webhooks
+
+```bash
+curl 'http://localhost:3333/api/kiwi/webhooks'
+```
+
+<Note>
+The `secret` field is omitted from list responses for security.
+</Note>
+
+### Delete a webhook
+
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/webhooks/wh_abc123'
+```

@@ -60,7 +60,9 @@
               "concepts/versioning",
               "concepts/dql",
               "concepts/wiki-links",
-              "concepts/mcp"
+              "concepts/mcp",
+              "concepts/webhooks",
+              "concepts/schemas"
             ]
           },
           {
@@ -100,7 +102,10 @@
               "api/versioning",
               "api/metadata",
               "api/import-export",
-              "api/analytics"
+              "api/analytics",
+              "api/webhooks",
+              "api/schemas",
+              "api/velocity"
             ]
           },
           {

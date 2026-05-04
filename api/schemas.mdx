@@ -1,0 +1,67 @@
+---
+title: "Schemas"
+description: "Manage JSON Schema definitions for frontmatter validation."
+icon: "shield-check"
+---
+
+<Note>
+Enable enforcement with `[schema] enforce = true` in config. See [Schema Validation](/concepts/schemas) for the full concept.
+</Note>
+
+## List schema types
+
+```http
+GET /api/kiwi/schemas
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/schemas'
+```
+
+```json
+["runbook", "concept", "episode"]
+```
+
+## Get a schema
+
+```http
+GET /api/kiwi/schemas/:type
+```
+
+<ParamField path="type" type="string" required>
+  Schema type name (matches the frontmatter `type` field).
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/schemas/runbook'
+```
+
+Returns the raw JSON Schema document.
+
+## Create or update a schema
+
+```http
+PUT /api/kiwi/schemas/:type
+```
+
+<ParamField path="type" type="string" required>
+  Schema type name.
+</ParamField>
+
+The request body is a raw JSON Schema document.
+
+```bash
+curl -X PUT 'http://localhost:3333/api/kiwi/schemas/runbook' \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "object",
+    "required": ["title", "status", "owner"],
+    "properties": {
+      "title": {"type": "string"},
+      "status": {"type": "string", "enum": ["draft", "reviewed", "verified"]},
+      "owner": {"type": "string"}
+    }
+  }'
+```
+
+When `[schema] enforce = true`, schema changes trigger a reload so subsequent writes use the updated schema immediately.

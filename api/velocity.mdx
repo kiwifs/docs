@@ -1,0 +1,194 @@
+---
+title: "Velocity and graph analytics"
+description: "Change velocity, PageRank, and structural analysis of your knowledge base."
+icon: "chart-line"
+---
+
+## Change velocity
+
+Analyze the rate and distribution of changes across your knowledge base over a time period.
+
+```http
+GET /api/kiwi/velocity
+```
+
+<ParamField query="period" type="string" default="30d">
+  Time window. Supports `Nd` (days), `Nw` (weeks), `Nm` (months).
+</ParamField>
+<ParamField query="limit" type="integer" default="20">
+  Max number of items in hot/cold spot lists.
+</ParamField>
+<ParamField query="path_prefix" type="string">
+  Limit analysis to a subdirectory.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/velocity?period=14d&limit=5'
+```
+
+```json
+{
+  "period": "14d",
+  "total_changes": 87,
+  "hot_spots": [
+    {"path": "concepts/auth.md", "changes": 12},
+    {"path": "runbooks/deploy.md", "changes": 9}
+  ],
+  "cold_spots": [
+    {"path": "concepts/legacy.md", "changes": 0, "days_since_update": 120}
+  ],
+  "bursts": [
+    {"date": "2026-04-28", "changes": 23, "actor": "agent:importer"}
+  ],
+  "single_author_pages": 14
+}
+```
+
+<ResponseField name="total_changes" type="integer">Total commits in the period.</ResponseField>
+<ResponseField name="hot_spots" type="array">Most frequently changed pages.</ResponseField>
+<ResponseField name="cold_spots" type="array">Least recently changed pages.</ResponseField>
+<ResponseField name="bursts" type="array">Days with unusually high change counts.</ResponseField>
+<ResponseField name="single_author_pages" type="integer">Pages with only one contributor.</ResponseField>
+
+<Tip>
+Use velocity data to identify knowledge that's churning (hot spots may need stabilization) and knowledge that's stale (cold spots may need review).
+</Tip>
+
+---
+
+## Graph analytics
+
+Structural analysis of the wiki-link graph using PageRank and connectivity metrics.
+
+```http
+GET /api/kiwi/graph/analytics
+```
+
+<ParamField query="limit" type="integer" default="20">
+  Number of top pages to return.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/graph/analytics?limit=10'
+```
+
+```json
+{
+  "total_nodes": 142,
+  "total_edges": 387,
+  "components": 3,
+  "largest_component_size": 138,
+  "orphans": ["concepts/legacy.md", "scratch/notes.md"],
+  "top_pages": [
+    {"path": "concepts/auth.md", "pagerank": 0.042, "in_degree": 18, "out_degree": 5},
+    {"path": "concepts/users.md", "pagerank": 0.038, "in_degree": 15, "out_degree": 8}
+  ]
+}
+```
+
+<ResponseField name="total_nodes" type="integer">Total pages in the graph.</ResponseField>
+<ResponseField name="total_edges" type="integer">Total wiki-link connections.</ResponseField>
+<ResponseField name="components" type="integer">Number of disconnected subgraphs.</ResponseField>
+<ResponseField name="largest_component_size" type="integer">Pages in the largest connected component.</ResponseField>
+<ResponseField name="orphans" type="array">Pages with no incoming or outgoing links.</ResponseField>
+<ResponseField name="top_pages" type="array">Highest PageRank pages with degree counts.</ResponseField>
+
+Returns `503` if the link indexer is not available.
+
+---
+
+## Suggestions
+
+Get semantically similar pages for a given page, useful for "related pages" features and discovering missing links.
+
+```http
+GET /api/kiwi/suggestions
+```
+
+<ParamField query="path" type="string" required>
+  File path to find suggestions for.
+</ParamField>
+<ParamField query="limit" type="integer" default="5">
+  Max suggestions to return.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/suggestions?path=concepts/auth.md&limit=3'
+```
+
+```json
+{
+  "suggestions": [
+    {"target": "concepts/api-keys.md", "similarity": 0.89, "snippet": "API key authentication..."},
+    {"target": "concepts/sessions.md", "similarity": 0.84, "snippet": "Session management..."}
+  ]
+}
+```
+
+Already-linked pages are filtered out. Requires vector search to be enabled.
+
+---
+
+## Embeddings
+
+Retrieve the raw embedding vectors for a page's chunks.
+
+```http
+GET /api/kiwi/embeddings
+```
+
+<ParamField query="path" type="string" required>
+  File path to retrieve embeddings for.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/embeddings?path=concepts/auth.md'
+```
+
+```json
+{
+  "path": "concepts/auth.md",
+  "dimensions": 768,
+  "chunks": [
+    {"chunk_idx": 0, "text": "# Authentication\n\nOAuth2...", "vector": [0.012, -0.034, ...]},
+    {"chunk_idx": 1, "text": "## Refresh tokens\n\n...", "vector": [0.008, 0.021, ...]}
+  ]
+}
+```
+
+Returns `503` if vector search is not enabled.
+
+---
+
+## Search evaluation
+
+Benchmark your search quality against expected results.
+
+```http
+POST /api/kiwi/eval
+```
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/eval' \
+  -H "Content-Type: application/json" \
+  -d '{
+    "queries": [
+      {"question": "how does authentication work", "expected_paths": ["concepts/auth.md"]},
+      {"question": "deploy checklist", "expected_paths": ["runbooks/deploy.md"]}
+    ]
+  }'
+```
+
+```json
+{
+  "fts": {"hit_rate": 1.0, "mrr": 0.75, "precision_at_5": 0.6},
+  "semantic": {"hit_rate": 1.0, "mrr": 0.9, "precision_at_5": 0.8},
+  "per_query": [
+    {"question": "how does authentication work", "fts_rank": 2, "semantic_rank": 1}
+  ]
+}
+```
+
+<ResponseField name="hit_rate" type="number">Fraction of queries where the expected page appeared in top-5.</ResponseField>
+<ResponseField name="mrr" type="number">Mean Reciprocal Rank across all queries.</ResponseField>
+<ResponseField name="precision_at_5" type="number">Average precision in the top-5 results.</ResponseField>

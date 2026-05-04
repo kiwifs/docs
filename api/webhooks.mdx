@@ -1,0 +1,61 @@
+---
+title: "Webhooks"
+description: "Register, list, and delete webhooks for real-time change notifications."
+icon: "webhook"
+---
+
+<Note>
+Webhooks must be enabled in configuration. See [Webhooks concept](/concepts/webhooks) for setup and signature verification.
+</Note>
+
+## Register a webhook
+
+```http
+POST /api/kiwi/webhooks
+```
+
+<ParamField body="url" type="string" required>
+  HTTPS endpoint to receive POST notifications.
+</ParamField>
+<ParamField body="path_glob" type="string" default="**">
+  Glob pattern to filter which file changes trigger this webhook. Defaults to all files.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/webhooks' \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/hook", "path_glob": "concepts/**"}'
+```
+
+<ResponseField name="id" type="string">Unique webhook identifier.</ResponseField>
+<ResponseField name="url" type="string">Registered endpoint URL.</ResponseField>
+<ResponseField name="path_glob" type="string">Path filter pattern.</ResponseField>
+<ResponseField name="secret" type="string">HMAC signing secret (only returned at creation).</ResponseField>
+<ResponseField name="created_at" type="string">ISO 8601 creation timestamp.</ResponseField>
+<ResponseField name="enabled" type="boolean">Whether the webhook is active.</ResponseField>
+
+Returns `503` if webhooks are not enabled in configuration.
+
+## List webhooks
+
+```http
+GET /api/kiwi/webhooks
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/webhooks'
+```
+
+Returns an array of webhooks. The `secret` field is omitted from list responses.
+
+## Delete a webhook
+
+```http
+DELETE /api/kiwi/webhooks/:id
+```
+
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/webhooks/wh_abc123'
+```
+
+Returns `204 No Content` on success.

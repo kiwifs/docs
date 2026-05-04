@@ -133,6 +133,76 @@ curl 'http://localhost:3333/api/kiwi/janitor'
 
 ---
 
+## Memory report
+
+Get an overview of your episodic memory structure — useful for agents that use the episode/merge pattern.
+
+```http
+GET /api/kiwi/memory/report
+```
+
+<ParamField query="episodes_prefix" type="string">
+  Path prefix for episodes directory. Uses the configured default if omitted.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/memory/report'
+```
+
+```json
+{
+  "episodic_count": 23,
+  "merged_from_refs": 15,
+  "episodic_files": ["episodes/ep-001.md", "episodes/ep-002.md"],
+  "unmerged": 8,
+  "warnings": ["Episode ep-012.md has no merge target"]
+}
+```
+
+## Context
+
+Retrieve the knowledge base context files used by agents — the playbook, schema description, and index.
+
+```http
+GET /api/kiwi/context
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/context'
+```
+
+```json
+{
+  "playbook": "# Playbook\n\nRules for how agents should interact...",
+  "schema": "# Schema\n\nFrontmatter fields and their meanings...",
+  "index": "# Index\n\nTop-level knowledge structure..."
+}
+```
+
+These map to `.kiwi/playbook.md`, `.kiwi/SCHEMA.md`, and `.kiwi/index.md`.
+
+## Theme
+
+Read or update the web UI theme.
+
+### Get theme
+
+```bash
+curl 'http://localhost:3333/api/kiwi/theme'
+```
+
+### Set theme
+
+```bash
+curl -X PUT 'http://localhost:3333/api/kiwi/theme' \
+  -H "Content-Type: application/json" \
+  -d '{"primary": "#6cbe45", "mode": "light"}'
+```
+
+Returns `403` if `ui.theme_locked = true` in configuration.
+
+---
+
 ## Comments
 
 Add, list, resolve, and delete inline comments on pages.
