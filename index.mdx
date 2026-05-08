@@ -1,14 +1,14 @@
 ---
 title: "Introduction"
-description: "KiwiFS is a knowledge filesystem that agents can write to, search, query, and trust."
+description: "KiwiFS is a markdown filesystem for agents and teams. Searchable. Structured. Versioned. One binary, zero config."
 icon: "house"
 ---
 
-KiwiFS is a **knowledge filesystem server** — one Go binary that turns markdown on disk into a searchable, queryable, versioned knowledge base accessible via REST, MCP, NFS, S3, WebDAV, and FUSE.
+KiwiFS is a **markdown filesystem for agents and teams** — one Go binary that turns markdown on disk into a searchable, queryable, versioned store accessible via REST, MCP, NFS, S3, WebDAV, and FUSE.
 
 ## Why KiwiFS?
 
-AI agents need somewhere to store and retrieve knowledge. Traditional databases require schemas and drivers. File-based wikis lack search and structure. KiwiFS gives you both:
+Markdown is the lingua franca of agents and developers — but raw `.md` files are just files. No search, no versioning, no structure. KiwiFS layers database-like guarantees on top of plain markdown:
 
 - **Files are the truth** — every page is a plain markdown file with YAML frontmatter. No proprietary format, no lock-in.
 - **Agents already know the API** — `cat`, `grep`, `echo` work out of the box. No SDK needed.
@@ -52,7 +52,7 @@ All protocols flow through the same storage layer. Every write — regardless of
     Configure search, auth, versioning, and more.
   </Card>
   <Card title="Agent Interface" icon="robot" href="/concepts/agent-interface">
-    How AI agents read and write knowledge.
+    How AI agents read and write markdown.
   </Card>
   <Card title="MCP" icon="plug" href="/concepts/mcp">
     Connect Claude, Cursor, and other AI tools.

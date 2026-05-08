@@ -1,10 +1,10 @@
 ---
 title: "Agent Interface"
-description: "How AI agents read and write knowledge in KiwiFS."
+description: "How AI agents read and write markdown in KiwiFS."
 icon: "robot"
 ---
 
-KiwiFS gives agents four ways to access knowledge, from the most native (filesystem) to the most structured (MCP).
+KiwiFS gives agents four ways to access markdown, from the most native (filesystem) to the most structured (MCP).
 
 ## Filesystem access
 
@@ -85,7 +85,7 @@ flowchart TD
 
 ## Provenance tracking
 
-Know which agent run produced which knowledge:
+Know which agent run produced which content:
 
 ```bash
 curl -X PUT localhost:3333/api/kiwi/file?path=report.md \

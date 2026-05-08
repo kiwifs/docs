@@ -11,8 +11,8 @@
 ## Terminology
 
 - Use "KiwiFS" (capital K, i, F, S), never "kiwifs" in prose (lowercase is fine in code/CLI examples)
-- Use "knowledge base" not "wiki" or "database" when referring to the content store
-- Use "knowledge server" when describing the product category
+- Use "markdown filesystem" when describing the product category
+- Use "knowledge base" as a generic noun for the data store, but not as a product descriptor
 - Use "agent" not "AI" or "LLM" when referring to the consumer of the filesystem interface
 - Use "web UI" not "frontend" or "dashboard"
 - Use "wiki links" not "wikilinks" or "internal links"

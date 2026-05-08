@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "maple",
-  "name": "KiwiFS — PocketBase for Knowledge",
+  "name": "KiwiFS — Markdown filesystem for agents and teams",
   "colors": {
     "primary": "#6cbe45",
     "light": "#7dd356",
