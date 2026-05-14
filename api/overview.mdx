@@ -18,6 +18,8 @@ All endpoints are prefixed with `/api/kiwi/`. In multi-space mode, endpoints inc
 /api/kiwi/{space}/file?path=concepts/auth.md
 ```
 
+You can also keep the path **`/api/kiwi/...`** (no `{space}` segment) and send the header **`X-Kiwi-Space: engineering`** so reverse proxies or the FUSE client can dispatch to a configured space without changing URL shapes.
+
 ## Authentication
 
 Configure the auth type in `.kiwi/config.toml` under `[auth] type`.
@@ -64,6 +66,8 @@ Configure the auth type in `.kiwi/config.toml` under `[auth] type`.
 | `X-Provenance` | Lineage tracking for audit trails | `run:run-249` |
 | `If-Match` | Optimistic locking using ETag (git blob SHA) | `a1b2c3d4e5f6` |
 | `Content-Type` | Body format | `text/markdown` or `application/json` |
+| `X-Kiwi-Space` | Target space when using the shared `/api/kiwi/...` prefix | `engineering` |
+| `X-Space` | Recorded on audit log entries when present | `engineering` |
 
 <Tip>
 Always set `X-Actor` on write operations. KiwiFS uses this value as the git commit author, making it easy to trace which agent or user made each change.
@@ -82,8 +86,10 @@ All errors return a JSON body with a single `error` field and a standard HTTP st
 | `400` | Bad request (malformed query, missing required field) |
 | `401` | Unauthorized (missing or invalid credentials) |
 | `404` | Resource not found |
-| `409` | Conflict (ETag mismatch on optimistic lock) |
+| `409` | Conflict (ETag mismatch on optimistic lock, or draft merge failure) |
 | `422` | Unprocessable entity (validation error) |
+| `501` | Not implemented (optional subsystem disabled, for example drafts) |
+| `503` | Service unavailable (claims, vector search, Dataview executor, and similar optional services) |
 | `500` | Internal server error |
 
 ## Health endpoints
@@ -112,7 +118,9 @@ All three return:
 
 ## Rate limiting
 
-KiwiFS enforces a built-in rate limit of **100 requests/second** per IP with a burst allowance of **200**. Health and metrics endpoints are exempt. If you need stricter or more advanced rate limiting, place a reverse proxy (nginx, Caddy, Envoy) in front of the server.
+When `[server.rate_limit]` in `.kiwi/config.toml` sets `requests_per_minute` greater than zero, KiwiFS applies a token-bucket limiter keyed by **Bearer token hash** (or client IP when anonymous). Health, readiness, and metrics routes skip the limiter.
+
+If `requests_per_minute` is **not** configured, no built-in HTTP rate limit is applied — use a reverse proxy (nginx, Caddy, Envoy) for strict quotas or geographic rules.
 
 ## Next steps
 
@@ -128,5 +136,14 @@ KiwiFS enforces a built-in rate limit of **100 requests/second** per IP with a b
   </Card>
   <Card title="Metadata" icon="tags" href="/api/metadata">
     Structured queries and knowledge graph.
+  </Card>
+  <Card title="Drafts" icon="code-branch" href="/api/drafts">
+    Staging branches for agents.
+  </Card>
+  <Card title="Views" icon="table" href="/api/views">
+    Saved DQL bases.
+  </Card>
+  <Card title="Utilities" icon="screwdriver-wrench" href="/api/utilities">
+    Lint, timeline, graph helpers, rules, audit.
   </Card>
 </CardGroup>

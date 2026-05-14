@@ -95,6 +95,19 @@ curl 'http://localhost:3333/api/kiwi/graph/analytics?limit=10'
 
 Returns `503` if the link indexer is not available.
 
+### Centrality, communities, path, and walk
+
+Additional graph helpers live alongside `/graph/analytics`:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /graph/centrality?limit=50` | PageRank and betweenness-style rankings per page. |
+| `GET /graph/communities` | Louvain community detection over wiki-link edges. |
+| `GET /graph/path?from=a.md&to=b.md` | Shortest path between two pages. |
+| `GET /graph/walk?path=a.md` | One-hop neighbors, backlinks, and optional same-directory siblings. |
+
+See [Utilities](/api/utilities#extended-graph-apis) for response notes and error codes.
+
 ---
 
 ## Suggestions

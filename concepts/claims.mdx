@@ -1,0 +1,21 @@
+---
+title: "Task claims"
+description: "Short-lived leases so multiple agents do not edit the same page at the same time."
+icon: "lock"
+---
+
+Claims are **cooperative locks** on file paths. An agent that wants exclusive access **claims** a path with a lease duration; others receive a conflict response until the lease expires or the holder **releases** the claim.
+
+## Requirements
+
+- The server must be configured with a claim store. If claims are disabled, APIs return `503` / "claims not enabled".
+- `POST /claim` and `DELETE /claim` require the **`X-Actor`** header so the server knows who holds the lease.
+
+## Lease duration
+
+Request body may include `lease_duration` as a Go duration string (for example `30m`, `1h`). The server clamps leases between **1 minute** and **24 hours** (default **30 minutes** if omitted).
+
+## Related documentation
+
+- [Claims REST API](/api/claims)
+- [MCP](/concepts/mcp) — `kiwi_claim`, `kiwi_release`, `kiwi_claims_list`

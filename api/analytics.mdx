@@ -265,29 +265,41 @@ Create and manage share links for pages.
 ```bash
 curl -X POST 'http://localhost:3333/api/kiwi/share' \
   -H "Content-Type: application/json" \
-  -d '{"path": "concepts/auth.md", "expires_in": "7d", "password": "optional-secret"}'
+  -H "X-Actor: agent:sharer" \
+  -d '{"path": "concepts/auth.md", "expiresIn": "168h", "password": "optional-secret"}'
 ```
+
+`expiresIn` is a Go duration string (`168h` for seven days). Omit it for links that never expire.
 
 ```json
 {
-  "id": "shr_abc123",
-  "url": "http://localhost:3333/s/shr_abc123",
+  "id": "a1b2c3d4",
   "path": "concepts/auth.md",
-  "expires": "2026-05-02T14:30:00Z"
+  "token": "<opaque-token>",
+  "expiresAt": "2026-05-09T14:30:00Z",
+  "createdBy": "agent:sharer",
+  "createdAt": "2026-05-02T14:30:00Z",
+  "viewCount": 0
 }
 ```
+
+Readers open `GET /api/kiwi/public/:token` (see [Utilities](/api/utilities#public-routes)).
 
 ### List share links
 
 ```bash
-curl 'http://localhost:3333/api/kiwi/share'
+curl 'http://localhost:3333/api/kiwi/share?path=concepts/auth.md'
 ```
+
+`path` is **required** — the handler returns every active link for that page.
 
 ### Revoke a share link
 
 ```bash
-curl -X DELETE 'http://localhost:3333/api/kiwi/share/shr_abc123'
+curl -X DELETE 'http://localhost:3333/api/kiwi/share/a1b2c3d4'
 ```
+
+Returns JSON `{ "revoked": "<id>" }` using the share **`id`** field (not the long `token`).
 
 ---
 

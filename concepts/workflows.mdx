@@ -1,0 +1,25 @@
+---
+title: "Workflows"
+description: "JSON state machines in .kiwi/workflows — pages carry workflow and state in frontmatter for Kanban-style boards."
+icon: "bars-progress"
+---
+
+Workflows let you define **allowed transitions** between named states. Pages opt in via frontmatter:
+
+- `workflow: <name>` — which definition from `.kiwi/workflows/<name>.json` applies.
+- `state: <state_name>` — current state.
+
+Definitions include `states` (each with `name`, optional `color`, optional `terminal`) and `transitions` (`from`, `to`, optional `required_role`).
+
+## Advancing state
+
+`POST /api/kiwi/workflow/advance` validates that a transition exists from the page's current `state` to the requested `target_state`, then updates frontmatter and commits through the normal pipeline.
+
+## Board view
+
+`GET /api/kiwi/workflow/board/:workflow` returns the workflow JSON plus pages grouped by `state` — useful for Kanban UIs.
+
+## Related documentation
+
+- [Workflows REST API](/api/workflows)
+- [MCP](/concepts/mcp) — `kiwi_workflow_list`, `kiwi_workflow_get`, `kiwi_workflow_save`, `kiwi_workflow_advance`, `kiwi_workflow_board`

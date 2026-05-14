@@ -1,0 +1,55 @@
+---
+title: "Claims"
+description: "Claim, release, and list cooperative write leases on file paths."
+icon: "lock"
+---
+
+Claims require a configured claim store. Otherwise endpoints return **`503`** with `"claims not enabled"`.
+
+**`X-Actor` is mandatory** for claim and release.
+
+Base path: `http://localhost:3333/api/kiwi`.
+
+## Claim a path
+
+```http
+POST /claim
+Content-Type: application/json
+```
+
+```json
+{
+  "path": "runbooks/deploy.md",
+  "lease_duration": "45m"
+}
+```
+
+- `lease_duration` is optional (Go duration syntax). The server enforces **1m ≤ lease ≤ 24h** (default **30m**).
+- Returns **`409`** JSON `{ "error": "already claimed", "active_claim": { ... } }` when another actor holds the lease.
+
+## Release
+
+```http
+DELETE /claim
+Content-Type: application/json
+```
+
+```json
+{ "path": "runbooks/deploy.md" }
+```
+
+Returns **`403`** if the caller is not the current holder.
+
+## List active claims
+
+```http
+GET /claims
+```
+
+```json
+{ "claims": [/* active claim objects */] }
+```
+
+## MCP parity
+
+`kiwi_claim`, `kiwi_release`, `kiwi_claims_list` — see [MCP](/concepts/mcp).

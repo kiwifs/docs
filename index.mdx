@@ -15,7 +15,7 @@ Markdown is the lingua franca of agents and developers — but raw `.md` files a
 - **Every write is a git commit** — full history, blame, diff, and rollback for free.
 - **Full-text + vector search** — BM25 via SQLite FTS5 out of the box, with pluggable vector embeddings.
 - **Query language (DQL)** — SQL-like queries over frontmatter metadata.
-- **Web UI included** — wiki links, knowledge graph, block editor, comments, dark mode.
+- **Web UI included** — wiki links, knowledge graph, Mermaid diagrams, markdown editing, Bases, canvas, comments, and dark mode.
 - **Single binary, zero config** — download and run. No Node, no Docker required (Docker optional).
 
 ## How it works
@@ -56,5 +56,11 @@ All protocols flow through the same storage layer. Every write — regardless of
   </Card>
   <Card title="MCP" icon="plug" href="/concepts/mcp">
     Connect Claude, Cursor, and other AI tools.
+  </Card>
+  <Card title="Draft spaces" icon="code-branch" href="/concepts/draft-spaces">
+    Stage agent edits in git-backed drafts before merge.
+  </Card>
+  <Card title="Bases (views)" icon="table" href="/concepts/bases-views">
+    Saved DQL queries with table and board layouts.
   </Card>
 </CardGroup>

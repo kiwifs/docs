@@ -61,6 +61,16 @@ ETag: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
 OAuth2 + JWT based authentication system...
 ```
 
+## Read a symlink target
+
+When a path in the knowledge root is a symbolic link, resolve its target without following into arbitrary filesystem paths outside the guard:
+
+```http
+GET /api/kiwi/readlink?path=link/to/page.md
+```
+
+Returns **plain text** body with the symlink target. **`404`** when the path does not exist; **`400`** when the path exists but is not a symlink.
+
 ## Write a file
 
 Create or update a file. The request body is raw markdown. KiwiFS creates a git commit for each write.

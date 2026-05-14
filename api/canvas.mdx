@@ -1,0 +1,63 @@
+---
+title: "Canvas"
+description: "List, read, write, and auto-generate .canvas.json files."
+icon: "diagram-project"
+---
+
+Base path: `http://localhost:3333/api/kiwi`.
+
+Canvas paths must end with **`.canvas.json`**.
+
+## List canvases
+
+```http
+GET /canvases
+```
+
+```json
+{ "canvases": ["maps/site.canvas.json", "research/ideas.canvas.json"] }
+```
+
+## Read canvas
+
+```http
+GET /canvas?path=maps/site.canvas.json
+```
+
+Returns the raw JSON document with `Content-Type: application/json`.
+
+## Write canvas
+
+```http
+PUT /canvas?path=maps/site.canvas.json
+Content-Type: application/json
+```
+
+Body must parse as JSON with **`nodes`** and **`edges`** arrays (empty arrays are allowed). Invalid JSON returns **`400`**.
+
+## Generate from link graph
+
+```http
+POST /canvas/generate
+Content-Type: application/json
+```
+
+```json
+{
+  "path": "auto/graph.canvas.json",
+  "layout": "hierarchical",
+  "folder": "concepts/",
+  "colorize": true
+}
+```
+
+- `path` — output file; default `canvas.canvas.json`. A `.canvas.json` suffix is added if missing.
+- `layout` — `hierarchical` (default), `radial`, `force`, or `circular`.
+- `folder` — optional prefix; only edges whose endpoints live under this folder are included.
+- `colorize` — boolean, default `true`.
+
+Returns **`503`** if the link index is unavailable.
+
+## MCP parity
+
+`kiwi_canvas_list`, `kiwi_canvas_read`, `kiwi_canvas_write`, `kiwi_canvas_generate` — see [MCP](/concepts/mcp).

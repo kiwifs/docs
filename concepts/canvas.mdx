@@ -1,0 +1,20 @@
+---
+title: "Canvas files"
+description: "JSON Canvas files for spatial diagrams — nodes, edges, and optional auto-layout from the wiki-link graph."
+icon: "diagram-project"
+---
+
+Canvas files are JSON documents with a **`.canvas.json`** suffix. They store `nodes` and `edges` for infinite-canvas style layouts in the web UI and for agents via API or MCP.
+
+## File format
+
+Each canvas is JSON with top-level `nodes` and `edges` arrays. Node and edge objects carry `id`, `type`, optional coordinates (`x`, `y`), and a `data` map for extensibility.
+
+## Graph-assisted layout
+
+`POST /api/kiwi/canvas/generate` can build a new canvas from the **wiki-link graph** using Graphviz-style layout (`hierarchical`, `radial`, `force`, or `circular`). You can restrict to a folder prefix so only part of the graph is laid out.
+
+## Related documentation
+
+- [Canvas REST API](/api/canvas)
+- [MCP](/concepts/mcp) — `kiwi_canvas_list`, `kiwi_canvas_read`, `kiwi_canvas_write`, `kiwi_canvas_generate`

@@ -1,0 +1,54 @@
+---
+title: "Views (Bases)"
+description: "List, save, delete, and execute saved DQL views stored in .kiwi/views."
+icon: "table"
+---
+
+Base path: `http://localhost:3333/api/kiwi`.
+
+## List views
+
+```http
+GET /views
+```
+
+```json
+{ "views": [{ "name": "open-tasks", "query": "...", "layout": "table" }] }
+```
+
+## Get or save a view
+
+```http
+GET /views/:name
+```
+
+Returns the full `View` object (`name`, `query`, `layout`, optional `columns`, `filters`, `sort`, `group_by`).
+
+```http
+PUT /views/:name
+Content-Type: application/json
+```
+
+Body is a `View` JSON object. The server forces `name` to match the URL parameter.
+
+## Delete a view
+
+```http
+DELETE /views/:name
+```
+
+Returns `{ "status": "deleted" }`.
+
+## Execute a view
+
+```http
+GET /views/:name/execute?limit=50&offset=0
+```
+
+Runs the view's DQL query through the Dataview executor, applies optional column formulas, and returns the query result payload (rows plus metadata from the executor).
+
+Returns **`503`** if the Dataview executor is unavailable.
+
+## MCP parity
+
+See `kiwi_views_list`, `kiwi_views_get`, `kiwi_views_save`, `kiwi_views_delete`, and `kiwi_views_execute` in [MCP](/concepts/mcp).

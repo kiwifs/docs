@@ -405,6 +405,80 @@ kiwifs view --root ./knowledge
 
 </AccordionGroup>
 
+## Rules, tokens, benchmarks, clipping, and memory
+
+<AccordionGroup>
+
+<Accordion title="rules — Manage .kiwi/rules.md">
+
+View or export the markdown rules file that steers agents across harnesses.
+
+```bash
+kiwifs rules
+kiwifs rules edit
+kiwifs rules export --format cursor
+kiwifs rules sync --format cursor --output .cursor/rules/kiwi.md
+```
+
+| Subcommand | Purpose |
+| --- | --- |
+| *(default)* | Print `rules.md` (local) or fetch from `--remote`. |
+| `edit` | Open the file in `$EDITOR`. |
+| `export` | Emit Cursor, Claude, AGENTS, or OpenClaw formatted snippets. |
+| `sync` | Export and write to `--output`. |
+
+Remote operations accept `--remote` and `--api-key` like other commands.
+
+</Accordion>
+
+<Accordion title="token — API tokens in config.toml">
+
+Create scoped keys (read/write/admin) for automation or per-space access.
+
+```bash
+kiwifs token create --root ./knowledge --space docs --scope read --actor ci-reader
+kiwifs token list --root ./knowledge
+kiwifs token revoke kiwi_ro_abc1deadbeef
+```
+
+Tokens append to `.kiwi/config.toml`; the plaintext key is shown once on create.
+
+</Accordion>
+
+<Accordion title="bench — Local performance harness">
+
+Runs in a temporary directory with an in-process stack to benchmark writes, bulk writes, reads, and search.
+
+```bash
+kiwifs bench --files 200 --bulk 120 --search-files 5000 --search-queries 100
+```
+
+Outputs a markdown table suitable for issues or release notes.
+
+</Accordion>
+
+<Accordion title="clip — Save a web page as markdown">
+
+```bash
+kiwifs clip https://example.com/article --root ./knowledge --folder clips/ --tags research,web
+```
+
+Flags: `--title`, `--tags`, `--folder`, `--actor` (defaults to `clipper`).
+
+</Accordion>
+
+<Accordion title="memory report — Episodic coverage">
+
+```bash
+kiwifs memory report --root ./knowledge --json
+```
+
+Summarizes episodic files vs merged pages for merge pipelines (no LLM consolidation).
+
+</Accordion>
+
+</AccordionGroup>
+
 ## Backup and restore
 
 <AccordionGroup>

@@ -1,0 +1,38 @@
+---
+title: "Browse, preview, and saved connections"
+description: "Discover tables and collections, preview import rows, and re-run imports without storing credentials on disk."
+icon: "link"
+---
+
+Beyond a one-shot `POST /api/kiwi/import`, KiwiFS supports a small **import pipeline** for interactive tools and agents.
+
+## Browse metadata
+
+`POST /api/kiwi/import/browse` lists **tables or collections** for a connected source. Supported `from` values today include `postgres`, `mysql`, `mongodb`, and `firestore`. The body mirrors connection fields (`dsn`, `uri`, `database`, `project`, credentials, and so on) documented in [Import and export](/api/import-export).
+
+Response shape:
+
+```json
+{ "tables": [{ "name": "users" }, { "name": "orders" }] }
+```
+
+## Preview rows
+
+`POST /api/kiwi/import/preview` streams a few records through the same importer stack and returns **path**, **frontmatter**, and a short **body_preview** for each — without writing pages. Optional `limit` (capped) controls sample size.
+
+## Saved connections
+
+When a connection store is enabled, the server can persist **metadata only** (no secrets):
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/kiwi/import/connections` | List saved connections. |
+| `POST` | `/api/kiwi/import/connections` | Save or update metadata. |
+| `DELETE` | `/api/kiwi/import/connections/:id` | Remove a saved connection. |
+| `POST` | `/api/kiwi/import/connections/:id/run` | Run import again; **credentials must be supplied in the body** for each run. |
+
+See [Import and export](/api/import-export#import-browse) for the same endpoints with request detail.
+
+## File ingestion
+
+`POST /api/kiwi/ingest` converts supported office and document formats into markdown pages via the MarkItDown pipeline. See [Import and export](/api/import-export#ingest-from-files).

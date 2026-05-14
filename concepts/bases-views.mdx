@@ -1,0 +1,26 @@
+---
+title: "Bases and saved views"
+description: "Named DQL queries with columns, filters, and layout — table, list, calendar, or kanban over your frontmatter."
+icon: "table"
+---
+
+**Bases** in the web UI are powered by **saved views**: JSON definitions stored under `.kiwi/views/<name>.json`. Each view stores a **DQL query** plus presentation metadata (columns, filters, sort, `group_by`, layout).
+
+## View definition
+
+| Field | Purpose |
+|-------|---------|
+| `name` | Stable identifier (matches the filename without `.json`). |
+| `query` | DQL string executed by the Dataview engine (same language as [DQL](/concepts/dql)). |
+| `layout` | One of `table`, `list`, `calendar`, `kanban`. |
+| `columns` | Optional column specs with `property`, `label`, optional `formula`, optional `summary`. |
+| `filters` | Structured filters (`field`, `operator`, `value`). |
+| `sort` | Sort keys (`field`, `order`: `asc` or `desc`). |
+| `group_by` | Optional grouping field for board-style layouts. |
+
+Computed views in markdown (frontmatter `kiwi-view: true`) are separate from saved views; use `POST /api/kiwi/view/refresh` or the `kiwi_view_refresh` MCP tool for those.
+
+## Related documentation
+
+- [Views REST API](/api/views)
+- [MCP](/concepts/mcp) — `kiwi_views_list`, `kiwi_views_get`, `kiwi_views_save`, `kiwi_views_delete`, `kiwi_views_execute`

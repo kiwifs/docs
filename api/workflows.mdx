@@ -1,0 +1,67 @@
+---
+title: "Workflows"
+description: "CRUD workflow definitions and advance page state with validation."
+icon: "bars-progress"
+---
+
+Workflow JSON files live in `.kiwi/workflows/`. Pages reference them with frontmatter keys `workflow` and `state`.
+
+Base path: `http://localhost:3333/api/kiwi`.
+
+## List and read
+
+```http
+GET /workflows
+```
+
+```json
+{ "workflows": [{ "name": "triage", "states": [...], "transitions": [...] }] }
+```
+
+```http
+GET /workflows/:name
+```
+
+Returns a single workflow definition.
+
+## Save definition
+
+```http
+PUT /workflows/:name
+Content-Type: application/json
+```
+
+Body is the full workflow JSON. The server sets `name` from the URL segment and validates structure.
+
+## Advance a page
+
+```http
+POST /workflow/advance
+Content-Type: application/json
+```
+
+```json
+{
+  "path": "tasks/t-42.md",
+  "target_state": "done",
+  "actor": "agent:bot"
+}
+```
+
+- Requires the page to have **`workflow`** and **`state`** in frontmatter.
+- Validates `(state → target_state)` against the workflow's `transitions`.
+- Writes the page with updated `state` via the normal pipeline.
+
+Returns **`409`** when the transition is not allowed.
+
+## Kanban board
+
+```http
+GET /workflow/board/:workflow
+```
+
+Returns `{ "workflow": { ... }, "board": { "<state>": [ { "path", "title", ... } ] } }` grouping markdown pages that declare the given workflow name.
+
+## MCP parity
+
+`kiwi_workflow_list`, `kiwi_workflow_get`, `kiwi_workflow_save`, `kiwi_workflow_advance`, `kiwi_workflow_board` — see [MCP](/concepts/mcp).

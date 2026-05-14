@@ -1,0 +1,74 @@
+---
+title: "Drafts"
+description: "Create, edit, merge, or discard git-backed draft workspaces under /api/kiwi/drafts."
+icon: "code-branch"
+---
+
+All paths below are under `http://localhost:3333/api/kiwi` unless you use [multi-space URLs](/api/overview) or the [`X-Kiwi-Space`](/api/overview) header.
+
+Drafts return **`501 Not Implemented`** when the server was started without a draft manager.
+
+## Create draft
+
+```http
+POST /drafts
+```
+
+Optional JSON body:
+
+```json
+{ "actor": "agent:planner" }
+```
+
+If `actor` is empty, the server uses `X-Actor`, then falls back to `api`.
+
+**Response `201`:** `{ "id", "branch", "actor", "created_at" }`
+
+## List drafts
+
+```http
+GET /drafts
+```
+
+Returns a JSON array of draft summaries (same fields as create).
+
+## Get draft
+
+```http
+GET /drafts/:id
+```
+
+## Diff draft against main
+
+```http
+GET /drafts/:id/diff
+```
+
+Returns `{ "diff": "<unified diff text>" }`.
+
+## Merge or discard
+
+```http
+POST /drafts/:id/merge
+```
+
+Returns `{ "status": "merged" }`. Conflicts return `409`.
+
+```http
+DELETE /drafts/:id
+```
+
+Returns **`204`** on success.
+
+## Files inside a draft
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `GET` | `/drafts/:id/file?path=...` | Raw markdown body; **`ETag`** header set. |
+| `PUT` | `/drafts/:id/file?path=...` | Body is markdown; uses `X-Actor` (default `draft-api`). Returns `{ "path", "etag" }`. |
+| `DELETE` | `/drafts/:id/file?path=...` | Deletes file inside the draft branch. **`204`**. |
+| `GET` | `/drafts/:id/tree?path=` | Same tree shape as [`GET /tree`](/api/files); omit `path` for root. |
+
+## MCP parity
+
+Use the `kiwi_draft_*` tools from [MCP](/concepts/mcp) for the same operations from Claude, Cursor, or other MCP clients.

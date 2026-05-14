@@ -1,0 +1,27 @@
+---
+title: "Draft spaces"
+description: "Git-backed staging branches so agents can prepare changes before merging to the live knowledge base."
+icon: "code-branch"
+---
+
+Draft spaces are **isolated worktrees** tied to your knowledge repository. Each draft has its own branch: agents read and write files inside the draft without touching the main tree until you **merge** or **discard**.
+
+## When to use drafts
+
+- Long-running agent sessions that should not publish partial work.
+- Reviewing a batch of edits as a single diff before one merge commit.
+- Parallel agents each with their own draft (subject to server limits).
+
+## Lifecycle
+
+1. **Create** a draft — server allocates an ID and a git branch.
+2. **Read / write / delete / tree** inside the draft using the draft API or MCP tools (`kiwi_draft_*`).
+3. **Diff** against the main branch to see what would change.
+4. **Merge** to apply all draft changes to the live knowledge base (with normal indexing and versioning), or **discard** to delete the draft branch.
+
+If the server returns `501` / "drafts not enabled", this process was started without a draft manager. Use the same KiwiFS version and configuration template as the HTTP server that advertises draft APIs.
+
+## Related documentation
+
+- [Drafts REST API](/api/drafts)
+- [MCP](/concepts/mcp) — `kiwi_draft_create`, `kiwi_draft_list`, `kiwi_draft_read`, `kiwi_draft_write`, `kiwi_draft_diff`, `kiwi_draft_merge`, `kiwi_draft_discard`

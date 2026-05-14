@@ -1,6 +1,6 @@
 ---
 title: "Import and export"
-description: "Bulk import and flexible export endpoints for moving data in and out of KiwiFS."
+description: "REST import (including browse, preview, saved connections, and file ingest) and export formats."
 icon: "arrows-rotate"
 ---
 
@@ -63,6 +63,90 @@ curl -X POST 'http://localhost:3333/api/kiwi/import' \
 <Warning>
 Large imports can take time. The endpoint responds synchronously. For very large datasets, consider using the CLI `kiwifs import` command with progress output.
 </Warning>
+
+## Import browse
+
+List **tables or collections** for a source before you run a full import. Same base URL prefix: `http://localhost:3333/api/kiwi`.
+
+```http
+POST /import/browse
+Content-Type: application/json
+```
+
+Body fields depend on `from` (same family as `POST /import`):
+
+| `from` | Required fields (typical) |
+|--------|----------------------------|
+| `postgres` | `dsn` |
+| `mysql` | `dsn` |
+| `mongodb` | `uri` (or `dsn`), `database` |
+| `firestore` | `project`, optional `credentials` JSON |
+
+```json
+{ "from": "postgres", "dsn": "postgres://user:pass@localhost:5432/db" }
+```
+
+```json
+{ "tables": [{ "name": "articles" }, { "name": "comments" }] }
+```
+
+Unsupported `from` values return **`400`** when browse is not implemented for that source.
+
+## Import preview
+
+Fetch sample rows **without writing** pages. Uses the same JSON shape as `POST /import`, plus optional `limit` (default **5**, max **20**).
+
+```http
+POST /import/preview
+Content-Type: application/json
+```
+
+```json
+{
+  "records": [
+    {
+      "path": "postgres/acme.md",
+      "frontmatter": { "_source": "postgres", "_source_id": "...", "title": "Acme" },
+      "body_preview": "# Acme\n\n> Auto-imported from postgres (row ...)"
+    }
+  ]
+}
+```
+
+## Import connections
+
+When a connection store is enabled, the server persists **metadata only** (never secrets). Re-runs require credentials in the request body.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/import/connections` | List saved connections (empty array if disabled). |
+| `POST` | `/import/connections` | Save or update metadata (`from`, `name`, `dsn`, `uri`, `table`, `collection`, `database`, `database_id`, `base_id`, `table_id`, `project`, `prefix`, `id_column`, `columns`, last-run stats, etc.). |
+| `DELETE` | `/import/connections/:id` | Remove a connection. **`204`**. |
+| `POST` | `/import/connections/:id/run` | Run import again. Body may include `credentials` and/or `api_key` for that run only. Response matches `POST /import`: `{ "imported", "skipped", "errors" }`. |
+
+## Ingest from files
+
+Convert supported office and document formats to markdown (MarkItDown pipeline).
+
+```http
+POST /ingest
+Content-Type: application/json
+```
+
+```json
+{
+  "file": "/tmp/report.pdf",
+  "split_mode": "single",
+  "prefix": "imports/",
+  "extract_keywords": true,
+  "max_keywords": 10,
+  "convert_crossrefs": false,
+  "actor": "ingest-bot"
+}
+```
+
+- `file` must use an extension the server accepts for MarkItDown.
+- `split_mode` defaults to `single`.
 
 ## Export
 

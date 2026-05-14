@@ -1,0 +1,218 @@
+---
+title: "Utilities and agent helpers"
+description: "Symlinks, linting, peek and section reads, timeline and feeds, clipping, extended graph APIs, rules, space settings, audit logs, and public share URLs."
+icon: "screwdriver-wrench"
+---
+
+These endpoints share the usual prefix `http://localhost:3333/api/kiwi` and authentication rules from [API overview](/api/overview).
+
+## Read symlink target
+
+```http
+GET /readlink?path=link/to/page.md
+```
+
+Returns **plain text** target path. **`404`** if the path is missing; **`400`** if the path is not a symlink.
+
+## Lint markdown
+
+```http
+POST /lint
+Content-Type: application/json
+```
+
+Lint an existing file:
+
+```json
+{ "path": "concepts/auth.md" }
+```
+
+Or inline content:
+
+```json
+{ "content": "# Title\n\nBody..." }
+```
+
+**Response:** `{ "issues": [ /* structured lint records */ ] }` (always an array, possibly empty).
+
+## Peek summary
+
+```http
+GET /peek?path=concepts/auth.md
+```
+
+Returns JSON with `title`, `snippet`, `frontmatter`, `links_out`, `links_in`, `headings`, `word_count`, and other lightweight fields without returning the full body.
+
+## Read one section
+
+```http
+GET /section?path=concepts/auth.md&heading=OAuth2%20flow
+```
+
+or
+
+```http
+GET /section?path=concepts/auth.md&index=2
+```
+
+Returns `{ "path", "heading", "level", "content", "line_start", "line_end" }`.
+
+## Activity timeline
+
+```http
+GET /timeline?limit=50&offset=0&actor=agent:bot&type=write&path_prefix=runbooks/
+```
+
+- `type` filter: `write`, `delete`, or omit for both.
+- `limit` defaults to **50**, max **500**.
+
+**Response:** `{ "events": [...], "total": <number> }` — `total` is a hint for pagination (see server implementation).
+
+## Feeds
+
+```http
+GET /feed.xml
+GET /feed.json
+```
+
+Atom and JSON Feed built from recent timeline events (titles include updated vs deleted paths).
+
+## Clip a web page
+
+```http
+POST /clip
+Content-Type: application/json
+```
+
+```json
+{
+  "url": "https://example.com/article",
+  "title": "Optional override",
+  "tags": ["research", "web"],
+  "folder": "clips/"
+}
+```
+
+Fetches the article, converts to markdown, writes through the pipeline using `X-Actor` (default `clipper`), and returns `{ "path", "title", "excerpt" }`.
+
+## Extended graph APIs
+
+All of the following return **`503`** when link indexing is unavailable.
+
+### Centrality
+
+```http
+GET /graph/centrality?limit=50
+```
+
+Returns `{ "pages": [ { "path", "pagerank", "betweenness", ... } ] }` (truncated to `limit`).
+
+### Communities
+
+```http
+GET /graph/communities
+```
+
+Louvain communities over wiki-link edges: `{ "communities": ... }`.
+
+### Shortest path
+
+```http
+GET /graph/path?from=concepts/a.md&to=runbooks/b.md
+```
+
+Returns `{ "path": ["concepts/a.md", "..."] }`. **`404`** when no path exists.
+
+### Local neighborhood
+
+```http
+GET /graph/walk?path=concepts/a.md&include_siblings=true
+```
+
+Returns outbound wiki links, backlinks, and optional same-directory neighbors.
+
+## Rules file
+
+```http
+GET /rules
+GET /rules?format=cursor
+PUT /rules
+```
+
+- Without `format`, returns raw `.kiwi/rules.md` (empty string when missing).
+- `format` may be `cursor`, `claude`, `agents`, or `openclaw` to wrap user rules for a specific harness.
+- `PUT` accepts raw markdown (max **256 KiB**) and commits `.kiwi/rules.md` when git versioning is enabled.
+
+## Space metadata
+
+```http
+GET /space/info
+```
+
+```json
+{ "visibility": "private", "root": "/data/knowledge" }
+```
+
+```http
+PUT /space/visibility
+Content-Type: application/json
+```
+
+```json
+{ "visibility": "public" }
+```
+
+Allowed values: `private`, `unlisted`, `public`. Persists into `.kiwi/config.toml` and updates the live config.
+
+## Audit log
+
+```http
+GET /audit?since=2026-05-01T00:00:00Z&limit=100
+```
+
+Returns JSON array entries `{ "ts", "method", "path", "space", "actor", "token_hash", "ip", "status", "duration_ms" }`.
+
+**`501`** when audit logging was not enabled for this server. Default `since` is the last 24 hours; `limit` defaults to **100** (max **10000**).
+
+## Public routes
+
+### Share tokens
+
+Create links with [`POST /share`](/api/analytics#sharing). Readers call **without** API authentication:
+
+```http
+GET /api/kiwi/public/:token
+```
+
+Optional password: query `password` or header `X-Share-Password`. Wrong or missing passwords return **`401`** with a `WWW-Authenticate` challenge when the link is password protected.
+
+### Public visibility browsing
+
+These endpoints expose only markdown that declares **`visibility: public`** in frontmatter:
+
+```http
+GET /api/kiwi/public/file?path=concepts/open.md
+GET /api/kiwi/public/tree?path=
+```
+
+Non-public pages return **`404`** as "not found" to avoid leaking existence.
+
+## Raw files
+
+```http
+GET /raw/*
+```
+
+Serves raw bytes for static assets and markdown outside the JSON APIs (used by the web UI). Not a substitute for `GET /file` when you need `ETag` semantics.
+
+## UI configuration
+
+```http
+GET /ui-config
+```
+
+Returns JSON consumed by the embedded web UI (feature flags, layout hints).
+
+## MCP parity
+
+Many of these flows have MCP tools (`kiwi_lint`, `kiwi_peek`, `kiwi_section`, `kiwi_timeline`, `kiwi_feed`, `kiwi_clip`, `kiwi_graph_*`, and more). See [MCP](/concepts/mcp).
