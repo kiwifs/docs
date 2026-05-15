@@ -96,6 +96,7 @@
             "group": "Deployment",
             "pages": [
               "deploy/docker",
+              "deploy/ollama-vector-search",
               "deploy/kubernetes",
               "deploy/go-embed"
             ]
