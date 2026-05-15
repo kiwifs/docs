@@ -135,9 +135,14 @@ theme_locked = false      # when true, users cannot change the theme
 remote = "git@github.com:org/knowledge.git"
 interval = "5m"
 branch = "main"
+rebase_before_push = true  # default: true
 ```
 
-Override via env: `KIWI_BACKUP_REMOTE`, `KIWI_BACKUP_INTERVAL`.
+KiwiFS fetches and rebases onto the backup branch before pushing by default. This avoids routine non-fast-forward failures when another client pushed to the same backup branch first.
+
+Override via env: `KIWI_BACKUP_REMOTE`, `KIWI_BACKUP_INTERVAL`, `KIWI_BACKUP_REBASE_BEFORE_PUSH`.
+
+See [Backup sync](/deploy/backup-sync) for the full workflow, opt-outs, and troubleshooting.
 
 ## Janitor
 

@@ -1,0 +1,148 @@
+---
+title: "Backup sync"
+description: "Push your KiwiFS knowledge root to a git remote and avoid routine non-fast-forward backup failures."
+icon: "rotate"
+---
+
+KiwiFS can back up a knowledge root by pushing its git repository to a remote.
+
+If another server, laptop, teammate, or git client pushes to the same backup branch first, a later backup push can fail with a non-fast-forward error. KiwiFS avoids the common clean case by fetching the backup branch and rebasing local backup commits before it pushes.
+
+## Configure a backup remote
+
+Add a `[backup]` section to `.kiwi/config.toml` inside your knowledge root.
+
+```toml
+[backup]
+remote = "git@github.com:org/knowledge.git"
+interval = "5m"
+branch = "main"
+
+# Optional. Defaults to true.
+rebase_before_push = true
+```
+
+Start KiwiFS normally.
+
+```bash
+kiwifs serve --root ./knowledge
+```
+
+KiwiFS pushes to the configured remote on the backup interval.
+
+<Note>
+`rebase_before_push` defaults to `true`. You only need to set it when you want the config file to show the behavior explicitly.
+</Note>
+
+## Run a one-shot backup
+
+Use `kiwifs backup` to push immediately.
+
+```bash
+kiwifs backup \
+  --root ./knowledge \
+  --remote git@github.com:org/knowledge.git \
+  --branch main
+```
+
+The command uses the same rebase-before-push behavior by default.
+
+## What happens before push
+
+When `rebase_before_push` is enabled, KiwiFS does this for each backup push:
+
+1. Ensures the local git remote named `backup` points to your configured `remote`.
+2. Resolves the backup branch from `[backup].branch`, the current git branch, then `main`.
+3. Checks whether the remote branch exists.
+4. Fetches `backup/<branch>` when the remote branch exists.
+5. Refuses automatic rebase if the worktree has uncommitted changes.
+6. Rebases clean local commits onto `backup/<branch>`.
+7. Pushes the branch to the backup remote.
+8. Verifies that the remote branch HEAD matches the local HEAD.
+
+If the remote branch does not exist yet, KiwiFS skips the rebase and lets the push create it. This supports first-time backup setup.
+
+## Safety behavior
+
+KiwiFS automates only the routine, safe path.
+
+- It does not force-push.
+- It only rebases a clean git worktree.
+- It does not resolve conflicts for you.
+- If rebase fails, KiwiFS aborts the rebase and records the backup error.
+- Before rebasing, KiwiFS stores the previous local HEAD at `refs/kiwifs/backup-pre-rebase`.
+
+<Warning>
+If two writers edit the same lines, resolve the git conflict yourself. KiwiFS will not choose one version over another.
+</Warning>
+
+## Disable rebase-before-push
+
+Disable this only when another process owns git synchronization and you want KiwiFS to perform a plain push.
+
+<Tabs>
+<Tab title="Config">
+
+```toml
+[backup]
+rebase_before_push = false
+```
+
+</Tab>
+<Tab title="Environment">
+
+```bash
+KIWI_BACKUP_REBASE_BEFORE_PUSH=false kiwifs serve --root ./knowledge
+```
+
+</Tab>
+<Tab title="CLI">
+
+```bash
+kiwifs backup --root ./knowledge --rebase-before-push=false
+```
+
+</Tab>
+</Tabs>
+
+## Troubleshooting
+
+### Dirty worktree
+
+If KiwiFS reports `worktree has uncommitted changes; refusing automatic rebase`, inspect the repository and save or discard the local changes.
+
+```bash
+cd ./knowledge
+git status --short
+git add .
+git commit -m "chore: save local knowledge changes"
+kiwifs backup --root .
+```
+
+### Rebase conflict
+
+If the rebase conflicts, resolve the conflicted markdown files with normal git tools.
+
+```bash
+cd ./knowledge
+git status
+# Edit conflicted files.
+git add <resolved-files>
+git rebase --continue
+kiwifs backup --root .
+```
+
+Abort if you need to stop and return to the pre-rebase state.
+
+```bash
+git rebase --abort
+```
+
+### Recover the pre-rebase HEAD
+
+KiwiFS records the previous local HEAD before rebasing.
+
+```bash
+git show refs/kiwifs/backup-pre-rebase
+git branch recover-before-backup-rebase refs/kiwifs/backup-pre-rebase
+```

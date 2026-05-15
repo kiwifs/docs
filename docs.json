@@ -97,7 +97,8 @@
             "pages": [
               "deploy/docker",
               "deploy/kubernetes",
-              "deploy/go-embed"
+              "deploy/go-embed",
+              "deploy/backup-sync"
             ]
           }
         ]

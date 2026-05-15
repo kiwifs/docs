@@ -496,10 +496,13 @@ kiwifs backup [flags]
 | `--root` | `-r` | | Knowledge root |
 | `--remote` | | | Git remote URL (overrides config) |
 | `--branch` | | | Branch to push |
+| `--rebase-before-push` | | `true` | Fetch and rebase onto the backup branch before pushing |
 
 ```bash
 kiwifs backup --root ./knowledge --remote git@github.com:org/knowledge.git
 ```
+
+By default, `kiwifs backup` fetches and rebases onto the backup branch before pushing. See [Backup sync](/deploy/backup-sync) for configuration, opt-outs, and conflict handling.
 
 </Accordion>
 
