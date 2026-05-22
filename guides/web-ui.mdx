@@ -1,0 +1,101 @@
+---
+title: "Web UI"
+description: "Browse, edit, search, and visualize your knowledge base in the embedded KiwiFS web UI."
+icon: "window"
+---
+
+KiwiFS ships a full **web UI** embedded in the Go binary (`go:embed`). Open `http://localhost:3333` after `kiwifs serve` — no separate frontend install.
+
+## Layout
+
+The UI uses a three-pane layout:
+
+- **Sidebar** — file tree (`KiwiTree`), space switcher when multi-space is enabled
+- **Main** — page view or editor
+- **Optional panels** — backlinks, table of contents, comments, engagement stats
+
+Press **Cmd+K** (macOS) or **Ctrl+K** (Windows/Linux) to open global search.
+
+## File tree
+
+- Expand and collapse folders; drag-and-drop to move pages
+- Context menu: rename, delete, new file, open in editor
+- Reflects the same paths as `GET /api/kiwi/tree`
+
+## Page view and editor
+
+- **View mode** — rendered markdown with wiki links, Mermaid diagrams, and frontmatter-aware styling
+- **Edit mode** — source-preserving markdown editor (BlockNote-based) that keeps your on-disk formatting stable
+- **History** — git versions, diff, and restore from the versioning UI
+- **ToC** — heading outline for long pages
+
+## Wiki navigation
+
+- `[[wiki links]]` render as clickable links; unresolved links are highlighted
+- **Backlinks** panel lists pages that link to the current page
+- **Graph** view visualizes the wiki-link network (force-directed layout)
+
+## Bases (saved views)
+
+**Bases** run saved DQL queries with table or board layouts. Definitions live in `.kiwi/views/*.json`. Open a Base from the sidebar or create views from the Bases screen.
+
+See [Bases and views](/concepts/bases-views).
+
+## Canvas
+
+Edit `*.canvas.json` spatial diagrams (nodes and edges). Use **Generate from graph** to seed a canvas from wiki-link structure.
+
+See [Canvas](/concepts/canvas).
+
+## Kanban and workflows
+
+Pages with workflow frontmatter can appear on **Kanban** boards driven by `.kiwi/workflows/*.json` state machines.
+
+See [Workflows](/concepts/workflows).
+
+## Comments
+
+Add inline comments on specific lines. Agents and humans resolve threads from the comments panel or via the [Comments API](/api/analytics#comments).
+
+## Search
+
+**Cmd+K** searches full text (BM25). Semantic search appears when vector search is configured on the server.
+
+## Analytics and engagement
+
+The analytics panel surfaces knowledge health: stale pages, orphans, broken links, and **page view** counts when tracking is enabled. Mirrors `kiwifs analytics` and `GET /api/kiwi/analytics`.
+
+## Themes
+
+Built-in themes (kiwi, ocean, forest, sunset, neutral). Users can switch theme unless `ui.theme_locked = true` in config.
+
+```toml
+[ui]
+theme_locked = false
+```
+
+## Publishing
+
+Use **Publish** in the UI (or `POST /api/kiwi/publish`) to set `published: true` in frontmatter. Published pages are readable at `/p/{path}` when your server exposes that route.
+
+See [Publish API](/api/publish).
+
+## Import wizard
+
+The import wizard walks through browse → preview → run for supported sources, matching the REST import pipeline.
+
+See [Data import](/import/overview).
+
+## Mobile
+
+The UI is responsive. Reading works well on phones; editing is best on a desktop-sized screen.
+
+## Embedding in your app
+
+The UI is embedded today as a single SPA inside the binary. A standalone `kiwifs-ui` npm package for React embedding is on the [roadmap](https://github.com/kiwifs/kiwifs/blob/main/docs/ROADMAP.md). Until then, use [Go embed](/deploy/go-embed) or proxy `GET /` from your app.
+
+## Related documentation
+
+- [Quickstart](/quickstart)
+- [Wiki links](/concepts/wiki-links)
+- [UI configuration](/api/utilities#ui-configuration) — `GET /ui-config`

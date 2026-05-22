@@ -37,6 +37,55 @@ curl 'http://localhost:3333/api/kiwi/analytics'
 <ResponseField name="link_coverage_pct" type="number">Percentage of wiki links that resolve to existing pages.</ResponseField>
 <ResponseField name="recently_updated" type="array">Most recently modified pages.</ResponseField>
 
+## Analytics overview
+
+Compact dashboard for the web UI engagement panel:
+
+```bash
+curl 'http://localhost:3333/api/kiwi/analytics/overview'
+```
+
+## Page views
+
+```bash
+curl 'http://localhost:3333/api/kiwi/analytics/views'
+curl 'http://localhost:3333/api/kiwi/analytics/views/v2?path=concepts/auth.md'
+```
+
+`views/v2` returns richer per-page engagement when tracking is enabled.
+
+## Search analytics
+
+```bash
+curl 'http://localhost:3333/api/kiwi/analytics/searches'
+curl 'http://localhost:3333/api/kiwi/analytics/failed-searches'
+```
+
+Failed searches help identify content gaps agents could not answer.
+
+## Trends and content gaps
+
+```bash
+curl 'http://localhost:3333/api/kiwi/analytics/trends'
+curl 'http://localhost:3333/api/kiwi/analytics/content-gaps'
+```
+
+Dismiss a content gap suggestion:
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/analytics/content-gaps/dismiss' \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "oauth refresh token"}'
+```
+
+## Import sources analytics
+
+```bash
+curl 'http://localhost:3333/api/kiwi/analytics/sources'
+```
+
+Summarizes pages by `_source` frontmatter from imports.
+
 ## Per-page health check
 
 Analyze the health of a single page.

@@ -1,0 +1,97 @@
+---
+title: "Publish"
+description: "Publish and unpublish pages via frontmatter and read them at /p/{path}."
+icon: "globe"
+---
+
+Publishing marks a page with `published: true` and `published_at` in frontmatter. Readers can open the rendered page at **`/p/{path}`** without API authentication when the server exposes that route.
+
+Base path for mutating endpoints: `http://localhost:3333/api/kiwi`.
+
+## Publish a page
+
+```http
+POST /publish
+Content-Type: application/json
+```
+
+```json
+{ "path": "concepts/auth.md" }
+```
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/publish' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Actor: agent:publisher' \
+  -d '{"path":"concepts/auth.md"}'
+```
+
+```json
+{
+  "path": "concepts/auth.md",
+  "published": true,
+  "published_at": "2026-05-02T14:30:00Z",
+  "public_url": "/p/concepts/auth.md"
+}
+```
+
+`published_at` is set only on first publish; later republish calls preserve the original timestamp.
+
+## Unpublish
+
+```http
+POST /unpublish
+Content-Type: application/json
+```
+
+```json
+{ "path": "concepts/auth.md" }
+```
+
+Sets `published: false` but keeps `published_at` for history.
+
+## Publish status
+
+```http
+GET /publish/status?path=concepts/auth.md
+```
+
+```json
+{
+  "path": "concepts/auth.md",
+  "published": true,
+  "published_at": "2026-05-02T14:30:00Z",
+  "public_url": "/p/concepts/auth.md",
+  "view_count": 42
+}
+```
+
+`view_count` is included when publish metrics tracking is enabled on the server.
+
+## Read published pages
+
+No API key required:
+
+```http
+GET /p/concepts/auth.md
+```
+
+Returns HTML rendered from the markdown page when `published: true`.
+
+## Public visibility (alternative model)
+
+Separate from per-page publish flags, you can mark pages with `visibility: public` in frontmatter and browse them via:
+
+- `GET /api/kiwi/public/file?path=...`
+- `GET /api/kiwi/public/tree?path=...`
+
+See [Utilities](/api/utilities#public-visibility-browsing) and [Share links](/api/analytics#sharing).
+
+## Web UI
+
+Use the **Publish** control in the page header to toggle publish state without curl.
+
+## Related documentation
+
+- [Web UI guide](/guides/web-ui#publishing)
+- [Utilities API](/api/utilities)

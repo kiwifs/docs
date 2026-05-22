@@ -1,0 +1,61 @@
+---
+title: "Airbyte import"
+description: "Sync data from Airbyte Docker connectors or Airbyte Cloud into markdown pages."
+icon: "rotate"
+---
+
+KiwiFS can drive **Airbyte** connectors for sources that are easier to configure in Airbyte than in native importers. Two modes exist:
+
+1. **Airbyte Docker** — local connector containers (Firebase RTDB, Notion, Airtable, …)
+2. **Airbyte Cloud** — hosted workspace API with discover/check/sync flows
+
+Native `kiwifs import --from notion` remains the simplest path for one-shot imports. Use Airbyte when you need connector UI, scheduled sync, or Airbyte Cloud connections.
+
+## Configuration
+
+```toml
+[import]
+# Airbyte Cloud
+airbyte_api_key = "${AIRBYTE_API_KEY}"
+airbyte_workspace_id = "${AIRBYTE_WORKSPACE_ID}"
+
+# Airbyte Docker (local)
+# airbyte_docker_image = "..."
+```
+
+Environment variables expand in TOML via `${VAR}` syntax.
+
+## REST endpoints (Docker)
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/kiwi/import/airbyte/spec` | Connector specification |
+| `POST` | `/api/kiwi/import/airbyte/check` | Validate connection config |
+| `POST` | `/api/kiwi/import/airbyte/discover` | List streams for a source |
+
+## REST endpoints (Cloud)
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/kiwi/import/airbyte-cloud/check` | Check cloud source |
+| `POST` | `/api/kiwi/import/airbyte-cloud/discover` | Discover streams |
+| `GET` | `/api/kiwi/import/airbyte-cloud/connections` | List connections |
+| `POST` | `/api/kiwi/import/airbyte-cloud/sync` | Trigger sync into KiwiFS |
+
+## Sync status
+
+```bash
+curl 'http://localhost:3333/api/kiwi/import/sync/status'
+```
+
+Use with saved [import connections](/import/connections) when periodic sync is enabled.
+
+## MCP
+
+Agents can call **`kiwi_import`** with Airbyte-compatible source configuration where the server exposes those sources in `GET /api/kiwi/import/sources`.
+
+## Related documentation
+
+- [Import overview](/import/overview)
+- [Import and export API](/api/import-export)
+- [Import connections](/import/connections)

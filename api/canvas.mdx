@@ -35,6 +35,45 @@ Content-Type: application/json
 
 Body must parse as JSON with **`nodes`** and **`edges`** arrays (empty arrays are allowed). Invalid JSON returns **`400`**.
 
+## Patch canvas
+
+```http
+PATCH /canvas?path=maps/site.canvas.json
+Content-Type: application/json
+```
+
+Apply a partial update (merge nodes/edges) without replacing the full document.
+
+## Delete canvas
+
+```http
+DELETE /canvas?path=maps/site.canvas.json
+```
+
+## Query canvas nodes
+
+```http
+GET /canvas/query?path=maps/site.canvas.json&q=auth
+```
+
+Filter nodes by label or metadata within a canvas file.
+
+## Auto-layout
+
+```http
+POST /canvas/auto-layout
+Content-Type: application/json
+```
+
+```json
+{
+  "path": "maps/site.canvas.json",
+  "layout": "hierarchical"
+}
+```
+
+Repositions nodes in place using the chosen layout algorithm.
+
 ## Generate from link graph
 
 ```http

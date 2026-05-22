@@ -131,6 +131,50 @@ GET /graph/walk?path=concepts/a.md&include_siblings=true
 
 Returns outbound wiki links, backlinks, and optional same-directory neighbors.
 
+## Page templates
+
+Slash-command templates in `.kiwi/templates/`:
+
+```http
+GET /templates
+GET /template?name=meeting-notes
+```
+
+`GET /templates` lists available template names. `GET /template` returns the template body for insertion into new pages.
+
+## Search evaluation
+
+Benchmark search quality against expected paths:
+
+```http
+POST /eval
+Content-Type: application/json
+```
+
+```json
+{
+  "queries": [
+    {
+      "question": "authentication flow",
+      "expected_paths": ["pages/auth.md", "concepts/oauth.md"]
+    }
+  ]
+}
+```
+
+Returns per-query FTS and semantic ranks plus aggregate `hit_rate`, `mrr`, and `precision_at_5`. MCP: **`kiwi_eval`**.
+
+## Backup status
+
+When `[backup]` is configured:
+
+```http
+GET /backup/status
+GET /sync/status
+```
+
+Returns last push time, remote URL, and error state for the background backup goroutine.
+
 ## Rules file
 
 ```http

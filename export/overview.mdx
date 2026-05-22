@@ -189,3 +189,7 @@ kiwifs export --format jsonl | jq -s 'group_by(.status) | map({status: .[0].stat
 <Tip>
 For large knowledge bases, use `--path` to scope the export to a subdirectory and `--limit` to cap the number of files. This keeps export times predictable.
 </Tip>
+
+## Document export (PDF, HTML, slides)
+
+To render markdown into PDF, HTML, slide decks, or static sites, use [Document export](/export/documents) (`POST /api/kiwi/export/document` or MCP `kiwi_export_document`).

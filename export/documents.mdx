@@ -1,0 +1,82 @@
+---
+title: "Document export"
+description: "Render markdown to PDF, HTML, slides, or a static site via POST /api/kiwi/export/document."
+icon: "file-pdf"
+---
+
+Beyond JSONL and CSV, KiwiFS can **render** markdown into deliverable formats using Pandoc/Marp/MkDocs tooling (typically inside the Docker image).
+
+## Endpoint
+
+```http
+POST /api/kiwi/export/document
+Content-Type: application/json
+```
+
+## Request body
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `format` | Yes | `pdf`, `html`, `slides`, or `site` |
+| `path` | Yes | File or directory under the knowledge root |
+| `theme` | No | Theme name for HTML/PDF |
+| `self_contained` | No | Single-file HTML with embedded assets |
+| `bibliography` | No | BibTeX path for citations |
+| `csl_style` | No | Citation style |
+| `crossref` | No | Enable cross-reference processing |
+| `pdf_engine` | No | PDF engine override |
+| `slide_format` | No | Slide deck format (Marp) |
+| `site_name` | No | Static site title (`site` format) |
+| `site_url` | No | Canonical site URL |
+| `repo_url` | No | Edit-on-GitHub style link |
+
+## Examples
+
+<CodeGroup>
+```bash PDF single page
+curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
+  -H 'Content-Type: application/json' \
+  -d '{"format":"pdf","path":"pages/report.md"}' \
+  -o report.pdf
+```
+
+```bash HTML bundle
+curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
+  -H 'Content-Type: application/json' \
+  -d '{"format":"html","path":"concepts/","self_contained":true}' \
+  -o site.html
+```
+
+```bash Slide deck
+curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
+  -H 'Content-Type: application/json' \
+  -d '{"format":"slides","path":"talks/intro.md","slide_format":"marp"}' \
+  -o intro.pdf
+```
+</CodeGroup>
+
+The response streams the rendered artifact with an appropriate `Content-Type`. Large exports may take up to **five minutes** server-side.
+
+## CLI
+
+Document export is primarily exposed over REST. For bulk metadata export use:
+
+```bash
+kiwifs export --format jsonl --include-content -o backup.jsonl
+```
+
+See [Data export](/export/overview).
+
+## MCP
+
+**`kiwi_export_document`** accepts the same options as the REST body for agent-driven publishing workflows.
+
+## Docker requirement
+
+PDF and site generation depend on external tools bundled in the official Docker image. Bare-metal installs may need those dependencies installed separately or export via Docker.
+
+## Related documentation
+
+- [Export overview](/export/overview)
+- [Import and export API](/api/import-export)
+- [MCP](/concepts/mcp)

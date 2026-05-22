@@ -129,7 +129,9 @@ The server currently registers **60+** tools (exact count may change release to 
 | `kiwi_feed` | Serialized activity feed (JSON or Atom depending on mode). |
 | `kiwi_clip` | Fetch a URL and persist clipped markdown. |
 | `kiwi_ingest` | Convert supported binary documents to markdown via MarkItDown. |
+| `kiwi_export_document` | Render markdown to PDF, HTML, slides, or a static site. |
 | `kiwi_lint` | Structural markdown lint for a path or inline content. |
+| `kiwi_eval` | Benchmark full-text and semantic search quality. |
 </Accordion>
 </AccordionGroup>
 
@@ -146,4 +148,6 @@ Read-only MCP resources:
 ## Further reading
 
 - [Agent interface](/concepts/agent-interface) — how MCP fits next to REST and mounts.
-- REST counterparts: [Drafts](/api/drafts), [Views](/api/views), [Canvas](/api/canvas), [Workflows](/api/workflows), [Claims](/api/claims), [Utilities](/api/utilities), [Import and export](/api/import-export#import-browse).
+- [Agent playbook](/concepts/agent-playbook) — `kiwi_context` and playbook operations.
+- [Episodic memory](/concepts/episodic-memory) — `kiwi_memory_report`.
+- REST counterparts: [Drafts](/api/drafts), [Views](/api/views), [Canvas](/api/canvas), [Workflows](/api/workflows), [Claims](/api/claims), [Publish](/api/publish), [Utilities](/api/utilities), [Import and export](/api/import-export#import-browse), [Document export](/export/documents).

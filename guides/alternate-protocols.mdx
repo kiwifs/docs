@@ -1,0 +1,111 @@
+---
+title: "Alternate protocols"
+description: "Mount and integrate KiwiFS over NFS, S3, WebDAV, and FUSE alongside REST and MCP."
+icon: "network-wired"
+---
+
+Every access path flows through the **same storage layer**: atomic write → git commit → search index → SSE broadcast. Choose a protocol based on what your client already supports.
+
+## Quick comparison
+
+| Protocol | Default port | Best for |
+| --- | --- | --- |
+| **REST** | `3333` | Web UI, curl, CI scripts |
+| **MCP** | stdio or `8181` (`kiwifs mcp --http`) | Claude, Cursor, custom agents |
+| **NFS** | `2049` | Docker/Kubernetes mounts without FUSE |
+| **S3-compatible** | `3334` | Backup tools, ETL, anything with an S3 SDK |
+| **WebDAV** | `3335` | Desktop sync, mapped drives |
+| **FUSE** | — | Developer workstation remote mount |
+
+## Enable on serve
+
+```bash
+kiwifs serve --root ./knowledge \
+  --nfs --nfs-allow 10.0.0.0/8 \
+  --s3 \
+  --webdav
+```
+
+| Flag | Description |
+| --- | --- |
+| `--nfs` | Userspace NFSv3 server |
+| `--nfs-port` | Default `2049` |
+| `--nfs-allow` | CIDR allowlist for NFS clients |
+| `--s3` | S3-compatible API |
+| `--s3-port` | Default `3334` |
+| `--webdav` | WebDAV server |
+| `--webdav-port` | Default `3335` |
+
+## NFS
+
+Mount from Linux or Kubernetes:
+
+```bash
+# Example: mount to /mnt/kiwi (requires nfs client tools on the host)
+sudo mount -t nfs -o vers=3 localhost:/ /mnt/kiwi
+```
+
+Agents can use normal shell tools:
+
+```bash
+cat /mnt/kiwi/pages/auth.md
+grep -r "timeout" /mnt/kiwi/
+echo "# Note" >> /mnt/kiwi/episodes/session.md
+```
+
+NFS supports symlinks, open-then-delete semantics, and advisory locks. Internal dirs (`.git`, `.kiwi`) are hidden from directory listings.
+
+## S3-compatible API
+
+Point any S3 client at `http://localhost:3334` with the credentials your deployment configures. Useful for `aws s3 sync` style backups alongside markdown truth on disk.
+
+## WebDAV
+
+Connect from macOS **Finder → Connect to Server** or Windows mapped drive:
+
+```
+http://localhost:3335/
+```
+
+WebDAV uses buffered writes with spill-to-disk for large uploads. Not full POSIX, but sufficient for desktop editors.
+
+## FUSE remote mount
+
+Mount a **remote** KiwiFS REST server as a local folder:
+
+```bash
+kiwifs mount --remote http://localhost:3333 --mountpoint ~/kiwi-mount
+```
+
+Optional auth:
+
+```bash
+export KIWIFS_API_KEY=my-secret
+kiwifs mount --remote http://host:3333 --mountpoint ~/kiwi-mount
+```
+
+FUSE reports sub-second mtime and supports symlinks via the REST API. **mmap** is not available over FUSE (HTTP-backed); use NFS or local disk for mmap workloads.
+
+## POSIX semantics
+
+| Access path | POSIX level |
+| --- | --- |
+| Local knowledge root | Full |
+| NFS mount | Near-full |
+| FUSE mount | Near-full (no mmap) |
+| WebDAV | Partial |
+| REST / S3 / MCP | HTTP or tool semantics (ETags, not POSIX) |
+
+Details: [POSIX guide](/guides/posix).
+
+## Security notes
+
+- Restrict NFS with `--nfs-allow` to trusted subnets.
+- Run alternate protocol ports behind a firewall in production.
+- Combine with `[auth]` for REST; protocol-specific auth varies — treat NFS/S3/WebDAV endpoints as sensitive network surfaces.
+
+## Related documentation
+
+- [Agent interface](/concepts/agent-interface)
+- [CLI serve flags](/cli/commands)
+- [Real-time events](/concepts/real-time-events)

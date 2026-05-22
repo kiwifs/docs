@@ -39,8 +39,15 @@ curl -X POST 'http://localhost:3333/api/kiwi/import' \
     | CSV | `csv` | Import from CSV files |
     | JSON | `json` | Import from JSON or JSONL files |
     | Notion | `notion` | Import from Notion workspace |
+    | Airtable | `airtable` | Import from Airtable bases |
+    | Google Sheets | `gsheets` | Import from Google Sheets |
     | Confluence | `confluence` | Import from Confluence spaces |
-    | Google Docs | `gdocs` | Import from Google Docs |
+    | Obsidian | `obsidian` | Import from Obsidian vaults |
+    | DynamoDB | `dynamodb` | Import from DynamoDB tables |
+    | Redis | `redis` | Import from Redis keys |
+    | Elasticsearch | `elasticsearch` | Import from Elasticsearch indices |
+    | Firestore | `firestore` | Import from Google Firestore |
+    | Markdown | `markdown` | Import from a folder of `.md` files |
   </Accordion>
   <Accordion title="Mapping template syntax">
     Use double-brace templates to map source fields to KiwiFS file paths and frontmatter:
@@ -208,3 +215,29 @@ concepts/billing.md,Billing,draft,2026-04-20
 <Tip>
 Use JSONL export with `include-content=true` to create backups or to feed your knowledge base into external pipelines.
 </Tip>
+
+## Document export
+
+Render markdown to PDF, HTML, slides, or a static site:
+
+```http
+POST /export/document
+Content-Type: application/json
+```
+
+See [Document export](/export/documents) for the full request body and examples.
+
+## Airbyte endpoints
+
+| Method | Path |
+| --- | --- |
+| `POST` | `/import/airbyte/spec` |
+| `POST` | `/import/airbyte/check` |
+| `POST` | `/import/airbyte/discover` |
+| `POST` | `/import/airbyte-cloud/check` |
+| `POST` | `/import/airbyte-cloud/discover` |
+| `GET` | `/import/airbyte-cloud/connections` |
+| `POST` | `/import/airbyte-cloud/sync` |
+| `GET` | `/import/sync/status` |
+
+See [Airbyte import](/import/airbyte).

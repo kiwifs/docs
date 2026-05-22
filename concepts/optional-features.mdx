@@ -1,0 +1,65 @@
+---
+title: "Optional features"
+description: "Which subsystems need configuration and what HTTP status codes mean when they are off."
+icon: "toggle-on"
+---
+
+Several KiwiFS features are **optional**. If a subsystem was not enabled at startup, the API returns a clear error instead of failing silently.
+
+## Feature matrix
+
+| Feature | Enable in config | Typical error when disabled |
+| --- | --- | --- |
+| **Draft spaces** | Git versioning + draft manager (default on recent builds) | `501` — drafts not enabled |
+| **Claims** | Claim store wired at bootstrap | `503` — claims not available |
+| **Audit log** | `[audit] enabled = true` | `501` on `GET /audit` |
+| **Vector / semantic search** | `[search.vector] enabled = true` | `503` on semantic search and embeddings |
+| **Webhooks** | `[webhooks] enabled = true` | Webhook CRUD may be empty or disabled |
+| **Import connections** | Connection store on disk | `GET /import/connections` returns `[]` if store init failed |
+| **Graph analytics** | Link index available | `503` on extended graph endpoints |
+| **Schema enforcement** | `[schema] enforce = true` | Writes rejected when frontmatter fails validation |
+
+## Drafts
+
+Drafts require git-backed branches. If `POST /api/kiwi/drafts` returns `501`, start the server with the same template and version that advertises draft APIs, and ensure git versioning is not `none`.
+
+See [Draft spaces](/concepts/draft-spaces).
+
+## Claims
+
+Task claims prevent two agents from editing the same path concurrently. Enable the claim store in your deployment bootstrap; otherwise `POST /api/kiwi/claim` returns `503`.
+
+See [Claims](/concepts/claims).
+
+## Audit log
+
+```toml
+[audit]
+enabled = true
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/audit?since=2026-05-01T00:00:00Z&limit=100'
+```
+
+Returns `{ "ts", "method", "path", "space", "actor", "token_hash", "ip", "status", "duration_ms" }` entries. See [Utilities API](/api/utilities#audit-log).
+
+## Vector search
+
+Semantic search and `GET /api/kiwi/embeddings` need `[search.vector]` with a working embedder and store. Full-text search still works without vector config.
+
+See [Search](/concepts/search) and [Configuration](/configuration#vector-search).
+
+## Schema enforcement
+
+```toml
+[schema]
+enforce = true
+```
+
+When enabled, invalid frontmatter on `PUT /api/kiwi/file` is rejected. Define types under `.kiwi/schemas/` — see [Schemas](/concepts/schemas).
+
+## Related documentation
+
+- [Configuration](/configuration)
+- [API overview](/api/overview) — auth and error conventions

@@ -1,34 +1,39 @@
-> **Customize this file**: Tailor this template to your project by noting specific contribution types you're looking for, adding a Code of Conduct, or adjusting the writing guidelines to match your style.
+# Contributing to KiwiFS documentation
 
-# Contribute to the documentation
+Thank you for improving the docs at [docs.kiwifs.com](https://docs.kiwifs.com).
 
-Thank you for your interest in contributing to our documentation! This guide will help you get started.
+## Before you edit
 
-## How to contribute
+1. Read [AGENTS.md](./AGENTS.md) — terminology, tone, and what not to document (internal implementation).
+2. Verify behavior against the [kiwifs/kiwifs](https://github.com/kiwifs/kiwifs) source or a running server.
+3. Use **KiwiFS** in prose; `kiwifs` only in CLI/code examples.
 
-### Option 1: Edit directly on GitHub
+## Local development
 
-1. Navigate to the page you want to edit
-2. Click the "Edit this file" button (the pencil icon)
-3. Make your changes and submit a pull request
+```bash
+npm i -g mint
+cd kiwi/docs
+mint dev
+```
 
-### Option 2: Local development
+Preview at `http://localhost:3000`. Check links:
 
-1. Fork and clone this repository
-2. Install the Mintlify CLI: `npm i -g mint`
-3. Create a branch for your changes
-4. Make changes
-5. Navigate to the docs directory and run `mint dev`
-6. Preview your changes at `http://localhost:3000`
-7. Commit your changes and submit a pull request
+```bash
+mint broken-links
+```
 
-For more details on local development, see our [development guide](development.mdx).
+## Adding a page
 
-## Writing guidelines
+1. Create `path/to/page.mdx` with YAML frontmatter (`title`, `description`, `icon`).
+2. Register the page in `docs.json` under the correct group.
+3. Link from related pages with Mintlify paths (e.g. `/concepts/mcp`).
 
-- **Use active voice**: "Run the command" not "The command should be run"
-- **Address the reader directly**: Use "you" instead of "the user"
-- **Keep sentences concise**: Aim for one idea per sentence
-- **Lead with the goal**: Start instructions with what the user wants to accomplish
-- **Use consistent terminology**: Don't alternate between synonyms for the same concept
-- **Include examples**: Show, don't just tell
+## Pull requests
+
+- One logical topic per PR when possible.
+- Include curl examples for new API endpoints.
+- Do not document unreleased hosted services unless explicitly marked as preview.
+
+## Edit on GitHub
+
+You can also use the **Edit** button on any published page to propose changes directly in the docs repository.

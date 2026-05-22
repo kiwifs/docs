@@ -1,0 +1,147 @@
+---
+title: "FAQ"
+description: "Frequently asked questions about KiwiFS installation, agents, search, and deployment."
+icon: "circle-question"
+---
+
+## General
+
+### What is KiwiFS?
+
+KiwiFS is a markdown filesystem for agents and teams — a single Go binary with a web UI, git versioning, full-text and vector search, and access via REST, MCP, NFS, S3, WebDAV, and FUSE.
+
+### How is this different from Obsidian?
+
+Obsidian is a desktop app. KiwiFS is a server with a web UI, agent APIs, git audit trail, and server-side search over the same markdown files.
+
+### How is this different from Notion or Confluence?
+
+Those tools store content in proprietary databases. KiwiFS stores plain markdown. `cat page.md` and `git clone` always work.
+
+### Do I need to know Git?
+
+No. Git runs under the hood; the API and web UI hide it. Git is the audit trail, not the primary interface.
+
+### Is KiwiFS production-ready?
+
+KiwiFS is in active development (v0.4). Core features are stable in internal production use. Public APIs may evolve before v1.0.
+
+## Installation
+
+### What are the system requirements?
+
+A single static Go binary. SQLite is embedded. The web UI is embedded via `go:embed`. Runs on macOS, Linux, and Docker.
+
+### How do I install?
+
+```bash
+brew install kiwifs/tap/kiwifs
+# or
+curl -fsSL https://raw.githubusercontent.com/kiwifs/kiwifs/main/install.sh | sh
+# or
+go install github.com/kiwifs/kiwifs@latest
+```
+
+### What is in `.kiwi/`?
+
+Derived state — not your content. Safe to delete and rebuild with `kiwifs reindex`.
+
+```
+.kiwi/
+├── config.toml
+├── playbook.md
+├── state/search.db
+├── comments/
+└── templates/
+```
+
+## Agents
+
+### How do agents write?
+
+1. **Filesystem** — NFS or FUSE mount: `cat`, `echo`, `grep`
+2. **REST** — `PUT /api/kiwi/file`
+3. **MCP** — `kiwifs mcp --root ~/knowledge` (60+ tools)
+
+### Can agents use KiwiFS without a running server?
+
+Yes. `kiwifs mcp --root ~/knowledge` runs in-process against the directory.
+
+### How do I configure Cursor or Claude Desktop?
+
+```json
+{
+  "mcpServers": {
+    "kiwifs": {
+      "command": "kiwifs",
+      "args": ["mcp", "--root", "/path/to/knowledge"]
+    }
+  }
+}
+```
+
+See [MCP](/concepts/mcp) and [Quickstart](/quickstart).
+
+### How does provenance tracking work?
+
+Send `X-Actor` and `X-Provenance` on writes. KiwiFS injects `derived-from` into frontmatter.
+
+## Search
+
+### What search backends exist?
+
+| Tier | Engine |
+| --- | --- |
+| 1 | `grep` |
+| 2 | `sqlite` (FTS5, default) |
+| 3 | Vector (optional `[search.vector]`) |
+
+### Vector search without a cloud API key?
+
+Use Ollama as the embedder and `sqlite-vec` as the store for fully local embeddings.
+
+### Rebuild the index?
+
+```bash
+kiwifs reindex --root ./knowledge
+```
+
+## Protocols
+
+### NFS vs S3 vs WebDAV vs FUSE?
+
+See [Alternate protocols](/guides/alternate-protocols).
+
+### Do all protocols share one pipeline?
+
+Yes. Every write gets git commit, index update, and SSE broadcast.
+
+## Data
+
+### Crash mid-write?
+
+Atomic writes (temp → fsync → rename). Git reflog aids recovery.
+
+### Backup?
+
+- `git push` to any remote
+- `kiwifs backup` / `[backup]` in config
+- `kiwifs restore --from ... --to ...`
+- `rsync` the knowledge root
+
+### Migrate from Obsidian or Notion?
+
+```bash
+kiwifs import --from obsidian --path ~/vault --root ./knowledge
+kiwifs import --from notion --api-key $KEY --database-id $ID --root ./knowledge
+```
+
+## License
+
+### Commercial use?
+
+BSL 1.1 — self-host and embed freely. You cannot offer KiwiFS itself as a commercial hosted service. Each release converts to Apache 2.0 after four years.
+
+### Contribute?
+
+See [Contributing](/CONTRIBUTING).

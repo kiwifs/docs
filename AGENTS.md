@@ -35,4 +35,16 @@
 
 - Document the public API, CLI, and configuration — not internal implementation details
 - Don't document unstable or experimental features without marking them as such
+- Don't document unreleased hosted or cloud products unless explicitly requested
 - Keep the source of truth in the source code; docs describe behavior, not implementation
+
+## Page locations
+
+| Directory | Use for |
+| --- | --- |
+| `concepts/` | Product concepts and mental models |
+| `guides/` | How-to guides (web UI, protocols, FAQ, examples) |
+| `api/` | REST reference with curl examples |
+| `cli/` | CLI reference |
+| `import/` / `export/` | Data movement |
+| `deploy/` | Docker, Kubernetes, embed |

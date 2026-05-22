@@ -62,18 +62,33 @@
             "pages": [
               "concepts/files-as-truth",
               "concepts/agent-interface",
+              "concepts/agent-playbook",
               "concepts/search",
               "concepts/versioning",
               "concepts/dql",
               "concepts/wiki-links",
               "concepts/mcp",
+              "concepts/episodic-memory",
               "concepts/draft-spaces",
               "concepts/bases-views",
               "concepts/canvas",
               "concepts/workflows",
               "concepts/claims",
               "concepts/webhooks",
-              "concepts/schemas"
+              "concepts/schemas",
+              "concepts/multi-space",
+              "concepts/real-time-events",
+              "concepts/optional-features"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/web-ui",
+              "guides/alternate-protocols",
+              "guides/posix",
+              "guides/examples",
+              "guides/faq"
             ]
           },
           {
@@ -83,13 +98,15 @@
               "import/databases",
               "import/files",
               "import/saas",
-              "import/connections"
+              "import/connections",
+              "import/airbyte"
             ]
           },
           {
             "group": "Data Export",
             "pages": [
-              "export/overview"
+              "export/overview",
+              "export/documents"
             ]
           },
           {
@@ -111,6 +128,7 @@
             "group": "REST API",
             "pages": [
               "api/overview",
+              "api/spaces",
               "api/files",
               "api/search",
               "api/versioning",
@@ -121,6 +139,7 @@
               "api/canvas",
               "api/workflows",
               "api/claims",
+              "api/publish",
               "api/utilities",
               "api/analytics",
               "api/webhooks",

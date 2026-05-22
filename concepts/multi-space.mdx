@@ -1,0 +1,87 @@
+---
+title: "Multi-space"
+description: "Run multiple isolated knowledge bases on one KiwiFS server with path or header routing."
+icon: "layer-group"
+---
+
+Multi-space mode lets one KiwiFS process host **multiple independent knowledge bases**. Each space has its own root directory, git repo, search index, and `.kiwi/` state.
+
+## When to use multi-space
+
+- Separate team wikis on one host (engineering vs product).
+- Per-tenant isolation in self-hosted deployments.
+- A default space plus dynamically provisioned workspaces on the same port.
+
+## Configure spaces
+
+<Tabs>
+<Tab title="config.toml">
+```toml
+[[spaces]]
+name = "engineering"
+root = "/data/eng-wiki"
+
+[[spaces]]
+name = "product"
+root = "/data/product-wiki"
+```
+</Tab>
+<Tab title="CLI flags">
+```bash
+kiwifs serve \
+  --space engineering=/data/eng-wiki \
+  --space product=/data/product-wiki
+```
+</Tab>
+</Tabs>
+
+The first registered space is the **default** when a request does not specify another space.
+
+## How requests are routed
+
+Resolution order:
+
+1. **`X-Kiwi-Space` header** — set by a reverse proxy (e.g. subdomain → space name). If the header is set but the space does not exist, the request fails (no silent fallback).
+2. **URL path prefix** — `GET /api/kiwi/{space}/tree` rewrites internally to `/api/kiwi/tree` on that space's stack.
+3. **Default space** — first registered space in config or flags.
+
+```bash
+# Path-based
+curl 'http://localhost:3333/api/kiwi/engineering/tree?path='
+
+# Header-based (same path as single-space)
+curl 'http://localhost:3333/api/kiwi/tree?path=' \
+  -H 'X-Kiwi-Space: engineering'
+```
+
+MCP supports **`--space <name>`** when the knowledge root hosts multiple configured spaces.
+
+## Space admin API
+
+Administrators can list, inspect, create, and remove spaces at the **manager** level (not under `/api/kiwi/`):
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/spaces` | List all spaces with metadata |
+| `GET` | `/api/spaces/:name` | One space summary |
+| `POST` | `/api/spaces` | Create `{ "name", "root" }` |
+| `DELETE` | `/api/spaces/:name` | Remove a dynamic space |
+
+See [Spaces API](/api/spaces) for curl examples. Dynamic spaces are persisted to `.kiwi/spaces.json` under the first registered space root and restored on restart.
+
+## Per-space auth
+
+With `auth.type = "perspace"`, API keys can be scoped to a single space:
+
+```toml
+[[auth.api_keys]]
+key = "kiwi_sk_eng_..."
+space = "engineering"
+actor = "eng-team"
+```
+
+## Related documentation
+
+- [Configuration](/configuration#multi-space)
+- [Spaces API](/api/spaces)
+- [Deployment](/deploy/docker) — Docker volume layout for `/data/.spaces/{name}`

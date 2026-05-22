@@ -20,6 +20,8 @@ All endpoints are prefixed with `/api/kiwi/`. In multi-space mode, endpoints inc
 
 You can also keep the path **`/api/kiwi/...`** (no `{space}` segment) and send the header **`X-Kiwi-Space: engineering`** so reverse proxies or the FUSE client can dispatch to a configured space without changing URL shapes.
 
+Space **administration** (`GET/POST/DELETE /api/spaces`) is documented in [Spaces API](/api/spaces). See [Multi-space](/concepts/multi-space).
+
 ## Authentication
 
 Configure the auth type in `.kiwi/config.toml` under `[auth] type`.

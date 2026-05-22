@@ -1,0 +1,91 @@
+---
+title: "Episodic memory"
+description: "Separate raw agent sessions from durable semantic pages using frontmatter conventions and merge reports."
+icon: "brain"
+---
+
+KiwiFS is file-first: agents write plain markdown, git versions everything, and HTTP headers can record **lineage** (`derived-from` from `X-Actor` / `X-Provenance`). For agent memory systems you usually want two layers:
+
+1. **Episodic memory** — per-run or per-session raw notes (high volume, append-friendly).
+2. **Semantic memory** — durable curated knowledge on entity and concept pages, often after **consolidation** from episodes.
+
+KiwiFS does **not** run an LLM for consolidation. You (or a scheduler) merge episodes into semantic pages; KiwiFS provides the **data model** and **`memory report`** to show what is not yet linked.
+
+## Provenance vs consolidation
+
+| Frontmatter | Meaning |
+| --- | --- |
+| `derived-from` | Injected on **write** from `X-Provenance`. Records which run or job **produced** this file. |
+| `merged-from` | You set this on a **downstream** page. It says this semantic page was built **from** these episodes. |
+
+An episode can have `derived-from: run:…` from the API, and a `pages/foo.md` page can list the same run under `merged-from`.
+
+## Classify pages with `memory_kind`
+
+| Value | Role |
+| --- | --- |
+| `episodic` | Raw run or session material |
+| `semantic` | Durable curated knowledge |
+| `consolidation` | Optional staging before merge to semantic |
+| `working` | Optional scratch, high churn |
+
+`memory_kind: semantic` or `consolidation` prevents a file from being treated as episodic even under the episodes path prefix.
+
+## Path convention: `episodes/`
+
+By default, markdown under **`episodes/`** is episodic when `memory_kind` is not `semantic` or `consolidation`. Configure the prefix in `.kiwi/config.toml`:
+
+```toml
+[memory]
+episodes_path_prefix = "episodes/"
+```
+
+## Episodic identity and `merged-from`
+
+- Prefer **`episode_id`** in episodic frontmatter.
+- If missing, **`id`** is used when the file is still episodic.
+- A `merged-from` entry can reference `type: episode` with matching `id`, or `type: episode` with `path` (e.g. `episodes/2026/run.md`).
+
+Example:
+
+```yaml
+merged-from:
+  - type: episode
+    id: run-7f3a
+    date: "2026-04-27T12:00:00Z"
+    note: "merged into concepts/auth from nightly job"
+```
+
+An episode is **covered** when any page cites it in `merged-from` (by `id` or compatible `type` such as `run`, `session`, `trace` with the same id). The report does **not** use `derived-from` for coverage.
+
+## Operator workflow
+
+1. Agents write under `episodes/` with `X-Provenance` and optional `episode_id`.
+2. A job reads unmerged episodes (`kiwifs memory report` or `GET /api/kiwi/memory/report`), consolidates with your LLM or rules, and updates `pages/` with **`merged-from`**.
+3. Re-run the report until `unmerged` is empty or acceptable.
+
+<Tabs>
+<Tab title="CLI">
+```bash
+kiwifs memory report --root ./knowledge
+kiwifs memory report --root ./knowledge --json
+kiwifs memory report --episodes-prefix raw/
+```
+</Tab>
+<Tab title="REST">
+```bash
+curl -s 'http://localhost:3333/api/kiwi/memory/report'
+curl -s 'http://localhost:3333/api/kiwi/memory/report?episodes_prefix=raw/&limit=10&offset=0'
+```
+</Tab>
+<Tab title="MCP">
+Call **`kiwi_memory_report`** with optional `episodes_prefix`, `limit`, and `offset`.
+</Tab>
+</Tabs>
+
+## Related documentation
+
+- [Configuration](/configuration#memory) — `[memory]` section
+- [Analytics API](/api/analytics#memory-report) — response fields
+- [Examples](/guides/examples#consolidate-episodes-into-durable-pages) — MCP consolidation sequence
+- [Agent playbook](/concepts/agent-playbook) — `Remember` and `Consolidate` operations

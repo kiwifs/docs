@@ -1,0 +1,86 @@
+---
+title: "Agent playbook"
+description: "SCHEMA.md, playbook.md, rules.md, and kiwi_context — how agents onboard to a knowledge base."
+icon: "book-open"
+---
+
+Every `kiwifs init` template ships agent-facing documents beside your markdown pages. Together they tell agents **where** to write, **what** frontmatter to use, and **which** MCP tools to call for each operation.
+
+## Core files
+
+| File | Purpose |
+| --- | --- |
+| `SCHEMA.md` | Directory layout, frontmatter field tables, naming conventions |
+| `.kiwi/playbook.md` | Step-by-step MCP sequences (ingest, query, remember, consolidate, lint) |
+| `.kiwi/rules.md` | Harness-specific behavior (export to Cursor, Claude, etc. via `kiwifs rules`) |
+| `index.md` | Auto-maintained table of contents (agents update after structural changes) |
+| `log.md` | Optional append-only chronological record |
+
+The **`knowledge`** template also includes `episodes/` for episodic memory. See [Episodic memory](/concepts/episodic-memory).
+
+## Load context in one call
+
+Before editing, agents should call **`kiwi_context`** (MCP) or:
+
+```bash
+curl -s 'http://localhost:3333/api/kiwi/context'
+```
+
+Response includes `schema`, `playbook`, and `index` text (from `SCHEMA.md`, `.kiwi/playbook.md`, and `index.md`).
+
+MCP also exposes read-only resource **`kiwi://schema`** for the same schema document.
+
+## Playbook operations
+
+Typical operations defined in `.kiwi/playbook.md`:
+
+| Operation | Goal |
+| --- | --- |
+| **Ingest** | Process a new source; create or update pages; refresh index and log |
+| **Query** | Search and read pages to answer a question |
+| **Remember** | Append episodic observations under `episodes/` |
+| **Consolidate** | Merge episodes into durable `pages/` with `merged-from` |
+| **Lint** | Audit orphans, broken wiki links, missing frontmatter |
+
+Example MCP sequence for ingest:
+
+```
+kiwi_context
+kiwi_search("authentication")
+kiwi_write("pages/auth.md", content)
+kiwi_read("index.md")
+kiwi_write("index.md", updated_index)
+kiwi_append("log.md", "- added auth page")
+```
+
+Full recipes: [Examples](/guides/examples).
+
+## Rules for your harness
+
+```bash
+kiwifs rules                          # print .kiwi/rules.md
+kiwifs rules export --format cursor   # Cursor rule snippet
+kiwifs rules sync --format cursor --output .cursor/rules/kiwi.md
+```
+
+REST equivalents: `GET /api/kiwi/rules`, `PUT /api/kiwi/rules` — see [Utilities API](/api/utilities#rules-file).
+
+## Provenance on writes
+
+Attribute agent writes with headers so consolidation and audit stay traceable:
+
+```bash
+curl -X PUT 'http://localhost:3333/api/kiwi/file?path=episodes/run-249.md' \
+  -H 'X-Actor: agent:researcher' \
+  -H 'X-Provenance: run:run-249' \
+  -d '# Session notes...'
+```
+
+KiwiFS injects `derived-from` into frontmatter automatically.
+
+## Related documentation
+
+- [MCP](/concepts/mcp) — tool reference
+- [Files as truth](/concepts/files-as-truth) — `.kiwi/` layout
+- [Episodic memory](/concepts/episodic-memory)
+- [Schemas](/concepts/schemas) — JSON Schema validation on writes

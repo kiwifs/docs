@@ -1,0 +1,52 @@
+---
+title: "Real-time events"
+description: "Subscribe to write, delete, and bulk events over Server-Sent Events (SSE)."
+icon: "bolt"
+---
+
+KiwiFS broadcasts knowledge-base changes over **Server-Sent Events (SSE)**. There is no WebSocket endpoint — use `GET /api/kiwi/events` for live updates in the web UI or external integrations.
+
+## Event stream
+
+```bash
+curl -N 'http://localhost:3333/api/kiwi/events'
+```
+
+Example stream:
+
+```
+event: write
+data: {"path":"concepts/auth.md","actor":"agent:docs-writer","timestamp":"2026-04-25T14:30:00Z"}
+
+event: delete
+data: {"path":"concepts/old-page.md","actor":"agent:cleanup","timestamp":"2026-04-25T14:31:00Z"}
+
+event: bulk
+data: {"paths":["a.md","b.md"],"actor":"agent:importer","timestamp":"2026-04-25T14:32:00Z"}
+
+event: import
+data: {"imported":42,"source":"postgres","timestamp":"2026-04-25T14:33:00Z"}
+```
+
+| Event | When it fires |
+| --- | --- |
+| `write` | A file was created or updated |
+| `delete` | A file was deleted |
+| `bulk` | A bulk write completed |
+| `import` | An import job finished |
+
+## Client guidance
+
+- Use `curl -N` (no buffer) or an SSE client library in your language.
+- Implement **reconnection** with backoff; the connection stays open until the client or server closes it.
+- Authenticate the same way as other `/api/kiwi` routes when auth is enabled.
+
+## Same pipeline as every protocol
+
+Events fire after the standard write pipeline: storage → git commit → index update. Writes through NFS, S3, WebDAV, FUSE, REST, or MCP all emit the same event types when they go through KiwiFS.
+
+## Related documentation
+
+- [Agent interface](/concepts/agent-interface) — protocol overview
+- [Analytics API](/api/analytics#real-time-events-sse) — curl example in API reference
+- [Webhooks](/concepts/webhooks) — outbound HTTP notifications (complementary to SSE)

@@ -1,0 +1,214 @@
+---
+title: "Examples"
+description: "Practical workflows for agents, DQL, import/export, and deployment."
+icon: "lightbulb"
+---
+
+## LLM wiki pattern
+
+```bash
+kiwifs init --template knowledge --root ./knowledge
+```
+
+```
+knowledge/
+├── SCHEMA.md
+├── index.md
+├── log.md
+├── pages/
+├── episodes/
+└── .kiwi/playbook.md
+```
+
+Call **`kiwi_context`** on connect, then follow playbook operations: Ingest, Query, Remember, Consolidate, Lint.
+
+See [Agent playbook](/concepts/agent-playbook).
+
+## Agent writes
+
+<CodeGroup>
+```bash REST
+curl -X PUT 'http://localhost:3333/api/kiwi/file?path=pages/auth.md' \
+  -H 'X-Actor: my-agent' \
+  -H 'X-Provenance: run:run-249' \
+  -d '# Authentication
+
+OAuth2 + JWT.'
+```
+
+```bash Bulk (one commit)
+curl -X POST 'http://localhost:3333/api/kiwi/bulk' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "files": [
+      {"path": "pages/auth.md", "content": "# Auth\n\nUpdated."},
+      {"path": "log.md", "content": "- 2026-05-21: updated auth"}
+    ],
+    "actor": "agent:exec_abc",
+    "message": "run 249"
+  }'
+```
+
+```bash Filesystem mount
+echo "# Finding" > /mnt/kiwi/pages/finding-042.md
+```
+</CodeGroup>
+
+Query provenance later:
+
+```bash
+curl 'http://localhost:3333/api/kiwi/meta?where=$.derived-from[*].id=run-249'
+```
+
+## MCP tool sequences
+
+### First connection
+
+```
+kiwi_context
+```
+
+### Ingest a source
+
+```
+kiwi_search("authentication")
+kiwi_write("pages/auth.md", content)
+kiwi_read("index.md")
+kiwi_write("index.md", updated)
+kiwi_append("log.md", "- added auth")
+```
+
+### Answer a question
+
+```
+kiwi_search("payment timeout")
+kiwi_read("pages/payments.md")
+```
+
+### Remember (episodic)
+
+```
+kiwi_append("episodes/2026-05-21.md", observation)
+```
+
+### Consolidate episodes into durable pages
+
+```
+kiwi_memory_report
+kiwi_read("episodes/2026-05-21.md")
+kiwi_write("pages/topic.md", merged_content_with_merged_from)
+```
+
+See [Episodic memory](/concepts/episodic-memory).
+
+### Health check
+
+```
+kiwi_analytics
+kiwi_health_check("pages/auth.md")
+kiwi_lint
+```
+
+## DQL
+
+```bash
+kiwifs query 'TABLE title, status FROM "pages" WHERE status = "draft" SORT priority DESC'
+kiwifs query 'COUNT FROM "pages" GROUP BY status'
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/query?q=TABLE%20title%20FROM%20%22pages%22%20WHERE%20status%3D%22draft%22'
+```
+
+Computed views:
+
+```bash
+kiwifs view refresh --root ./knowledge
+```
+
+## Aggregation
+
+```bash
+kiwifs aggregate --group status --calc count,avg:priority
+```
+
+```
+GET /api/kiwi/query/aggregate?group_by=status&calc=count,avg:priority
+```
+
+## Import
+
+```bash
+kiwifs import --from postgres --dsn "postgres://..." --table users --root ./knowledge
+kiwifs import --from obsidian --path ~/vault --root ./knowledge
+kiwifs import --from csv --path data.csv --root ./knowledge --dry-run
+```
+
+## Export
+
+```bash
+kiwifs export --format jsonl --include-content -o knowledge.jsonl
+kiwifs export --format jsonl --include-embeddings -o vectors.jsonl
+```
+
+Document render:
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
+  -H 'Content-Type: application/json' \
+  -d '{"format":"pdf","path":"pages/report.md"}' -o report.pdf
+```
+
+See [Document export](/export/documents).
+
+## Production config snippet
+
+```toml
+[server]
+public_url = "https://wiki.example.com"
+
+[search]
+engine = "sqlite"
+
+[search.vector]
+enabled = true
+
+[search.vector.embedder]
+provider = "ollama"
+model = "nomic-embed-text"
+
+[versioning]
+strategy = "git"
+
+[backup]
+remote = "git@github.com:org/knowledge.git"
+interval = "5m"
+```
+
+## Docker
+
+```bash
+docker run -d --restart always \
+  -v /data/knowledge:/data \
+  -p 3333:3333 \
+  ameliaanhlam/kiwifs serve --root /data
+```
+
+## Go embed
+
+```go
+import "github.com/kiwifs/kiwifs/pkg/kiwi"
+
+srv, err := kiwi.New("/data/knowledge", kiwi.WithSearch("sqlite"))
+mux.Handle("/wiki/", http.StripPrefix("/wiki", srv.Handler()))
+```
+
+See [Go embed](/deploy/go-embed).
+
+## NFS in Kubernetes
+
+```bash
+kiwifs serve --root /data --nfs --nfs-port 2049
+```
+
+See [Alternate protocols](/guides/alternate-protocols) and [Kubernetes](/deploy/kubernetes).

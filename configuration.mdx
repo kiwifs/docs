@@ -173,10 +173,67 @@ is_long = "len(body) > 5000"
 
 ## Memory
 
+Episodic vs semantic conventions for agent memory. See [Episodic memory](/concepts/episodic-memory).
+
 ```toml
 [memory]
 episodes_path_prefix = "episodes/"
 ```
+
+## Drafts
+
+```toml
+[drafts]
+enabled = true
+max_active = 10
+auto_discard_days = 30
+```
+
+## Workflow
+
+```toml
+[workflow]
+enforce_transitions = false
+```
+
+## Audit
+
+```toml
+[audit]
+enabled = true
+```
+
+Requires `[audit] enabled = true` for `GET /api/kiwi/audit`. See [Optional features](/concepts/optional-features).
+
+## Webhooks
+
+```toml
+[webhooks]
+enabled = true
+max_workers = 4
+max_retries = 3
+```
+
+See [Webhooks](/concepts/webhooks).
+
+## Schema enforcement
+
+```toml
+[schema]
+enforce = false
+```
+
+When `true`, writes are validated against `.kiwi/schemas/`. See [Schemas](/concepts/schemas).
+
+## Import (Airbyte)
+
+```toml
+[import]
+airbyte_api_key = "${AIRBYTE_API_KEY}"
+airbyte_workspace_id = "${AIRBYTE_WORKSPACE_ID}"
+```
+
+See [Airbyte import](/import/airbyte).
 
 ## Tracing
 
@@ -203,8 +260,10 @@ name = "product"
 root = "/data/product-wiki"
 ```
 
-Each space gets its own set of API endpoints under `/api/kiwi/{name}/...`.
+Each space gets its own API under `/api/kiwi/{name}/...` or via the `X-Kiwi-Space` header. Administrators use `/api/spaces` to create and list spaces.
 
 <Tip>
 You can also add spaces via CLI flags: `kiwifs serve --space eng=/data/eng --space product=/data/product`.
 </Tip>
+
+See [Multi-space](/concepts/multi-space) and [Spaces API](/api/spaces).
