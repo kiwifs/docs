@@ -61,6 +61,10 @@ ETag: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
 OAuth2 + JWT based authentication system...
 ```
 
+<Info>
+Each successful read of a knowledge file records a page view for analytics. Pass `?source=mcp` or the `X-Kiwi-Source` header to attribute views to your client. Bot user agents are excluded. See [Analytics and health](/api/analytics#page-view-tracking).
+</Info>
+
 ## Read a symlink target
 
 When a path in the knowledge root is a symbolic link, resolve its target without following into arbitrary filesystem paths outside the guard:

@@ -130,6 +130,24 @@ When a connection store is enabled, the server persists **metadata only** (never
 | `POST` | `/import/connections` | Save or update metadata (`from`, `name`, `dsn`, `uri`, `table`, `collection`, `database`, `database_id`, `base_id`, `table_id`, `project`, `prefix`, `id_column`, `columns`, last-run stats, etc.). |
 | `DELETE` | `/import/connections/:id` | Remove a connection. **`204`**. |
 | `POST` | `/import/connections/:id/run` | Run import again. Body may include `credentials` and/or `api_key` for that run only. Response matches `POST /import`: `{ "imported", "skipped", "errors" }`. |
+| `POST` | `/import/connections/:id/sync` | Pause, resume, or change auto-sync interval. Body: `{ "enabled": true, "interval": "1h" }`. |
+| `GET` | `/import/sync/status` | List all sync-enabled connections with status (`idle`, `running`, `error`). |
+
+### Auto-sync
+
+Syncable sources (`postgres`, `mysql`, `mongodb`, `firestore`, `firebase-rtdb`, `notion`, `airtable`) enable periodic auto-sync on first import. The default interval is **1 hour**. Periodic syncs use full sync — pages from the same `_source` that are not seen in a run receive `_archived_at` frontmatter instead of being deleted.
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/import/connections/conn_01/sync' \
+  -H 'Content-Type: application/json' \
+  -d '{"enabled": false}'
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/import/sync/status'
+```
+
+See [Import connections](/import/connections) and [Airbyte import](/import/airbyte).
 
 ## Ingest from files
 
@@ -160,7 +178,7 @@ Content-Type: application/json
 Export your knowledge base in structured formats.
 
 <ParamField query="format" type="string" required>
-  Output format: `jsonl` or `csv`.
+  Output format: `jsonl`, `csv`, or `parquet`.
 </ParamField>
 <ParamField query="path" type="string">
   Scope export to a subdirectory (e.g. `concepts`).

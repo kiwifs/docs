@@ -6,85 +6,238 @@ icon: "chart-bar"
 
 ## Health dashboard
 
-Get an overview of your knowledge base health.
+Get an overview of your knowledge base health, link coverage, and engagement metrics.
+
+<ParamField query="scope" type="string">
+  Path prefix to scope results (for example `concepts/`).
+</ParamField>
+<ParamField query="stale_threshold" type="integer" default="30">
+  Days without updates before a page counts as stale.
+</ParamField>
 
 ```bash
-curl 'http://localhost:3333/api/kiwi/analytics'
+curl 'http://localhost:3333/api/kiwi/analytics?scope=concepts/&stale_threshold=14'
 ```
 
 ```json
 {
   "total_pages": 142,
-  "stale_pages": 8,
-  "orphan_pages": 5,
-  "broken_links": 3,
-  "empty_pages": 1,
-  "pages_without_frontmatter": 12,
-  "link_coverage_pct": 96.5,
-  "recently_updated": [
-    {"path": "concepts/auth.md", "updated": "2026-04-25T14:30:00Z"},
-    {"path": "concepts/billing.md", "updated": "2026-04-24T09:15:00Z"}
-  ]
+  "total_words": 48200,
+  "health": {
+    "stale": { "count": 8, "paths": ["runbooks/deploy-v1.md"] },
+    "orphans": { "count": 5, "paths": ["concepts/caching.md"] },
+    "broken_links": { "count": 3, "paths": ["concepts/billing.md"] },
+    "empty": { "count": 1, "paths": ["drafts/placeholder.md"] },
+    "no_frontmatter": { "count": 12, "paths": ["notes/quick.md"] }
+  },
+  "coverage": {
+    "pages_with_links": 120,
+    "pages_without_links": 22,
+    "avg_links_per_page": 4.2
+  },
+  "top_updated": [
+    { "path": "concepts/auth.md", "updated_at": "2026-04-25T14:30:00Z" }
+  ],
+  "engagement": {
+    "total_views": 1840,
+    "top_viewed": [{ "path": "concepts/auth.md", "count": 312 }],
+    "failed_searches": [{ "query": "oauth refresh", "count": 7, "search_type": "search" }]
+  }
 }
 ```
 
-<ResponseField name="total_pages" type="integer">Total number of pages.</ResponseField>
-<ResponseField name="stale_pages" type="integer">Pages past their `review-by` date in frontmatter.</ResponseField>
-<ResponseField name="orphan_pages" type="integer">Pages with no incoming backlinks.</ResponseField>
-<ResponseField name="broken_links" type="integer">Wiki links pointing to nonexistent pages.</ResponseField>
-<ResponseField name="empty_pages" type="integer">Pages with no content beyond frontmatter.</ResponseField>
-<ResponseField name="pages_without_frontmatter" type="integer">Pages missing YAML frontmatter.</ResponseField>
-<ResponseField name="link_coverage_pct" type="number">Percentage of wiki links that resolve to existing pages.</ResponseField>
-<ResponseField name="recently_updated" type="array">Most recently modified pages.</ResponseField>
+<ResponseField name="total_pages" type="integer">Total number of indexed pages.</ResponseField>
+<ResponseField name="total_words" type="integer">Sum of word counts across pages.</ResponseField>
+<ResponseField name="health" type="object">Stale, orphan, broken-link, empty, and no-frontmatter counts with sample paths.</ResponseField>
+<ResponseField name="coverage" type="object">Link coverage statistics.</ResponseField>
+<ResponseField name="top_updated" type="array">Most recently modified pages.</ResponseField>
+<ResponseField name="engagement" type="object">Page view totals, top viewed pages, and top failed searches.</ResponseField>
+
+<Note>
+Analytics endpoints require the **sqlite** search backend. With `--search grep`, they return **501 Not Implemented**.
+</Note>
+
+## Page view tracking
+
+Every `GET /api/kiwi/file` request for a knowledge file records a page view automatically. Bot user agents are excluded.
+
+Attribute views to a client with the `source` query parameter or the `X-Kiwi-Source` header. When omitted, the source defaults to `api`. The web UI sends `ui`.
+
+See [Files API — Read a file](/api/files#read-a-file).
 
 ## Analytics overview
 
-Compact dashboard for the web UI engagement panel:
+Compact KPIs for the web UI engagement panel.
+
+<ParamField query="period" type="string" default="7d">
+  Time window: `7d`, `30d`, or `90d`.
+</ParamField>
 
 ```bash
-curl 'http://localhost:3333/api/kiwi/analytics/overview'
+curl 'http://localhost:3333/api/kiwi/analytics/overview?period=30d'
+```
+
+```json
+{
+  "period": "30d",
+  "total_views": 4200,
+  "views_delta_percent": 12.5,
+  "total_searches": 890,
+  "searches_delta_percent": -3.2,
+  "search_success_rate": 0.87,
+  "success_rate_delta_pp": 1.4,
+  "unique_pages_viewed": 64,
+  "unique_pages_delta_percent": 8.0
+}
 ```
 
 ## Page views
 
+### Legacy aggregate
+
+<ParamField query="top" type="integer" default="20">
+  Maximum results to return.
+</ParamField>
+<ParamField query="path" type="string">
+  Filter to a single page path.
+</ParamField>
+<ParamField query="since" type="string">
+  Unix timestamp or RFC3339 date — only count views after this time.
+</ParamField>
+
 ```bash
-curl 'http://localhost:3333/api/kiwi/analytics/views'
-curl 'http://localhost:3333/api/kiwi/analytics/views/v2?path=concepts/auth.md'
+curl 'http://localhost:3333/api/kiwi/analytics/views?top=10&since=2026-04-01T00:00:00Z'
 ```
 
-`views/v2` returns richer per-page engagement when tracking is enabled.
+```json
+{
+  "top": 10,
+  "since": 1743465600,
+  "results": [{ "path": "concepts/auth.md", "count": 312 }]
+}
+```
+
+### Time-series (v2)
+
+<ParamField query="period" type="string" default="30d">
+  Time window: `7d`, `30d`, or `90d`. Uses hourly buckets for ≤7d and daily buckets for longer periods.
+</ParamField>
+<ParamField query="path" type="string">
+  Filter to a single page path.
+</ParamField>
+<ParamField query="source" type="string">
+  Filter by view source (`ui`, `api`, `mcp`, etc.).
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/analytics/views/v2?period=7d&path=concepts/auth.md'
+```
+
+```json
+{
+  "period": "7d",
+  "path": "concepts/auth.md",
+  "time_series": [{ "timestamp": 1745539200, "count": 42 }],
+  "top_pages": [{ "path": "concepts/auth.md", "count": 312 }]
+}
+```
 
 ## Search analytics
 
+### Failed searches (legacy)
+
 ```bash
-curl 'http://localhost:3333/api/kiwi/analytics/searches'
-curl 'http://localhost:3333/api/kiwi/analytics/failed-searches'
+curl 'http://localhost:3333/api/kiwi/analytics/failed-searches?top=10'
 ```
 
-Failed searches help identify content gaps agents could not answer.
+### Search trends (v2)
+
+<ParamField query="period" type="string" default="30d">
+  Time window: `7d`, `30d`, or `90d`.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/analytics/searches?period=30d'
+```
+
+```json
+{
+  "period": "30d",
+  "search_success_rate": 0.87,
+  "time_series": [{ "timestamp": 1745539200, "count": 18 }],
+  "top_failed": [{ "query": "oauth refresh", "count": 7, "search_type": "search" }]
+}
+```
 
 ## Trends and content gaps
 
+### Trending pages
+
+<ParamField query="period" type="string" default="7d">
+  Comparison window for trending and declining pages.
+</ParamField>
+
 ```bash
-curl 'http://localhost:3333/api/kiwi/analytics/trends'
-curl 'http://localhost:3333/api/kiwi/analytics/content-gaps'
+curl 'http://localhost:3333/api/kiwi/analytics/trends?period=7d'
+```
+
+```json
+{
+  "period": "7d",
+  "trending": [{ "path": "concepts/auth.md", "delta_percent": 45.2 }],
+  "declining": [{ "path": "runbooks/legacy.md", "delta_percent": -32.1 }]
+}
+```
+
+### Content gaps
+
+Failed searches surfaced as content-gap suggestions for agents.
+
+<ParamField query="limit" type="integer" default="20">
+  Maximum suggestions to return.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/analytics/content-gaps?limit=10'
 ```
 
 Dismiss a content gap suggestion:
 
+<ParamField body="query" type="string" required>
+  Search query to dismiss.
+</ParamField>
+<ParamField body="search_type" type="string" default="search">
+  Search type that produced the gap.
+</ParamField>
+
 ```bash
 curl -X POST 'http://localhost:3333/api/kiwi/analytics/content-gaps/dismiss' \
   -H 'Content-Type: application/json' \
-  -d '{"query": "oauth refresh token"}'
+  -d '{"query": "oauth refresh token", "search_type": "search"}'
 ```
 
-## Import sources analytics
+```json
+{ "dismissed": "oauth refresh token" }
+```
+
+## View source breakdown
+
+Break down page views by client source (`ui`, `api`, `mcp`, etc.).
+
+<ParamField query="period" type="string" default="7d">
+  Time window: `7d`, `30d`, or `90d`.
+</ParamField>
 
 ```bash
-curl 'http://localhost:3333/api/kiwi/analytics/sources'
+curl 'http://localhost:3333/api/kiwi/analytics/sources?period=30d'
 ```
 
-Summarizes pages by `_source` frontmatter from imports.
+```json
+{
+  "period": "30d",
+  "sources": { "ui": 3200, "api": 840, "mcp": 160 }
+}
+```
 
 ## Per-page health check
 
@@ -193,17 +346,29 @@ GET /api/kiwi/memory/report
 <ParamField query="episodes_prefix" type="string">
   Path prefix for episodes directory. Uses the configured default if omitted.
 </ParamField>
+<ParamField query="limit" type="integer">
+  Paginate `episodic_files` and `unmerged` lists. When set, totals still reflect the full scan.
+</ParamField>
+<ParamField query="offset" type="integer">
+  Skip this many entries before returning paginated lists.
+</ParamField>
 
 ```bash
-curl 'http://localhost:3333/api/kiwi/memory/report'
+curl 'http://localhost:3333/api/kiwi/memory/report?limit=10&offset=0'
 ```
 
 ```json
 {
-  "episodic_count": 23,
+  "episodic_count": 10,
+  "total_episodic": 23,
+  "total_unmerged": 8,
   "merged_from_refs": 15,
-  "episodic_files": ["episodes/ep-001.md", "episodes/ep-002.md"],
-  "unmerged": 8,
+  "episodic_files": [
+    { "path": "episodes/ep-001.md", "episode_id": "ep-001", "memory_kind": "episodic" }
+  ],
+  "unmerged": [
+    { "path": "episodes/ep-012.md", "episode_id": "ep-012" }
+  ],
   "warnings": ["Episode ep-012.md has no merge target"]
 }
 ```

@@ -1,6 +1,6 @@
 ---
 title: "Canvas"
-description: "List, read, write, and auto-generate .canvas.json files."
+description: "List, read, write, patch, query, and auto-layout .canvas.json files."
 icon: "diagram-project"
 ---
 
@@ -14,9 +14,21 @@ Canvas paths must end with **`.canvas.json`**.
 GET /canvases
 ```
 
-```json
-{ "canvases": ["maps/site.canvas.json", "research/ideas.canvas.json"] }
+```bash
+curl 'http://localhost:3333/api/kiwi/canvases'
 ```
+
+```json
+{
+  "canvases": [
+    { "path": "maps/site.canvas.json", "name": "Site map" },
+    { "path": "research/ideas.canvas.json", "name": "Ideas" }
+  ]
+}
+```
+
+<ResponseField name="canvases[].path" type="string">Canvas file path.</ResponseField>
+<ResponseField name="canvases[].name" type="string">Display name derived from the file path.</ResponseField>
 
 ## Read canvas
 
@@ -25,6 +37,10 @@ GET /canvas?path=maps/site.canvas.json
 ```
 
 Returns the raw JSON document with `Content-Type: application/json`.
+
+```bash
+curl 'http://localhost:3333/api/kiwi/canvas?path=maps/site.canvas.json'
+```
 
 ## Write canvas
 
@@ -35,14 +51,56 @@ Content-Type: application/json
 
 Body must parse as JSON with **`nodes`** and **`edges`** arrays (empty arrays are allowed). Invalid JSON returns **`400`**.
 
+```bash
+curl -X PUT 'http://localhost:3333/api/kiwi/canvas?path=maps/site.canvas.json' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Actor: agent:canvas-writer' \
+  -d '{"nodes":[],"edges":[]}'
+```
+
 ## Patch canvas
+
+Apply a batch of atomic node and edge operations without replacing the full document. If any operation fails, the entire batch is rejected.
 
 ```http
 PATCH /canvas?path=maps/site.canvas.json
 Content-Type: application/json
 ```
 
-Apply a partial update (merge nodes/edges) without replacing the full document.
+<ParamField body="operations" type="array" required>
+  Ordered list of patch operations. Supported `op` values: `add_node`, `update_node`, `remove_node`, `add_edge`, `update_edge`, `remove_edge`.
+</ParamField>
+
+```bash
+curl -X PATCH 'http://localhost:3333/api/kiwi/canvas?path=maps/site.canvas.json' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Actor: agent:canvas-patcher' \
+  -d '{
+    "operations": [
+      { "op": "add_node", "node": { "id": "n1", "type": "text", "x": 0, "y": 0, "text": "Auth" } },
+      { "op": "add_edge", "edge": { "id": "e1", "fromNode": "n1", "toNode": "n2" } }
+    ]
+  }'
+```
+
+```json
+{
+  "path": "maps/site.canvas.json",
+  "etag": "a1b2c3d4",
+  "applied": {
+    "nodes_added": 1,
+    "nodes_updated": 0,
+    "nodes_removed": 0,
+    "edges_added": 1,
+    "edges_updated": 0,
+    "edges_removed": 0
+  }
+}
+```
+
+<Note>
+If the canvas file does not exist, PATCH creates an empty canvas and applies the operations.
+</Note>
 
 ## Delete canvas
 
@@ -50,31 +108,81 @@ Apply a partial update (merge nodes/edges) without replacing the full document.
 DELETE /canvas?path=maps/site.canvas.json
 ```
 
-## Query canvas nodes
-
-```http
-GET /canvas/query?path=maps/site.canvas.json&q=auth
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/canvas?path=maps/site.canvas.json' \
+  -H 'X-Actor: agent:canvas-cleanup'
 ```
 
-Filter nodes by label or metadata within a canvas file.
+```json
+{ "deleted": "maps/site.canvas.json" }
+```
+
+## Query canvas nodes
+
+Filter nodes and edges within a canvas file.
+
+```http
+GET /canvas/query?path=maps/site.canvas.json
+```
+
+<ParamField query="path" type="string" required>
+  Canvas file path.
+</ParamField>
+<ParamField query="type" type="string">
+  Filter nodes by type (for example `text`, `file`, `link`, `group`).
+</ParamField>
+<ParamField query="q" type="string">
+  Text search across node labels and metadata.
+</ParamField>
+<ParamField query="connected" type="string">
+  Return only nodes connected to this node ID.
+</ParamField>
+<ParamField query="nodes_only" type="boolean" default="false">
+  Return only matching nodes.
+</ParamField>
+<ParamField query="edges_only" type="boolean" default="false">
+  Return only matching edges.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/canvas/query?path=maps/site.canvas.json&q=auth&type=text'
+```
 
 ## Auto-layout
 
+Reposition **existing** canvas nodes using Graphviz. Unlike **Generate from link graph**, this does not add nodes — it only rearranges the current document.
+
 ```http
-POST /canvas/auto-layout
+POST /canvas/auto-layout?path=maps/site.canvas.json
 Content-Type: application/json
+```
+
+<ParamField query="path" type="string" required>
+  Canvas file path.
+</ParamField>
+<ParamField body="layout" type="string" default="dot">
+  Graphviz layout engine: `dot`, `neato`, `fdp`, or `circo`.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/canvas/auto-layout?path=maps/site.canvas.json' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Actor: agent:layout' \
+  -d '{"layout":"dot"}'
 ```
 
 ```json
 {
   "path": "maps/site.canvas.json",
-  "layout": "hierarchical"
+  "etag": "b2c3d4e5",
+  "node_count": 12,
+  "edge_count": 18
 }
 ```
 
-Repositions nodes in place using the chosen layout algorithm.
-
 ## Generate from link graph
+
+Build a new canvas from the **wiki-link graph**.
 
 ```http
 POST /canvas/generate
@@ -97,6 +205,13 @@ Content-Type: application/json
 
 Returns **`503`** if the link index is unavailable.
 
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/canvas/generate' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Actor: agent:graph-builder' \
+  -d '{"path":"auto/graph.canvas.json","folder":"concepts/"}'
+```
+
 ## MCP parity
 
-`kiwi_canvas_list`, `kiwi_canvas_read`, `kiwi_canvas_write`, `kiwi_canvas_generate` — see [MCP](/concepts/mcp).
+`kiwi_canvas_list`, `kiwi_canvas_read`, `kiwi_canvas_write`, and `kiwi_canvas_generate` are available over MCP. Patch, query, auto-layout, and delete are REST-only today — see [MCP](/concepts/mcp).

@@ -69,6 +69,7 @@ Configure the auth type in `.kiwi/config.toml` under `[auth] type`.
 | `If-Match` | Optimistic locking using ETag (git blob SHA) | `a1b2c3d4e5f6` |
 | `Content-Type` | Body format | `text/markdown` or `application/json` |
 | `X-Kiwi-Space` | Target space when using the shared `/api/kiwi/...` prefix | `engineering` |
+| `X-Kiwi-Source` | Page view attribution on `GET /file` | `mcp` |
 | `X-Space` | Recorded on audit log entries when present | `engineering` |
 
 <Tip>
@@ -112,10 +113,39 @@ curl http://localhost:3333/readyz
 ```
 </CodeGroup>
 
-All three return:
+`/health` and `/healthz` return a simple OK payload:
 
 ```json
 {"status": "ok"}
+```
+
+`/healthz` also includes uptime and build version:
+
+```json
+{"status": "ok", "uptime": "2h15m30s", "version": "0.20.0"}
+```
+
+`/readyz` verifies storage is reachable. When NFS, S3, or WebDAV is enabled, it also probes those protocol servers:
+
+```json
+{
+  "status": "ready",
+  "protocols": {
+    "nfs": { "enabled": true, "healthy": true, "port": 2049 },
+    "s3": { "enabled": true, "healthy": true, "port": 3334 }
+  }
+}
+```
+
+Returns **`503`** when storage is unreachable or an enabled protocol fails its health check:
+
+```json
+{
+  "status": "protocol-unhealthy",
+  "protocols": {
+    "nfs": { "enabled": true, "healthy": false, "port": 2049, "error": "connection refused" }
+  }
+}
 ```
 
 ## Rate limiting
