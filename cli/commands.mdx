@@ -229,16 +229,18 @@ Use `--dry-run` first to preview which files will be created before writing anyt
 
 <Accordion title="export — Export knowledge base">
 
-Export your knowledge base as JSONL or CSV.
+Export your knowledge base as structured data (JSONL, CSV, Parquet) or render documents (PDF, HTML, slides, static site).
 
 ```bash
 kiwifs export [flags]
 ```
 
+**Data export flags**
+
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--root` | `-r` | `./knowledge` | Knowledge root |
-| `--format` | | `jsonl` | Output format: `jsonl` or `csv` |
+| `--format` | | `jsonl` | Output format: `jsonl`, `csv`, or `parquet` |
 | `--output` | `-o` | stdout | Output file |
 | `--path` | | | Scope to subdirectory |
 | `--columns` | | | Comma-separated frontmatter fields |
@@ -247,21 +249,40 @@ kiwifs export [flags]
 | `--include-embeddings` | | `false` | Include vector embeddings |
 | `--limit` | | `0` | Max files (0 = unlimited) |
 
+**Document export flags** (require `--path`)
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--theme` | | Theme: `paper`, `modern`, `minimal`, `dark`, `presentation` |
+| `--self-contained` | `false` | Embed assets in HTML/PDF output |
+| `--bibliography` | | Path to `.bib` or `.json` bibliography |
+| `--csl` | | Citation style: `apa`, `ieee`, `chicago`, `vancouver`, `harvard` |
+| `--crossref` | `false` | Enable cross-reference processing |
+| `--pdf-engine` | auto | PDF engine: `typst` or `xelatex` |
+| `--slide-format` | `html` | Slide output: `html`, `pdf`, or `pptx` |
+| `--site-name` | | Static site title (`site` format) |
+| `--site-url` | | Canonical site URL |
+| `--repo-url` | | Repository URL for edit links |
+
 <CodeGroup>
 ```bash Export as JSONL
 kiwifs export --format jsonl -o knowledge.jsonl
 ```
 
-```bash Export as CSV with specific columns
-kiwifs export --format csv --path students/ --columns name,status,grade -o students.csv
+```bash Export as Parquet
+kiwifs export --format parquet -o knowledge.parquet
 ```
 
-```bash Pipe to jq
-kiwifs export --format jsonl | jq '.title'
+```bash Render PDF
+kiwifs export --format pdf --path docs/report.md --output report.pdf --theme paper
+```
+
+```bash Render static site
+kiwifs export --format site --path docs/ --output site.zip --site-name "Team wiki"
 ```
 </CodeGroup>
 
-See the [data export guide](/export/overview) for full details on output formats and the REST API.
+See [Data export](/export/overview) and [Document export](/export/documents).
 
 </Accordion>
 
@@ -311,7 +332,7 @@ kiwifs aggregate --root ./knowledge --group status --calc count --calc avg:prior
 
 <Accordion title="analytics — Knowledge health dashboard">
 
-Display a dashboard summarizing the health and statistics of your knowledge base.
+Display a dashboard summarizing knowledge health, link coverage, and engagement metrics.
 
 ```bash
 kiwifs analytics [flags]
@@ -319,11 +340,26 @@ kiwifs analytics [flags]
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--root` | `-r` | | Knowledge root |
+| `--root` | `-r` | `./knowledge` | Knowledge root |
+| `--scope` | | | Path prefix to scope results |
+| `--stale-threshold` | | `30` | Days before a page counts as stale |
+| `--format` | | `text` | Output format: `text` or `json` |
 
-```bash
+<CodeGroup>
+```bash Full dashboard
 kiwifs analytics --root ./knowledge
 ```
+
+```bash Scope to a folder
+kiwifs analytics --scope students/ --stale-threshold 14
+```
+
+```bash JSON output
+kiwifs analytics --format json
+```
+</CodeGroup>
+
+Text output includes **Engagement** metrics: total page views, top viewed pages, and failed searches (requires sqlite search backend).
 
 </Accordion>
 

@@ -1,10 +1,29 @@
 ---
 title: "Document export"
-description: "Render markdown to PDF, HTML, slides, or a static site via POST /api/kiwi/export/document."
+description: "Render markdown to PDF, HTML, slides, or a static site via REST, CLI, or MCP."
 icon: "file-pdf"
 ---
 
-Beyond JSONL and CSV, KiwiFS can **render** markdown into deliverable formats using Pandoc/Marp/MkDocs tooling (typically inside the Docker image).
+Beyond JSONL and CSV, KiwiFS can **render** markdown into deliverable formats using Pandoc, Marp, and MkDocs tooling (typically inside the Docker image).
+
+<Tabs>
+  <Tab title="REST">
+    ```bash
+    curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
+      -H 'Content-Type: application/json' \
+      -d '{"format":"pdf","path":"pages/report.md","theme":"paper"}' \
+      -o report.pdf
+    ```
+  </Tab>
+  <Tab title="CLI">
+    ```bash
+    kiwifs export --format pdf --path pages/report.md --output report.pdf --theme paper
+    ```
+  </Tab>
+  <Tab title="MCP">
+    Call **`kiwi_export_document`** with the same options as the REST body.
+  </Tab>
+</Tabs>
 
 ## Endpoint
 
@@ -15,20 +34,53 @@ Content-Type: application/json
 
 ## Request body
 
-| Field | Required | Description |
-| --- | --- | --- |
-| `format` | Yes | `pdf`, `html`, `slides`, or `site` |
-| `path` | Yes | File or directory under the knowledge root |
-| `theme` | No | Theme name for HTML/PDF |
-| `self_contained` | No | Single-file HTML with embedded assets |
-| `bibliography` | No | BibTeX path for citations |
-| `csl_style` | No | Citation style |
-| `crossref` | No | Enable cross-reference processing |
-| `pdf_engine` | No | PDF engine override |
-| `slide_format` | No | Slide deck format (Marp) |
-| `site_name` | No | Static site title (`site` format) |
-| `site_url` | No | Canonical site URL |
-| `repo_url` | No | Edit-on-GitHub style link |
+<ParamField body="format" type="string" required>
+  Output format: `pdf`, `html`, `slides`, or `site`.
+</ParamField>
+
+<ParamField body="path" type="string" required>
+  File or directory under the knowledge root.
+</ParamField>
+
+<ParamField body="theme" type="string">
+  Built-in theme: `paper`, `modern`, `minimal`, `dark`, or `presentation`. You can also place custom templates in `.kiwi/themes/`.
+</ParamField>
+
+<ParamField body="self_contained" type="boolean" default="false">
+  Produce a single-file HTML or PDF with embedded assets.
+</ParamField>
+
+<ParamField body="bibliography" type="string">
+  Path to a `.bib` or `.json` bibliography file for citations.
+</ParamField>
+
+<ParamField body="csl_style" type="string">
+  Citation style: `apa`, `ieee`, `chicago`, `vancouver`, or `harvard`.
+</ParamField>
+
+<ParamField body="crossref" type="boolean" default="false">
+  Enable cross-reference processing for figures, tables, and equations.
+</ParamField>
+
+<ParamField body="pdf_engine" type="string">
+  PDF engine: `typst` or `xelatex`. Auto-detects when omitted.
+</ParamField>
+
+<ParamField body="slide_format" type="string" default="html">
+  Slide output format: `html`, `pdf`, or `pptx` (Marp).
+</ParamField>
+
+<ParamField body="site_name" type="string">
+  Static site title (`site` format).
+</ParamField>
+
+<ParamField body="site_url" type="string">
+  Canonical site URL for MkDocs export.
+</ParamField>
+
+<ParamField body="repo_url" type="string">
+  Repository URL for edit-on-GitHub style links.
+</ParamField>
 
 ## Examples
 
@@ -36,7 +88,7 @@ Content-Type: application/json
 ```bash PDF single page
 curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
   -H 'Content-Type: application/json' \
-  -d '{"format":"pdf","path":"pages/report.md"}' \
+  -d '{"format":"pdf","path":"pages/report.md","theme":"paper"}' \
   -o report.pdf
 ```
 
@@ -50,26 +102,20 @@ curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
 ```bash Slide deck
 curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
   -H 'Content-Type: application/json' \
-  -d '{"format":"slides","path":"talks/intro.md","slide_format":"marp"}' \
+  -d '{"format":"slides","path":"talks/intro.md","slide_format":"pdf"}' \
   -o intro.pdf
+```
+
+```bash CLI PDF export
+kiwifs export --format pdf --path docs/report.md --output report.pdf --theme modern --crossref
 ```
 </CodeGroup>
 
 The response streams the rendered artifact with an appropriate `Content-Type`. Large exports may take up to **five minutes** server-side.
 
-## CLI
-
-Document export is primarily exposed over REST. For bulk metadata export use:
-
-```bash
-kiwifs export --format jsonl --include-content -o backup.jsonl
-```
-
-See [Data export](/export/overview).
-
-## MCP
-
-**`kiwi_export_document`** accepts the same options as the REST body for agent-driven publishing workflows.
+<Warning>
+Document export requires `--path`. Data-only formats (`jsonl`, `csv`, `parquet`) do not need it.
+</Warning>
 
 ## Docker requirement
 
@@ -77,6 +123,17 @@ PDF and site generation depend on external tools bundled in the official Docker 
 
 ## Related documentation
 
-- [Export overview](/export/overview)
-- [Import and export API](/api/import-export)
-- [MCP](/concepts/mcp)
+<CardGroup cols={2}>
+  <Card title="Data export" icon="upload" href="/export/overview">
+    JSONL, CSV, and Parquet metadata export.
+  </Card>
+  <Card title="Import and export API" icon="arrows-rotate" href="/api/import-export">
+    REST reference for export endpoints.
+  </Card>
+  <Card title="CLI commands" icon="terminal" href="/cli/commands">
+    Full `kiwifs export` flag reference.
+  </Card>
+  <Card title="MCP" icon="plug" href="/concepts/mcp">
+    Agent-driven publishing with `kiwi_export_document`.
+  </Card>
+</CardGroup>

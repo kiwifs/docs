@@ -229,9 +229,25 @@ When `true`, writes are validated against `.kiwi/schemas/`. See [Schemas](/conce
 
 ```toml
 [import]
+# Airbyte Cloud
 airbyte_api_key = "${AIRBYTE_API_KEY}"
 airbyte_workspace_id = "${AIRBYTE_WORKSPACE_ID}"
+
+# Airbyte Docker
+docker_host = "unix:///var/run/docker.sock"   # override DOCKER_HOST
+image_prefix = "airbyte/"                     # private registry prefix
+pull_policy = "if-not-present"                # always | if-not-present | never
+prefer_airbyte = true                           # route network sources through Airbyte when available
 ```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `airbyte_api_key` | | Airbyte Cloud API key |
+| `airbyte_workspace_id` | | Airbyte Cloud workspace ID |
+| `docker_host` | `$DOCKER_HOST` | Docker socket for local connector containers |
+| `image_prefix` | `airbyte/` | Connector image prefix (for private registries) |
+| `pull_policy` | `if-not-present` | When to pull connector images |
+| `prefer_airbyte` | `true` | Route network sources through Airbyte when Docker or Cloud is configured |
 
 See [Airbyte import](/import/airbyte).
 
