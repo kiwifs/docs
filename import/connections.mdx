@@ -1,6 +1,6 @@
 ---
 title: "Browse, preview, and saved connections"
-description: "Discover tables and collections, preview import rows, and re-run imports without storing credentials on disk."
+description: "Discover tables and collections, preview import rows, manage saved connections, and configure auto-sync."
 icon: "link"
 ---
 
@@ -30,9 +30,57 @@ When a connection store is enabled, the server can persist **metadata only** (no
 | `POST` | `/api/kiwi/import/connections` | Save or update metadata. |
 | `DELETE` | `/api/kiwi/import/connections/:id` | Remove a saved connection. |
 | `POST` | `/api/kiwi/import/connections/:id/run` | Run import again; **credentials must be supplied in the body** for each run. |
+| `POST` | `/api/kiwi/import/connections/:id/sync` | Pause, resume, or change auto-sync interval. |
+| `GET` | `/api/kiwi/import/sync/status` | List sync-enabled connections and their status. |
 
 See [Import and export](/api/import-export#import-browse) for the same endpoints with request detail.
+
+## Auto-sync
+
+Syncable sources enable periodic background imports after the first successful run:
+
+| Source | Sync method |
+| --- | --- |
+| `postgres`, `mysql`, `mongodb`, `firestore` | Native Go driver |
+| `firebase-rtdb`, `notion`, `airtable` | Airbyte Docker or Cloud |
+
+<Steps>
+  <Step title="First import completes">
+    Syncable connections auto-enable sync with a default **1 hour** interval.
+  </Step>
+  <Step title="Scheduler runs">
+    The server checks due connections every **30 seconds** and runs full sync imports.
+  </Step>
+  <Step title="Removed records archived">
+    Pages from the same `_source` not seen in a sync run receive `_archived_at` frontmatter instead of being deleted.
+  </Step>
+</Steps>
+
+Pause or resume sync from the web UI data sources panel or via REST:
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/import/connections/conn_01/sync' \
+  -H 'Content-Type: application/json' \
+  -d '{"enabled": true, "interval": "2h"}'
+```
+
+Check sync status:
+
+```bash
+curl 'http://localhost:3333/api/kiwi/import/sync/status'
+```
 
 ## File ingestion
 
 `POST /api/kiwi/ingest` converts supported office and document formats into markdown pages via the MarkItDown pipeline. See [Import and export](/api/import-export#ingest-from-files).
+
+## Related documentation
+
+<CardGroup cols={2}>
+  <Card title="Airbyte import" icon="rotate" href="/import/airbyte">
+    Docker and Cloud connector flows.
+  </Card>
+  <Card title="Import overview" icon="download" href="/import/overview">
+    Supported sources and CLI usage.
+  </Card>
+</CardGroup>

@@ -12,9 +12,16 @@ Each canvas is JSON with top-level `nodes` and `edges` arrays. Node and edge obj
 
 ## Graph-assisted layout
 
-`POST /api/kiwi/canvas/generate` can build a new canvas from the **wiki-link graph** using Graphviz-style layout (`hierarchical`, `radial`, `force`, or `circular`). You can restrict to a folder prefix so only part of the graph is laid out.
+Two layout paths exist:
+
+- **`POST /api/kiwi/canvas/generate`** builds a new canvas from the **wiki-link graph** using layout modes (`hierarchical`, `radial`, `force`, or `circular`). You can restrict to a folder prefix so only part of the graph is laid out.
+- **`POST /api/kiwi/canvas/auto-layout`** repositions nodes in an **existing** canvas using Graphviz engines (`dot`, `neato`, `fdp`, `circo`).
+
+## Web UI
+
+The web UI opens `.canvas.json` files in structured (React Flow) or freeform (Excalidraw) mode. See [Web UI — Canvas](/guides/web-ui#canvas).
 
 ## Related documentation
 
-- [Canvas REST API](/api/canvas)
+- [Canvas REST API](/api/canvas) — list, read, write, patch, query, auto-layout, generate
 - [MCP](/concepts/mcp) — `kiwi_canvas_list`, `kiwi_canvas_read`, `kiwi_canvas_write`, `kiwi_canvas_generate`

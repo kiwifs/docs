@@ -18,8 +18,13 @@ Press **Cmd+K** (macOS) or **Ctrl+K** (Windows/Linux) to open global search.
 
 ## File tree
 
-- Expand and collapse folders; drag-and-drop to move pages
+The sidebar file tree uses virtualization for large knowledge bases:
+
+- Expand and collapse folders; drag-and-drop to move pages or upload files from your OS
+- Keyboard navigation: arrow keys, Enter to open, F2 to rename inline
 - Context menu: rename, delete, new file, open in editor
+- Undo and redo for file operations
+- Double-click a **`.canvas.json`** file to open the canvas editor
 - Reflects the same paths as `GET /api/kiwi/tree`
 
 ## Page view and editor
@@ -43,9 +48,15 @@ See [Bases and views](/concepts/bases-views).
 
 ## Canvas
 
-Edit `*.canvas.json` spatial diagrams (nodes and edges). Use **Generate from graph** to seed a canvas from wiki-link structure.
+Open any **`*.canvas.json`** file from the file tree to edit spatial diagrams.
 
-See [Canvas](/concepts/canvas).
+- **Structured mode** — React Flow renderer with text, file, link, and group node types; client-side layout
+- **Freeform mode** — Excalidraw-style drawing on the same canvas document
+- **Canvas screen** — browse and manage multiple canvas files from one view
+- **Generate from graph** — seed a canvas from the wiki-link structure
+- **Auto-layout** — reposition existing nodes with Graphviz layouts
+
+Canvas changes stream over SSE alongside file writes. See [Canvas](/concepts/canvas) and [Canvas REST API](/api/canvas).
 
 ## Kanban and workflows
 
@@ -63,7 +74,14 @@ Add inline comments on specific lines. Agents and humans resolve threads from th
 
 ## Analytics and engagement
 
-The analytics panel surfaces knowledge health: stale pages, orphans, broken links, and **page view** counts when tracking is enabled. Mirrors `kiwifs analytics` and `GET /api/kiwi/analytics`.
+The analytics panel surfaces knowledge health and engagement metrics:
+
+- **Health** — stale pages, orphans, broken links, empty pages, missing frontmatter
+- **Engagement** — page view counts, top viewed pages, failed searches
+- **Trends** — trending and declining pages over selectable periods (`7d`, `30d`, `90d`)
+- **Content gaps** — failed searches surfaced as writing suggestions you can dismiss
+
+Mirrors `kiwifs analytics` and the [Analytics API](/api/analytics). Requires the sqlite search backend.
 
 ## Themes
 

@@ -20,10 +20,13 @@ airbyte_api_key = "${AIRBYTE_API_KEY}"
 airbyte_workspace_id = "${AIRBYTE_WORKSPACE_ID}"
 
 # Airbyte Docker (local)
-# airbyte_docker_image = "..."
+docker_host = "unix:///var/run/docker.sock"
+image_prefix = "airbyte/"
+pull_policy = "if-not-present"    # always | if-not-present | never
+prefer_airbyte = true
 ```
 
-Environment variables expand in TOML via `${VAR}` syntax.
+See [Configuration — Import](/configuration#import-airbyte) for all options.
 
 ## REST endpoints (Docker)
 
@@ -42,10 +45,20 @@ Environment variables expand in TOML via `${VAR}` syntax.
 | `GET` | `/api/kiwi/import/airbyte-cloud/connections` | List connections |
 | `POST` | `/api/kiwi/import/airbyte-cloud/sync` | Trigger sync into KiwiFS |
 
-## Sync status
+## Sync status and auto-sync
+
+Syncable sources (`postgres`, `mysql`, `mongodb`, `firestore`, `firebase-rtdb`, `notion`, `airtable`) enable periodic auto-sync after the first import. Default interval is **1 hour**.
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/import/sync/status'
+```
+
+Pause or change interval:
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/import/connections/conn_01/sync' \
+  -H 'Content-Type: application/json' \
+  -d '{"enabled": true, "interval": "2h"}'
 ```
 
 Use with saved [import connections](/import/connections) when periodic sync is enabled.
