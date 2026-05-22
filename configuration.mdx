@@ -37,18 +37,20 @@ Enable semantic search by configuring an embedder and a vector store.
 ```toml
 [search.vector]
 enabled = true
-chunk = 512
-worker_count = 4
+worker_count = 5          # default; lower for small local embedders
 
 [search.vector.embedder]
 provider = "openai"      # openai | ollama | cohere | http | bedrock | vertex
 model = "text-embedding-3-small"
 api_key = "${OPENAI_API_KEY}"
 dimensions = 1536
+# timeout = "120s"       # optional for Ollama; default is 30s
 
 [search.vector.store]
 provider = "sqlite-vec"  # sqlite-vec | qdrant | pgvector | pinecone | weaviate | milvus
 ```
+
+For local Ollama on a small CPU-only VPS, lower `worker_count` and raise the Ollama request timeout. See [Ollama vector search on a small VPS](/deploy/ollama-vector-search).
 
 <AccordionGroup>
 <Accordion title="Embedder providers">

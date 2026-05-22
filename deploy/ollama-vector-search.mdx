@@ -1,0 +1,168 @@
+---
+title: "Ollama vector search on a small VPS"
+description: "Run semantic search with a local Ollama embedder, sqlite-vec, and low-concurrency vector indexing."
+icon: "server"
+---
+
+Use this setup when you want semantic search without an external embedding API.
+It is useful on small CPU-only VPS instances where Ollama can be slower than the default vector indexing settings.
+
+KiwiFS supports two tuning knobs for this case:
+
+- `[search.vector].worker_count` lowers concurrent embed and upsert workers.
+- `[search.vector.embedder].timeout` raises the Ollama HTTP request timeout.
+
+The defaults stay optimized for normal machines: `worker_count` defaults to `5`, and the Ollama timeout defaults to `30s`.
+
+## Prerequisites
+
+- KiwiFS with the vector tuning options from [kiwifs/kiwifs#20](https://github.com/kiwifs/kiwifs/pull/20).
+- An Ollama server reachable from the KiwiFS process.
+- An embedding model pulled into Ollama.
+
+```bash
+ollama pull nomic-embed-text
+```
+
+## Configure KiwiFS
+
+Create or update `.kiwi/config.toml` in your knowledge root.
+
+```toml
+[search]
+engine = "sqlite"
+
+[search.vector]
+enabled = true
+worker_count = 1
+
+[search.vector.embedder]
+provider = "ollama"
+base_url = "http://127.0.0.1:11434"
+model = "nomic-embed-text"
+timeout = "120s"
+
+[search.vector.store]
+provider = "sqlite-vec"
+```
+
+This keeps the full stack local:
+
+- Ollama generates embeddings on the same machine.
+- `sqlite-vec` stores vectors inside the KiwiFS search database.
+- No embedding API key is required.
+
+<Note>
+Use Go duration strings for `timeout`, such as `60s`, `120s`, or `3m`.
+</Note>
+
+## Choose the Ollama URL
+
+The correct `base_url` depends on where KiwiFS runs.
+
+<AccordionGroup>
+<Accordion title="KiwiFS and Ollama on the same host">
+
+Use the local Ollama URL.
+
+```toml
+[search.vector.embedder]
+provider = "ollama"
+base_url = "http://127.0.0.1:11434"
+model = "nomic-embed-text"
+timeout = "120s"
+```
+
+</Accordion>
+<Accordion title="KiwiFS in Docker, Ollama on the host">
+
+On Linux, add a host gateway entry to the KiwiFS container and use `host.docker.internal`.
+
+```yaml
+services:
+  kiwifs:
+    image: ameliaanhlam/kiwifs:latest
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+
+Then configure KiwiFS:
+
+```toml
+[search.vector.embedder]
+provider = "ollama"
+base_url = "http://host.docker.internal:11434"
+model = "nomic-embed-text"
+timeout = "120s"
+```
+
+</Accordion>
+<Accordion title="KiwiFS and Ollama in the same Compose network">
+
+Use the Ollama service name as the hostname.
+
+```toml
+[search.vector.embedder]
+provider = "ollama"
+base_url = "http://ollama:11434"
+model = "nomic-embed-text"
+timeout = "120s"
+```
+
+</Accordion>
+</AccordionGroup>
+
+## Index existing files
+
+After enabling vector search, rebuild the search indexes once.
+
+```bash
+kiwifs reindex --root ./knowledge
+```
+
+For a large vault on a small VPS, keep `worker_count = 1` for the first reindex.
+Raise it later only if CPU, memory, and Ollama latency remain stable.
+
+## When to tune the values
+
+| Symptom | Change |
+| --- | --- |
+| Ollama requests time out during reindexing | Increase `timeout`, for example from `120s` to `3m` |
+| CPU stays saturated or the VPS becomes unresponsive | Lower `worker_count` to `1` |
+| Reindexing is stable but too slow | Try `worker_count = 2` |
+| Vector search works, but new writes appear in semantic search slowly | Keep `worker_count` low and run `kiwifs reindex` during low-traffic periods |
+
+## Troubleshooting
+
+### Check Ollama from the KiwiFS machine
+
+```bash
+curl http://127.0.0.1:11434/api/tags
+```
+
+If KiwiFS runs in Docker, run the check from inside the container and use the same hostname as `base_url`.
+
+```bash
+curl http://host.docker.internal:11434/api/tags
+```
+
+### Confirm the model exists
+
+```bash
+ollama list
+```
+
+If `nomic-embed-text` is missing, pull it:
+
+```bash
+ollama pull nomic-embed-text
+```
+
+### Recover from a failed first reindex
+
+Keep the same config, raise `timeout`, and run reindex again.
+The vector index is derivative data, so KiwiFS can rebuild it from the markdown files.
+
+```bash
+kiwifs reindex --root ./knowledge
+```
