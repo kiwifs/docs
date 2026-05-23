@@ -4,21 +4,31 @@ description: "Separate raw agent sessions from durable semantic pages using fron
 icon: "brain"
 ---
 
-KiwiFS is file-first: agents write plain markdown, git versions everything, and HTTP headers can record **lineage** (`derived-from` from `X-Actor` / `X-Provenance`). For agent memory systems you usually want two layers:
+KiwiFS provides a **data model** for agent memory systems: episodic files accumulate raw observations, semantic pages hold durable knowledge, and a **merge report** shows which episodes are not yet referenced by any downstream page.
 
-1. **Episodic memory** — per-run or per-session raw notes (high volume, append-friendly).
-2. **Semantic memory** — durable curated knowledge on entity and concept pages, often after **consolidation** from episodes.
+KiwiFS does not run an LLM. Consolidation is your job; KiwiFS gives you conventions and tooling.
 
-KiwiFS does **not** run an LLM for consolidation. You (or a scheduler) merge episodes into semantic pages; KiwiFS provides the **data model** and **`memory report`** to show what is not yet linked.
+## Two layers
+
+<CardGroup cols={2}>
+  <Card title="Episodic memory" icon="clock-rotate-left">
+    Per-run or per-session raw notes. High volume, append-friendly, lives under `episodes/`.
+  </Card>
+  <Card title="Semantic memory" icon="book">
+    Durable curated knowledge on entity and concept pages. Built from episodes after consolidation.
+  </Card>
+</CardGroup>
 
 ## Provenance vs consolidation
 
-| Frontmatter | Meaning |
-| --- | --- |
-| `derived-from` | Injected on **write** from `X-Provenance`. Records which run or job **produced** this file. |
-| `merged-from` | You set this on a **downstream** page. It says this semantic page was built **from** these episodes. |
+| Frontmatter | Set by | Meaning |
+| --- | --- | --- |
+| `derived-from` | KiwiFS (from `X-Provenance` header) | Which run or job **produced** this file |
+| `merged-from` | You (or your consolidation job) | Which episodes were **folded into** this downstream page |
 
-An episode can have `derived-from: run:…` from the API, and a `pages/foo.md` page can list the same run under `merged-from`.
+<Info>
+`derived-from` records authorship. `merged-from` records consumption. The memory report uses only `merged-from` to determine coverage.
+</Info>
 
 ## Classify pages with `memory_kind`
 
@@ -26,29 +36,27 @@ An episode can have `derived-from: run:…` from the API, and a `pages/foo.md` p
 | --- | --- |
 | `episodic` | Raw run or session material |
 | `semantic` | Durable curated knowledge |
-| `consolidation` | Optional staging before merge to semantic |
-| `working` | Optional scratch, high churn |
+| `consolidation` | Staging area before merge to semantic |
+| `working` | Scratch, high churn |
 
-`memory_kind: semantic` or `consolidation` prevents a file from being treated as episodic even under the episodes path prefix.
+<Note>
+`memory_kind: semantic` or `consolidation` prevents a file from being treated as episodic even when it lives under the episodes path prefix.
+</Note>
 
-## Path convention: `episodes/`
+## Path convention
 
-By default, markdown under **`episodes/`** is episodic when `memory_kind` is not `semantic` or `consolidation`. Configure the prefix in `.kiwi/config.toml`:
+By default, markdown under **`episodes/`** is treated as episodic when `memory_kind` is absent or set to `episodic`.
 
-```toml
+```toml .kiwi/config.toml
 [memory]
 episodes_path_prefix = "episodes/"
 ```
 
 ## Episodic identity and `merged-from`
 
-- Prefer **`episode_id`** in episodic frontmatter.
-- If missing, **`id`** is used when the file is still episodic.
-- A `merged-from` entry can reference `type: episode` with matching `id`, or `type: episode` with `path` (e.g. `episodes/2026/run.md`).
+Prefer **`episode_id`** in episodic frontmatter. If absent, KiwiFS falls back to `id`.
 
-Example:
-
-```yaml
+```yaml frontmatter example
 merged-from:
   - type: episode
     id: run-7f3a
@@ -56,36 +64,50 @@ merged-from:
     note: "merged into concepts/auth from nightly job"
 ```
 
-An episode is **covered** when any page cites it in `merged-from` (by `id` or compatible `type` such as `run`, `session`, `trace` with the same id). The report does **not** use `derived-from` for coverage.
+An episode is **covered** when any page references it in `merged-from` — by `id` or by compatible `type` (`run`, `session`, `trace`, `event`, `ingest`).
 
 ## Operator workflow
 
-1. Agents write under `episodes/` with `X-Provenance` and optional `episode_id`.
-2. A job reads unmerged episodes (`kiwifs memory report` or `GET /api/kiwi/memory/report`), consolidates with your LLM or rules, and updates `pages/` with **`merged-from`**.
-3. Re-run the report until `unmerged` is empty or acceptable.
+<Steps>
+  <Step title="Agents write episodes">
+    Write under `episodes/` with `X-Provenance` and optional `episode_id` in frontmatter.
+  </Step>
+  <Step title="Consolidation job runs">
+    Read unmerged episodes, consolidate with your LLM or rules, then update `pages/` with `merged-from`.
+  </Step>
+  <Step title="Verify coverage">
+    Re-run the memory report until `unmerged` is empty or acceptable.
+  </Step>
+</Steps>
+
+## Check coverage
 
 <Tabs>
-<Tab title="CLI">
-```bash
-kiwifs memory report --root ./knowledge
-kiwifs memory report --root ./knowledge --json
-kiwifs memory report --episodes-prefix raw/
-```
-</Tab>
-<Tab title="REST">
-```bash
-curl -s 'http://localhost:3333/api/kiwi/memory/report'
-curl -s 'http://localhost:3333/api/kiwi/memory/report?episodes_prefix=raw/&limit=10&offset=0'
-```
-</Tab>
-<Tab title="MCP">
-Call **`kiwi_memory_report`** with optional `episodes_prefix`, `limit`, and `offset`.
-</Tab>
+  <Tab title="CLI">
+    ```bash
+    kiwifs memory report --root ./knowledge
+    kiwifs memory report --root ./knowledge --json
+    kiwifs memory report --episodes-prefix raw/
+    ```
+  </Tab>
+  <Tab title="REST">
+    ```bash
+    curl -s 'http://localhost:3333/api/kiwi/memory/report'
+    curl -s 'http://localhost:3333/api/kiwi/memory/report?episodes_prefix=raw/&limit=10&offset=0'
+    ```
+  </Tab>
+  <Tab title="MCP">
+    Call **`kiwi_memory_report`** with optional `episodes_prefix`, `limit`, and `offset`.
+  </Tab>
 </Tabs>
 
 ## Related documentation
 
-- [Configuration](/configuration#memory) — `[memory]` section
-- [Analytics API](/api/analytics#memory-report) — response fields
-- [Examples](/guides/examples#consolidate-episodes-into-durable-pages) — MCP consolidation sequence
-- [Agent playbook](/concepts/agent-playbook) — `Remember` and `Consolidate` operations
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/configuration#memory">
+    `[memory]` section in config.toml.
+  </Card>
+  <Card title="Analytics API" icon="chart-bar" href="/api/analytics#memory-report">
+    Response fields for the memory report endpoint.
+  </Card>
+</CardGroup>

@@ -10,78 +10,99 @@ Multi-space mode lets one KiwiFS process host **multiple independent knowledge b
 
 - Separate team wikis on one host (engineering vs product).
 - Per-tenant isolation in self-hosted deployments.
-- A default space plus dynamically provisioned workspaces on the same port.
+- A default space plus dynamically provisioned workspaces.
 
 ## Configure spaces
 
 <Tabs>
-<Tab title="config.toml">
-```toml
-[[spaces]]
-name = "engineering"
-root = "/data/eng-wiki"
+  <Tab title="config.toml">
+    ```toml .kiwi/config.toml
+    [[spaces]]
+    name = "engineering"
+    root = "/data/eng-wiki"
 
-[[spaces]]
-name = "product"
-root = "/data/product-wiki"
-```
-</Tab>
-<Tab title="CLI flags">
-```bash
-kiwifs serve \
-  --space engineering=/data/eng-wiki \
-  --space product=/data/product-wiki
-```
-</Tab>
+    [[spaces]]
+    name = "product"
+    root = "/data/product-wiki"
+    ```
+  </Tab>
+  <Tab title="CLI flags">
+    ```bash
+    kiwifs serve \
+      --space engineering=/data/eng-wiki \
+      --space product=/data/product-wiki
+    ```
+  </Tab>
 </Tabs>
 
-The first registered space is the **default** when a request does not specify another space.
+<Info>
+The first registered space is the **default** — requests without a space identifier route there.
+</Info>
 
-## How requests are routed
+## Request routing
 
 Resolution order:
 
-1. **`X-Kiwi-Space` header** — set by a reverse proxy (e.g. subdomain → space name). If the header is set but the space does not exist, the request fails (no silent fallback).
-2. **URL path prefix** — `GET /api/kiwi/{space}/tree` rewrites internally to `/api/kiwi/tree` on that space's stack.
-3. **Default space** — first registered space in config or flags.
+| Priority | Method | Example |
+| --- | --- | --- |
+| 1 | `X-Kiwi-Space` header | Set by a reverse proxy (subdomain → space name) |
+| 2 | URL path prefix | `/api/kiwi/{space}/tree` |
+| 3 | Default space | First registered space |
 
-```bash
-# Path-based
+<CodeGroup>
+```bash Path-based routing
 curl 'http://localhost:3333/api/kiwi/engineering/tree?path='
+```
 
-# Header-based (same path as single-space)
+```bash Header-based routing
 curl 'http://localhost:3333/api/kiwi/tree?path=' \
   -H 'X-Kiwi-Space: engineering'
 ```
+</CodeGroup>
 
-MCP supports **`--space <name>`** when the knowledge root hosts multiple configured spaces.
+<Warning>
+If `X-Kiwi-Space` is set but the space does not exist, the request fails immediately — no silent fallback to the default.
+</Warning>
 
 ## Space admin API
-
-Administrators can list, inspect, create, and remove spaces at the **manager** level (not under `/api/kiwi/`):
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/spaces` | List all spaces with metadata |
-| `GET` | `/api/spaces/:name` | One space summary |
+| `GET` | `/api/spaces/:name` | Single space summary |
 | `POST` | `/api/spaces` | Create `{ "name", "root" }` |
 | `DELETE` | `/api/spaces/:name` | Remove a dynamic space |
 
-See [Spaces API](/api/spaces) for curl examples. Dynamic spaces are persisted to `.kiwi/spaces.json` under the first registered space root and restored on restart.
+Dynamic spaces persist to `.kiwi/spaces.json` under the first space's root and restore on restart.
+
+See [Spaces API](/api/spaces) for curl examples.
 
 ## Per-space auth
 
-With `auth.type = "perspace"`, API keys can be scoped to a single space:
+With `auth.type = "perspace"`, API keys scope to a single space:
 
-```toml
+```toml .kiwi/config.toml
 [[auth.api_keys]]
 key = "kiwi_sk_eng_..."
 space = "engineering"
 actor = "eng-team"
 ```
 
+## MCP
+
+Use `--space <name>` when the knowledge root hosts multiple configured spaces:
+
+```bash
+kiwifs mcp --root /data --space engineering
+```
+
 ## Related documentation
 
-- [Configuration](/configuration#multi-space)
-- [Spaces API](/api/spaces)
-- [Deployment](/deploy/docker) — Docker volume layout for `/data/.spaces/{name}`
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/configuration#multi-space">
+    `[[spaces]]` config syntax.
+  </Card>
+  <Card title="Spaces API" icon="server" href="/api/spaces">
+    REST CRUD for space management.
+  </Card>
+</CardGroup>

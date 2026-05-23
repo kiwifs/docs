@@ -4,9 +4,11 @@ description: "List, create, and remove knowledge spaces on a multi-space KiwiFS 
 icon: "server"
 ---
 
-When KiwiFS runs with a **space manager**, space administration lives at `/api/spaces` (not under `/api/kiwi/`). Per-space file APIs remain at `/api/kiwi/...` or `/api/kiwi/{space}/...`.
+When KiwiFS runs with a **space manager**, space administration lives at `/api/spaces` (not under `/api/kiwi/`).
 
-See [Multi-space](/concepts/multi-space) for routing rules and `X-Kiwi-Space`.
+<Info>
+Per-space file APIs remain at `/api/kiwi/...` or `/api/kiwi/{space}/...`. See [Multi-space](/concepts/multi-space) for routing rules.
+</Info>
 
 ## List spaces
 
@@ -18,7 +20,7 @@ GET /api/spaces
 curl -s 'http://localhost:3333/api/spaces'
 ```
 
-```json
+```json Response
 {
   "spaces": [
     {
@@ -32,6 +34,12 @@ curl -s 'http://localhost:3333/api/spaces'
 }
 ```
 
+<ResponseField name="spaces[].name" type="string">Unique space identifier.</ResponseField>
+<ResponseField name="spaces[].root" type="string">Filesystem path for this space.</ResponseField>
+<ResponseField name="spaces[].fileCount" type="integer">Number of markdown files.</ResponseField>
+<ResponseField name="spaces[].sizeBytes" type="integer">Total size on disk.</ResponseField>
+<ResponseField name="spaces[].lastModified" type="string">Most recent file modification.</ResponseField>
+
 ## Get one space
 
 ```http
@@ -42,7 +50,7 @@ GET /api/spaces/:name
 curl -s 'http://localhost:3333/api/spaces/engineering'
 ```
 
-Returns **`404`** if the name is unknown.
+Returns `404` if the name is unknown.
 
 ## Create a space
 
@@ -51,12 +59,13 @@ POST /api/spaces
 Content-Type: application/json
 ```
 
-```json
-{
-  "name": "research",
-  "root": "/data/research-wiki"
-}
-```
+<ParamField body="name" type="string" required>
+  Unique identifier for the new space.
+</ParamField>
+
+<ParamField body="root" type="string" required>
+  Filesystem path for the space's knowledge root.
+</ParamField>
 
 ```bash
 curl -X POST 'http://localhost:3333/api/spaces' \
@@ -64,7 +73,11 @@ curl -X POST 'http://localhost:3333/api/spaces' \
   -d '{"name":"research","root":"/data/research-wiki"}'
 ```
 
-Returns **`201`** with space metadata. Returns **`409`** if the name already exists. KiwiFS creates the root directory, initializes git and indexes, and persists the entry to `.kiwi/spaces.json`.
+Returns `201` with space metadata. Returns `409` if the name already exists.
+
+<Note>
+KiwiFS creates the root directory, initializes git and indexes, and persists the entry to `.kiwi/spaces.json`.
+</Note>
 
 ## Delete a space
 
@@ -76,17 +89,27 @@ DELETE /api/spaces/:name
 curl -X DELETE 'http://localhost:3333/api/spaces/research'
 ```
 
-```json
+```json Response
 { "deleted": "research" }
 ```
 
-Removes the space from the manager. Does not delete files on disk — clean up the `root` directory separately if needed.
+<Warning>
+Removes the space from the manager but does **not** delete files on disk. Clean up the `root` directory separately if needed.
+</Warning>
 
 ## Auth
 
+<Tip>
 Protect `/api/spaces` in production. Creation and deletion are administrative operations. Per-space API keys (`auth.type = perspace`) apply to `/api/kiwi` routes after routing.
+</Tip>
 
 ## Related documentation
 
-- [Multi-space](/concepts/multi-space)
-- [Configuration](/configuration#multi-space)
+<CardGroup cols={2}>
+  <Card title="Multi-space" icon="layer-group" href="/concepts/multi-space">
+    Routing and configuration.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration#multi-space">
+    `[[spaces]]` config syntax.
+  </Card>
+</CardGroup>

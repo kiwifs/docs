@@ -4,62 +4,94 @@ description: "Which subsystems need configuration and what HTTP status codes mea
 icon: "toggle-on"
 ---
 
-Several KiwiFS features are **optional**. If a subsystem was not enabled at startup, the API returns a clear error instead of failing silently.
+Several KiwiFS features are **optional**. Disabled subsystems return a clear HTTP error instead of failing silently.
 
 ## Feature matrix
 
-| Feature | Enable in config | Typical error when disabled |
+| Feature | How to enable | Error when disabled |
 | --- | --- | --- |
-| **Draft spaces** | Git versioning + draft manager (default on recent builds) | `501` — drafts not enabled |
-| **Claims** | Claim store wired at bootstrap | `503` — claims not available |
-| **Audit log** | `[audit] enabled = true` | `501` on `GET /audit` |
-| **Vector / semantic search** | `[search.vector] enabled = true` | `503` on semantic search and embeddings |
-| **Webhooks** | `[webhooks] enabled = true` | Webhook CRUD may be empty or disabled |
-| **Import connections** | Connection store on disk | `GET /import/connections` returns `[]` if store init failed |
-| **Graph analytics** | Link index available | `503` on extended graph endpoints |
-| **Schema enforcement** | `[schema] enforce = true` | Writes rejected when frontmatter fails validation |
+| Draft spaces | Git versioning (not `none`) | `501` |
+| Claims | Claim store at bootstrap | `503` |
+| Audit log | `[audit] enabled = true` | `501` |
+| Vector search | `[search.vector] enabled = true` | `503` |
+| Webhooks | `[webhooks] enabled = true` | Empty CRUD |
+| Schema enforcement | `[schema] enforce = true` | Writes pass without validation |
+| Graph analytics | Link index available | `503` |
+| Import connections | Store init success | `[]` from list endpoint |
 
-## Drafts
+## Enabling subsystems
 
-Drafts require git-backed branches. If `POST /api/kiwi/drafts` returns `501`, start the server with the same template and version that advertises draft APIs, and ensure git versioning is not `none`.
+<AccordionGroup>
+  <Accordion title="Drafts" icon="code-branch">
+    Drafts require git-backed branches. Ensure versioning is not `none`:
 
-See [Draft spaces](/concepts/draft-spaces).
+    ```toml .kiwi/config.toml
+    [versioning]
+    strategy = "git"
+    ```
 
-## Claims
+    See [Draft spaces](/concepts/draft-spaces).
+  </Accordion>
 
-Task claims prevent two agents from editing the same path concurrently. Enable the claim store in your deployment bootstrap; otherwise `POST /api/kiwi/claim` returns `503`.
+  <Accordion title="Claims" icon="lock">
+    Task claims prevent two agents from editing the same path concurrently. The claim store is wired at bootstrap when the server detects the feature is needed.
 
-See [Claims](/concepts/claims).
+    See [Claims](/concepts/claims).
+  </Accordion>
 
-## Audit log
+  <Accordion title="Audit log" icon="scroll">
+    ```toml .kiwi/config.toml
+    [audit]
+    enabled = true
+    ```
 
-```toml
-[audit]
-enabled = true
-```
+    ```bash
+    curl 'http://localhost:3333/api/kiwi/audit?since=2026-05-01T00:00:00Z&limit=100'
+    ```
 
-```bash
-curl 'http://localhost:3333/api/kiwi/audit?since=2026-05-01T00:00:00Z&limit=100'
-```
+    See [Utilities API](/api/utilities#audit-log).
+  </Accordion>
 
-Returns `{ "ts", "method", "path", "space", "actor", "token_hash", "ip", "status", "duration_ms" }` entries. See [Utilities API](/api/utilities#audit-log).
+  <Accordion title="Vector search" icon="brain">
+    ```toml .kiwi/config.toml
+    [search.vector]
+    enabled = true
 
-## Vector search
+    [search.vector.embedder]
+    provider = "openai"
+    model = "text-embedding-3-small"
+    api_key = "${OPENAI_API_KEY}"
 
-Semantic search and `GET /api/kiwi/embeddings` need `[search.vector]` with a working embedder and store. Full-text search still works without vector config.
+    [search.vector.store]
+    provider = "sqlite-vec"
+    ```
 
-See [Search](/concepts/search) and [Configuration](/configuration#vector-search).
+    See [Search](/concepts/search) and [Configuration](/configuration#vector-search).
+  </Accordion>
 
-## Schema enforcement
+  <Accordion title="Schema enforcement" icon="shield-check">
+    ```toml .kiwi/config.toml
+    [schema]
+    enforce = true
+    ```
 
-```toml
-[schema]
-enforce = true
-```
+    When enabled, writes with invalid frontmatter are rejected. Define types under `.kiwi/schemas/`.
 
-When enabled, invalid frontmatter on `PUT /api/kiwi/file` is rejected. Define types under `.kiwi/schemas/` — see [Schemas](/concepts/schemas).
+    See [Schemas](/concepts/schemas).
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+If you see `501` or `503` on an endpoint, check the table above. These are not bugs — they mean the subsystem was not configured for this server instance.
+</Warning>
 
 ## Related documentation
 
-- [Configuration](/configuration)
-- [API overview](/api/overview) — auth and error conventions
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Full config.toml reference.
+  </Card>
+  <Card title="API overview" icon="terminal" href="/api/overview">
+    Auth and error conventions.
+  </Card>
+</CardGroup>

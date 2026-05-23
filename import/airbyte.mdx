@@ -4,43 +4,47 @@ description: "Sync data from Airbyte Docker connectors or Airbyte Cloud into mar
 icon: "rotate"
 ---
 
-KiwiFS can drive **Airbyte** connectors for sources that are easier to configure in Airbyte than in native importers. Two modes exist:
+KiwiFS can drive **Airbyte** connectors for sources easier to configure through Airbyte than native importers.
 
-1. **Airbyte Docker** — local connector containers (Firebase RTDB, Notion, Airtable, …)
-2. **Airbyte Cloud** — hosted workspace API with discover/check/sync flows
+<Info>
+Native `kiwifs import --from notion` remains the simplest path for one-shot imports. Use Airbyte when you need scheduled sync or Airbyte Cloud connections.
+</Info>
 
-Native `kiwifs import --from notion` remains the simplest path for one-shot imports. Use Airbyte when you need connector UI, scheduled sync, or Airbyte Cloud connections.
+## Two modes
+
+<Tabs>
+  <Tab title="Airbyte Docker">
+    Local connector containers (Firebase RTDB, Notion, Airtable, etc.).
+
+    | Method | Path | Purpose |
+    | --- | --- | --- |
+    | `POST` | `/api/kiwi/import/airbyte/spec` | Connector specification |
+    | `POST` | `/api/kiwi/import/airbyte/check` | Validate connection config |
+    | `POST` | `/api/kiwi/import/airbyte/discover` | List streams for a source |
+  </Tab>
+  <Tab title="Airbyte Cloud">
+    Hosted workspace API with discover/check/sync flows.
+
+    | Method | Path | Purpose |
+    | --- | --- | --- |
+    | `POST` | `/api/kiwi/import/airbyte-cloud/check` | Check cloud source |
+    | `POST` | `/api/kiwi/import/airbyte-cloud/discover` | Discover streams |
+    | `GET` | `/api/kiwi/import/airbyte-cloud/connections` | List connections |
+    | `POST` | `/api/kiwi/import/airbyte-cloud/sync` | Trigger sync into KiwiFS |
+  </Tab>
+</Tabs>
 
 ## Configuration
 
-```toml
+```toml .kiwi/config.toml
 [import]
-# Airbyte Cloud
 airbyte_api_key = "${AIRBYTE_API_KEY}"
 airbyte_workspace_id = "${AIRBYTE_WORKSPACE_ID}"
-
-# Airbyte Docker (local)
-# airbyte_docker_image = "..."
 ```
 
+<Note>
 Environment variables expand in TOML via `${VAR}` syntax.
-
-## REST endpoints (Docker)
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `POST` | `/api/kiwi/import/airbyte/spec` | Connector specification |
-| `POST` | `/api/kiwi/import/airbyte/check` | Validate connection config |
-| `POST` | `/api/kiwi/import/airbyte/discover` | List streams for a source |
-
-## REST endpoints (Cloud)
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `POST` | `/api/kiwi/import/airbyte-cloud/check` | Check cloud source |
-| `POST` | `/api/kiwi/import/airbyte-cloud/discover` | Discover streams |
-| `GET` | `/api/kiwi/import/airbyte-cloud/connections` | List connections |
-| `POST` | `/api/kiwi/import/airbyte-cloud/sync` | Trigger sync into KiwiFS |
+</Note>
 
 ## Sync status
 
@@ -52,10 +56,18 @@ Use with saved [import connections](/import/connections) when periodic sync is e
 
 ## MCP
 
-Agents can call **`kiwi_import`** with Airbyte-compatible source configuration where the server exposes those sources in `GET /api/kiwi/import/sources`.
+Agents can call **`kiwi_import`** with Airbyte-compatible source configuration. Available sources are listed by `GET /api/kiwi/import/sources`.
 
 ## Related documentation
 
-- [Import overview](/import/overview)
-- [Import and export API](/api/import-export)
-- [Import connections](/import/connections)
+<CardGroup cols={2}>
+  <Card title="Import overview" icon="download" href="/import/overview">
+    All 18+ import sources.
+  </Card>
+  <Card title="Import API" icon="arrows-rotate" href="/api/import-export">
+    REST reference.
+  </Card>
+  <Card title="Connections" icon="plug" href="/import/connections">
+    Saved connections and re-runs.
+  </Card>
+</CardGroup>

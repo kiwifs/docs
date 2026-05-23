@@ -4,20 +4,18 @@ description: "Publish and unpublish pages via frontmatter and read them at /p/{p
 icon: "globe"
 ---
 
-Publishing marks a page with `published: true` and `published_at` in frontmatter. Readers can open the rendered page at **`/p/{path}`** without API authentication when the server exposes that route.
-
-Base path for mutating endpoints: `http://localhost:3333/api/kiwi`.
+Publishing marks a page with `published: true` and `published_at` in frontmatter. Published pages are readable at `/p/{path}` without API authentication.
 
 ## Publish a page
 
 ```http
-POST /publish
+POST /api/kiwi/publish
 Content-Type: application/json
 ```
 
-```json
-{ "path": "concepts/auth.md" }
-```
+<ParamField body="path" type="string" required>
+  File path to publish.
+</ParamField>
 
 ```bash
 curl -X POST 'http://localhost:3333/api/kiwi/publish' \
@@ -26,7 +24,7 @@ curl -X POST 'http://localhost:3333/api/kiwi/publish' \
   -d '{"path":"concepts/auth.md"}'
 ```
 
-```json
+```json Response
 {
   "path": "concepts/auth.md",
   "published": true,
@@ -35,28 +33,34 @@ curl -X POST 'http://localhost:3333/api/kiwi/publish' \
 }
 ```
 
-`published_at` is set only on first publish; later republish calls preserve the original timestamp.
+<Info>
+`published_at` is set only on first publish. Later republish calls preserve the original timestamp.
+</Info>
 
 ## Unpublish
 
 ```http
-POST /unpublish
+POST /api/kiwi/unpublish
 Content-Type: application/json
 ```
 
-```json
-{ "path": "concepts/auth.md" }
-```
+<ParamField body="path" type="string" required>
+  File path to unpublish.
+</ParamField>
 
 Sets `published: false` but keeps `published_at` for history.
 
 ## Publish status
 
 ```http
-GET /publish/status?path=concepts/auth.md
+GET /api/kiwi/publish/status?path=concepts/auth.md
 ```
 
-```json
+<ParamField query="path" type="string" required>
+  File path to check.
+</ParamField>
+
+```json Response
 {
   "path": "concepts/auth.md",
   "published": true,
@@ -66,32 +70,43 @@ GET /publish/status?path=concepts/auth.md
 }
 ```
 
-`view_count` is included when publish metrics tracking is enabled on the server.
+<ResponseField name="view_count" type="integer">
+  Included when publish metrics tracking is enabled on the server.
+</ResponseField>
 
 ## Read published pages
 
 No API key required:
 
-```http
-GET /p/concepts/auth.md
+```bash
+curl 'http://localhost:3333/p/concepts/auth.md'
 ```
-
-Returns HTML rendered from the markdown page when `published: true`.
 
 ## Public visibility (alternative model)
 
-Separate from per-page publish flags, you can mark pages with `visibility: public` in frontmatter and browse them via:
+Separate from per-page publish flags, mark pages with `visibility: public` in frontmatter:
 
-- `GET /api/kiwi/public/file?path=...`
-- `GET /api/kiwi/public/tree?path=...`
+<CodeGroup>
+```bash Read public file
+curl 'http://localhost:3333/api/kiwi/public/file?path=concepts/open.md'
+```
 
-See [Utilities](/api/utilities#public-visibility-browsing) and [Share links](/api/analytics#sharing).
+```bash Browse public tree
+curl 'http://localhost:3333/api/kiwi/public/tree?path='
+```
+</CodeGroup>
 
-## Web UI
-
-Use the **Publish** control in the page header to toggle publish state without curl.
+<Note>
+Non-public pages return `404` to avoid leaking existence.
+</Note>
 
 ## Related documentation
 
-- [Web UI guide](/guides/web-ui#publishing)
-- [Utilities API](/api/utilities)
+<CardGroup cols={2}>
+  <Card title="Web UI" icon="window" href="/guides/web-ui#publishing">
+    Publish toggle in the page header.
+  </Card>
+  <Card title="Utilities API" icon="screwdriver-wrench" href="/api/utilities">
+    Share links and public routes.
+  </Card>
+</CardGroup>

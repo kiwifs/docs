@@ -4,50 +4,66 @@ description: "POSIX compliance by access path — NFS, FUSE, atomic writes, and 
 icon: "file-code"
 ---
 
-KiwiFS stores **real files** on disk. POSIX behavior depends on **how** you access them.
+KiwiFS stores **real files** on disk. POSIX behavior depends on how you access them.
 
 ## Compliance by access path
 
 | Access path | POSIX level | Notes |
 | --- | --- | --- |
-| **Direct filesystem** | Full | Real files, atomic writes, mmap works |
-| **NFS mount** | Near-full | Symlinks, open-unlink, stable handles |
-| **FUSE mount** | Near-full | Remote client; no kernel mmap |
-| **WebDAV** | Partial | MOVE/COPY/MKCOL; buffered writes |
-| **REST API** | N/A | ETag concurrency, not POSIX |
-| **S3 API** | N/A | S3 semantics |
-| **MCP** | N/A | Tool calls |
+| Direct filesystem | Full | Real files, atomic writes, mmap works |
+| NFS mount | Near-full | Symlinks, open-unlink, stable handles |
+| FUSE mount | Near-full | Remote client; no kernel mmap |
+| WebDAV | Partial | MOVE/COPY/MKCOL; buffered writes |
+| REST / S3 / MCP | N/A | HTTP or tool semantics |
 
 ## What works on NFS and FUSE
 
 | Semantic | NFS | FUSE |
 | --- | --- | --- |
-| Atomic writes | Yes | Yes |
-| `rename` | Yes | Yes |
+| Atomic writes (tmp → fsync → rename) | Yes | Yes |
+| `rename(2)` | Yes | Yes |
 | Symlinks | Yes | Yes |
-| Open-then-delete | Yes (NFS) | — |
+| Open-then-delete (POSIX unlink) | Yes | — |
 | `fsync` | Yes | Yes |
 | Directory rename | Yes | Yes |
 | `readdir` hides `.git`, `.kiwi` | Yes | Yes |
-| 64MB max file size (`EFBIG`) | Yes | Yes |
+| 64 MB max file size (`EFBIG`) | Yes | Yes |
 
 ## Concurrency and durability
 
-- **Optimistic locking** — `If-Match` / ETag on REST writes; `409` on conflict.
-- **Serialized writes** — one mutex across protocols.
-- **Single-instance guard** — `flock` on `.kiwi/server.lock`; released on process exit.
-- **Git lock recovery** — stale `index.lock` cleaned on a timer and at startup.
-- **Line endings** — `core.autocrlf=false` and `* -text` in `.gitattributes` keep ETags aligned with raw bytes.
+<AccordionGroup>
+  <Accordion title="Optimistic locking">
+    `If-Match` / ETag on REST writes. Returns `409` on conflict.
+  </Accordion>
+
+  <Accordion title="Serialized writes">
+    One mutex across all protocols. Concurrent writers are safely queued.
+  </Accordion>
+
+  <Accordion title="Single-instance guard">
+    `flock` on `.kiwi/server.lock`. Released automatically on process exit (including SIGKILL).
+  </Accordion>
+
+  <Accordion title="Git lock recovery">
+    A background watcher cleans stale `index.lock` every 10 seconds (60-second threshold). Also cleaned at startup.
+  </Accordion>
+
+  <Accordion title="Line-ending integrity">
+    `core.autocrlf=false` and `* -text` in `.gitattributes`. ETags always match raw bytes.
+  </Accordion>
+</AccordionGroup>
 
 ## Intentionally limited
 
+<Warning>
 - FUSE does not support kernel **mmap** (HTTP-backed I/O).
 - WebDAV is not a full POSIX layer.
 - Two KiwiFS servers must not share one knowledge root — the lock prevents split-brain.
+</Warning>
 
 ## Symlinks
 
-Symlinks work on NFS (real `os.Symlink`) and FUSE/REST (`Content-Type: application/x-symlink`). Targets that escape the knowledge root are rejected.
+Symlinks work on NFS (real `os.Symlink`) and FUSE/REST (`Content-Type: application/x-symlink`). Targets escaping the knowledge root are rejected.
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/readlink?path=link.md'
@@ -55,6 +71,11 @@ curl 'http://localhost:3333/api/kiwi/readlink?path=link.md'
 
 ## Related documentation
 
-- [Alternate protocols](/guides/alternate-protocols)
-- [Files as truth](/concepts/files-as-truth)
-- Full matrix in the [KiwiFS repo POSIX doc](https://github.com/kiwifs/kiwifs/blob/main/docs/POSIX.md)
+<CardGroup cols={2}>
+  <Card title="Alternate protocols" icon="network-wired" href="/guides/alternate-protocols">
+    NFS, S3, WebDAV, FUSE setup.
+  </Card>
+  <Card title="Files as truth" icon="file" href="/concepts/files-as-truth">
+    Storage philosophy.
+  </Card>
+</CardGroup>

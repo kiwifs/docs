@@ -4,18 +4,18 @@ description: "Mount and integrate KiwiFS over NFS, S3, WebDAV, and FUSE alongsid
 icon: "network-wired"
 ---
 
-Every access path flows through the **same storage layer**: atomic write → git commit → search index → SSE broadcast. Choose a protocol based on what your client already supports.
+Every access path flows through the **same storage layer**: atomic write → git commit → search index → SSE broadcast.
 
 ## Quick comparison
 
-| Protocol | Default port | Best for |
+| Protocol | Port | Best for |
 | --- | --- | --- |
-| **REST** | `3333` | Web UI, curl, CI scripts |
-| **MCP** | stdio or `8181` (`kiwifs mcp --http`) | Claude, Cursor, custom agents |
-| **NFS** | `2049` | Docker/Kubernetes mounts without FUSE |
-| **S3-compatible** | `3334` | Backup tools, ETL, anything with an S3 SDK |
-| **WebDAV** | `3335` | Desktop sync, mapped drives |
-| **FUSE** | — | Developer workstation remote mount |
+| REST | `3333` | Web UI, curl, CI scripts |
+| MCP | stdio or `8181` | Claude, Cursor, custom agents |
+| NFS | `2049` | Docker / Kubernetes mounts |
+| S3 | `3334` | Backup tools, ETL, S3-compatible clients |
+| WebDAV | `3335` | Desktop sync, mapped drives |
+| FUSE | — | Developer workstation remote mount |
 
 ## Enable on serve
 
@@ -26,65 +26,66 @@ kiwifs serve --root ./knowledge \
   --webdav
 ```
 
-| Flag | Description |
-| --- | --- |
-| `--nfs` | Userspace NFSv3 server |
-| `--nfs-port` | Default `2049` |
-| `--nfs-allow` | CIDR allowlist for NFS clients |
-| `--s3` | S3-compatible API |
-| `--s3-port` | Default `3334` |
-| `--webdav` | WebDAV server |
-| `--webdav-port` | Default `3335` |
+<AccordionGroup>
+  <Accordion title="NFS" icon="hard-drive">
+    Mount from Linux or Kubernetes:
 
-## NFS
+    ```bash
+    sudo mount -t nfs -o vers=3 localhost:/ /mnt/kiwi
+    ```
 
-Mount from Linux or Kubernetes:
+    Agents use normal shell tools:
 
-```bash
-# Example: mount to /mnt/kiwi (requires nfs client tools on the host)
-sudo mount -t nfs -o vers=3 localhost:/ /mnt/kiwi
-```
+    ```bash
+    cat /mnt/kiwi/pages/auth.md
+    grep -r "timeout" /mnt/kiwi/
+    echo "# Note" >> /mnt/kiwi/episodes/session.md
+    ```
 
-Agents can use normal shell tools:
+    NFS supports symlinks, open-then-delete semantics, and advisory locks. Internal dirs (`.git`, `.kiwi`) are hidden from listings.
 
-```bash
-cat /mnt/kiwi/pages/auth.md
-grep -r "timeout" /mnt/kiwi/
-echo "# Note" >> /mnt/kiwi/episodes/session.md
-```
+    <Note>
+    Restrict access with `--nfs-allow <CIDR>` in production.
+    </Note>
+  </Accordion>
 
-NFS supports symlinks, open-then-delete semantics, and advisory locks. Internal dirs (`.git`, `.kiwi`) are hidden from directory listings.
+  <Accordion title="S3-compatible API" icon="bucket">
+    Point any S3 client at `http://localhost:3334`:
 
-## S3-compatible API
+    ```bash
+    aws s3 sync s3://knowledge/ /backup/ --endpoint-url http://localhost:3334
+    ```
 
-Point any S3 client at `http://localhost:3334` with the credentials your deployment configures. Useful for `aws s3 sync` style backups alongside markdown truth on disk.
+    Useful for `aws s3 sync` backups or S3-compatible ETL pipelines.
+  </Accordion>
 
-## WebDAV
+  <Accordion title="WebDAV" icon="desktop">
+    Connect from macOS **Finder → Connect to Server** or Windows mapped drive:
 
-Connect from macOS **Finder → Connect to Server** or Windows mapped drive:
+    ```
+    http://localhost:3335/
+    ```
 
-```
-http://localhost:3335/
-```
+    WebDAV uses buffered writes with spill-to-disk for large uploads.
+  </Accordion>
 
-WebDAV uses buffered writes with spill-to-disk for large uploads. Not full POSIX, but sufficient for desktop editors.
+  <Accordion title="FUSE remote mount" icon="folder-open">
+    Mount a **remote** KiwiFS as a local folder:
 
-## FUSE remote mount
+    ```bash
+    kiwifs mount --remote http://host:3333 --mountpoint ~/kiwi-mount
+    ```
 
-Mount a **remote** KiwiFS REST server as a local folder:
+    Optional auth:
 
-```bash
-kiwifs mount --remote http://localhost:3333 --mountpoint ~/kiwi-mount
-```
+    ```bash
+    export KIWIFS_API_KEY=my-secret
+    kiwifs mount --remote http://host:3333 --mountpoint ~/kiwi-mount
+    ```
 
-Optional auth:
-
-```bash
-export KIWIFS_API_KEY=my-secret
-kiwifs mount --remote http://host:3333 --mountpoint ~/kiwi-mount
-```
-
-FUSE reports sub-second mtime and supports symlinks via the REST API. **mmap** is not available over FUSE (HTTP-backed); use NFS or local disk for mmap workloads.
+    FUSE reports sub-second mtime and supports symlinks. **mmap** is not available (HTTP-backed I/O).
+  </Accordion>
+</AccordionGroup>
 
 ## POSIX semantics
 
@@ -94,18 +95,27 @@ FUSE reports sub-second mtime and supports symlinks via the REST API. **mmap** i
 | NFS mount | Near-full |
 | FUSE mount | Near-full (no mmap) |
 | WebDAV | Partial |
-| REST / S3 / MCP | HTTP or tool semantics (ETags, not POSIX) |
+| REST / S3 / MCP | HTTP or tool semantics |
 
-Details: [POSIX guide](/guides/posix).
+See [POSIX guide](/guides/posix) for the full matrix.
 
-## Security notes
-
-- Restrict NFS with `--nfs-allow` to trusted subnets.
-- Run alternate protocol ports behind a firewall in production.
-- Combine with `[auth]` for REST; protocol-specific auth varies — treat NFS/S3/WebDAV endpoints as sensitive network surfaces.
+<Warning>
+Run alternate protocol ports behind a firewall in production. NFS, S3, and WebDAV endpoints are sensitive network surfaces.
+</Warning>
 
 ## Related documentation
 
-- [Agent interface](/concepts/agent-interface)
-- [CLI serve flags](/cli/commands)
-- [Real-time events](/concepts/real-time-events)
+<CardGroup cols={2}>
+  <Card title="Agent interface" icon="robot" href="/concepts/agent-interface">
+    Protocol overview.
+  </Card>
+  <Card title="CLI serve flags" icon="terminal" href="/cli/commands">
+    Full `kiwifs serve` reference.
+  </Card>
+  <Card title="POSIX" icon="file-code" href="/guides/posix">
+    Compliance details.
+  </Card>
+  <Card title="Real-time events" icon="bolt" href="/concepts/real-time-events">
+    SSE broadcast.
+  </Card>
+</CardGroup>

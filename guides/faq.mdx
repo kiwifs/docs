@@ -4,36 +4,39 @@ description: "Frequently asked questions about KiwiFS installation, agents, sear
 icon: "circle-question"
 ---
 
-## General
+<AccordionGroup>
 
-### What is KiwiFS?
+<Accordion title="What is KiwiFS?">
+A markdown filesystem for agents and teams — a single Go binary with a web UI, git versioning, full-text and vector search, and access via REST, MCP, NFS, S3, WebDAV, and FUSE.
+</Accordion>
 
-KiwiFS is a markdown filesystem for agents and teams — a single Go binary with a web UI, git versioning, full-text and vector search, and access via REST, MCP, NFS, S3, WebDAV, and FUSE.
-
-### How is this different from Obsidian?
-
+<Accordion title="How is this different from Obsidian?">
 Obsidian is a desktop app. KiwiFS is a server with a web UI, agent APIs, git audit trail, and server-side search over the same markdown files.
+</Accordion>
 
-### How is this different from Notion or Confluence?
-
+<Accordion title="How is this different from Notion or Confluence?">
 Those tools store content in proprietary databases. KiwiFS stores plain markdown. `cat page.md` and `git clone` always work.
+</Accordion>
 
-### Do I need to know Git?
-
+<Accordion title="Do I need to know Git?">
 No. Git runs under the hood; the API and web UI hide it. Git is the audit trail, not the primary interface.
+</Accordion>
 
-### Is KiwiFS production-ready?
-
+<Accordion title="Is KiwiFS production-ready?">
 KiwiFS is in active development (v0.4). Core features are stable in internal production use. Public APIs may evolve before v1.0.
+</Accordion>
+
+</AccordionGroup>
 
 ## Installation
 
-### What are the system requirements?
+<AccordionGroup>
 
+<Accordion title="System requirements?">
 A single static Go binary. SQLite is embedded. The web UI is embedded via `go:embed`. Runs on macOS, Linux, and Docker.
+</Accordion>
 
-### How do I install?
-
+<Accordion title="How do I install?">
 ```bash
 brew install kiwifs/tap/kiwifs
 # or
@@ -41,12 +44,12 @@ curl -fsSL https://raw.githubusercontent.com/kiwifs/kiwifs/main/install.sh | sh
 # or
 go install github.com/kiwifs/kiwifs@latest
 ```
+</Accordion>
 
-### What is in `.kiwi/`?
-
+<Accordion title="What is in .kiwi/?">
 Derived state — not your content. Safe to delete and rebuild with `kiwifs reindex`.
 
-```
+```text
 .kiwi/
 ├── config.toml
 ├── playbook.md
@@ -54,21 +57,27 @@ Derived state — not your content. Safe to delete and rebuild with `kiwifs rein
 ├── comments/
 └── templates/
 ```
+</Accordion>
+
+</AccordionGroup>
 
 ## Agents
 
-### How do agents write?
+<AccordionGroup>
+
+<Accordion title="How do agents write?">
+Three ways:
 
 1. **Filesystem** — NFS or FUSE mount: `cat`, `echo`, `grep`
 2. **REST** — `PUT /api/kiwi/file`
 3. **MCP** — `kiwifs mcp --root ~/knowledge` (60+ tools)
+</Accordion>
 
-### Can agents use KiwiFS without a running server?
+<Accordion title="Can agents use KiwiFS without a running server?">
+Yes. `kiwifs mcp --root ~/knowledge` runs in-process against the directory. No HTTP needed.
+</Accordion>
 
-Yes. `kiwifs mcp --root ~/knowledge` runs in-process against the directory.
-
-### How do I configure Cursor or Claude Desktop?
-
+<Accordion title="How do I configure Cursor or Claude Desktop?">
 ```json
 {
   "mcpServers": {
@@ -80,68 +89,94 @@ Yes. `kiwifs mcp --root ~/knowledge` runs in-process against the directory.
 }
 ```
 
-See [MCP](/concepts/mcp) and [Quickstart](/quickstart).
+See [MCP](/concepts/mcp).
+</Accordion>
 
-### How does provenance tracking work?
+<Accordion title="How does provenance tracking work?">
+Send `X-Actor` and `X-Provenance` on writes. KiwiFS injects `derived-from` into frontmatter automatically.
+</Accordion>
 
-Send `X-Actor` and `X-Provenance` on writes. KiwiFS injects `derived-from` into frontmatter.
+</AccordionGroup>
 
 ## Search
 
-### What search backends exist?
+<AccordionGroup>
 
+<Accordion title="What search backends exist?">
 | Tier | Engine |
 | --- | --- |
-| 1 | `grep` |
-| 2 | `sqlite` (FTS5, default) |
-| 3 | Vector (optional `[search.vector]`) |
+| 1 | `grep` (zero deps) |
+| 2 | `sqlite` (FTS5, BM25 — default) |
+| 3 | Vector (`[search.vector]` — optional) |
+</Accordion>
 
-### Vector search without a cloud API key?
+<Accordion title="Vector search without a cloud API key?">
+Use Ollama as the embedder and `sqlite-vec` as the store for fully local semantic search.
+</Accordion>
 
-Use Ollama as the embedder and `sqlite-vec` as the store for fully local embeddings.
-
-### Rebuild the index?
-
+<Accordion title="Rebuild the index?">
 ```bash
 kiwifs reindex --root ./knowledge
 ```
+</Accordion>
+
+</AccordionGroup>
 
 ## Protocols
 
-### NFS vs S3 vs WebDAV vs FUSE?
+<AccordionGroup>
+
+<Accordion title="NFS vs S3 vs WebDAV vs FUSE?">
+| Protocol | Best for |
+| --- | --- |
+| NFS | Docker / Kubernetes mounts |
+| S3 | Backup tools, pipelines |
+| WebDAV | Desktop sync, mapped drives |
+| FUSE | Developer workstation remote mount |
 
 See [Alternate protocols](/guides/alternate-protocols).
+</Accordion>
 
-### Do all protocols share one pipeline?
+<Accordion title="Do all protocols share one pipeline?">
+Yes. Every write gets git commit, index update, and SSE broadcast regardless of entry protocol.
+</Accordion>
 
-Yes. Every write gets git commit, index update, and SSE broadcast.
+</AccordionGroup>
 
 ## Data
 
-### Crash mid-write?
+<AccordionGroup>
 
+<Accordion title="Crash mid-write?">
 Atomic writes (temp → fsync → rename). Git reflog aids recovery.
+</Accordion>
 
-### Backup?
-
+<Accordion title="Backup?">
 - `git push` to any remote
 - `kiwifs backup` / `[backup]` in config
 - `kiwifs restore --from ... --to ...`
 - `rsync` the knowledge root
+</Accordion>
 
-### Migrate from Obsidian or Notion?
-
+<Accordion title="Migrate from Obsidian or Notion?">
 ```bash
 kiwifs import --from obsidian --path ~/vault --root ./knowledge
 kiwifs import --from notion --api-key $KEY --database-id $ID --root ./knowledge
 ```
+</Accordion>
+
+</AccordionGroup>
 
 ## License
 
-### Commercial use?
+<AccordionGroup>
 
+<Accordion title="Commercial use?">
 BSL 1.1 — self-host and embed freely. You cannot offer KiwiFS itself as a commercial hosted service. Each release converts to Apache 2.0 after four years.
+</Accordion>
 
-### Contribute?
-
+<Accordion title="Contribute?">
 See [CONTRIBUTING.md](https://github.com/kiwifs/docs/blob/main/CONTRIBUTING.md).
+</Accordion>
+
+</AccordionGroup>

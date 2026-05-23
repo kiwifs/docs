@@ -10,7 +10,7 @@ icon: "lightbulb"
 kiwifs init --template knowledge --root ./knowledge
 ```
 
-```
+```text Directory structure
 knowledge/
 ├── SCHEMA.md
 ├── index.md
@@ -20,111 +20,118 @@ knowledge/
 └── .kiwi/playbook.md
 ```
 
-Call **`kiwi_context`** on connect, then follow playbook operations: Ingest, Query, Remember, Consolidate, Lint.
+Call **`kiwi_context`** on connect, then follow playbook operations.
 
 See [Agent playbook](/concepts/agent-playbook).
 
 ## Agent writes
 
-<CodeGroup>
-```bash REST
-curl -X PUT 'http://localhost:3333/api/kiwi/file?path=pages/auth.md' \
-  -H 'X-Actor: my-agent' \
-  -H 'X-Provenance: run:run-249' \
-  -d '# Authentication
+<AccordionGroup>
+  <Accordion title="REST — single file">
+    ```bash
+    curl -X PUT 'http://localhost:3333/api/kiwi/file?path=pages/auth.md' \
+      -H 'X-Actor: my-agent' \
+      -H 'X-Provenance: run:run-249' \
+      -d '# Authentication
 
-OAuth2 + JWT.'
-```
+    OAuth2 + JWT.'
+    ```
+  </Accordion>
 
-```bash Bulk (one commit)
-curl -X POST 'http://localhost:3333/api/kiwi/bulk' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "files": [
-      {"path": "pages/auth.md", "content": "# Auth\n\nUpdated."},
-      {"path": "log.md", "content": "- 2026-05-21: updated auth"}
-    ],
-    "actor": "agent:exec_abc",
-    "message": "run 249"
-  }'
-```
+  <Accordion title="REST — bulk write (one commit)">
+    ```bash
+    curl -X POST 'http://localhost:3333/api/kiwi/bulk' \
+      -H 'Content-Type: application/json' \
+      -d '{
+        "files": [
+          {"path": "pages/auth.md", "content": "# Auth\n\nUpdated."},
+          {"path": "log.md", "content": "- 2026-05-21: updated auth"}
+        ],
+        "actor": "agent:exec_abc",
+        "message": "run 249"
+      }'
+    ```
+  </Accordion>
 
-```bash Filesystem mount
-echo "# Finding" > /mnt/kiwi/pages/finding-042.md
-```
-</CodeGroup>
+  <Accordion title="Filesystem mount">
+    ```bash
+    echo "# Finding" > /mnt/kiwi/pages/finding-042.md
+    ```
+  </Accordion>
 
-Query provenance later:
-
-```bash
-curl 'http://localhost:3333/api/kiwi/meta?where=$.derived-from[*].id=run-249'
-```
+  <Accordion title="Query provenance">
+    ```bash
+    curl 'http://localhost:3333/api/kiwi/meta?where=$.derived-from[*].id=run-249'
+    ```
+  </Accordion>
+</AccordionGroup>
 
 ## MCP tool sequences
 
-### First connection
+<AccordionGroup>
+  <Accordion title="First connection">
+    ```
+    kiwi_context
+    ```
+  </Accordion>
 
-```
-kiwi_context
-```
+  <Accordion title="Ingest a source">
+    ```
+    kiwi_search("authentication")
+    kiwi_write("pages/auth.md", content)
+    kiwi_read("index.md")
+    kiwi_write("index.md", updated)
+    kiwi_append("log.md", "- added auth")
+    ```
+  </Accordion>
 
-### Ingest a source
+  <Accordion title="Answer a question">
+    ```
+    kiwi_search("payment timeout")
+    kiwi_read("pages/payments.md")
+    ```
+  </Accordion>
 
-```
-kiwi_search("authentication")
-kiwi_write("pages/auth.md", content)
-kiwi_read("index.md")
-kiwi_write("index.md", updated)
-kiwi_append("log.md", "- added auth")
-```
+  <Accordion title="Remember (episodic)">
+    ```
+    kiwi_append("episodes/2026-05-21.md", observation)
+    ```
+  </Accordion>
 
-### Answer a question
+  <Accordion title="Consolidate episodes">
+    ```
+    kiwi_memory_report
+    kiwi_read("episodes/2026-05-21.md")
+    kiwi_write("pages/topic.md", merged_content_with_merged_from)
+    ```
 
-```
-kiwi_search("payment timeout")
-kiwi_read("pages/payments.md")
-```
+    See [Episodic memory](/concepts/episodic-memory).
+  </Accordion>
 
-### Remember (episodic)
-
-```
-kiwi_append("episodes/2026-05-21.md", observation)
-```
-
-### Consolidate episodes into durable pages
-
-```
-kiwi_memory_report
-kiwi_read("episodes/2026-05-21.md")
-kiwi_write("pages/topic.md", merged_content_with_merged_from)
-```
-
-See [Episodic memory](/concepts/episodic-memory).
-
-### Health check
-
-```
-kiwi_analytics
-kiwi_health_check("pages/auth.md")
-kiwi_lint
-```
+  <Accordion title="Health check">
+    ```
+    kiwi_analytics
+    kiwi_health_check("pages/auth.md")
+    kiwi_lint
+    ```
+  </Accordion>
+</AccordionGroup>
 
 ## DQL
 
-```bash
+<CodeGroup>
+```bash Table query
 kiwifs query 'TABLE title, status FROM "pages" WHERE status = "draft" SORT priority DESC'
+```
+
+```bash Count by group
 kiwifs query 'COUNT FROM "pages" GROUP BY status'
 ```
 
-```bash
-curl 'http://localhost:3333/api/kiwi/query?q=TABLE%20title%20FROM%20%22pages%22%20WHERE%20status%3D%22draft%22'
+```bash REST
+curl 'http://localhost:3333/api/kiwi/query?q=TABLE%20title%20FROM%20%22pages%22'
 ```
-
-Computed views:
-
-```bash
-kiwifs view refresh --root ./knowledge
-```
+</CodeGroup>
 
 ## Aggregation
 
@@ -132,38 +139,45 @@ kiwifs view refresh --root ./knowledge
 kiwifs aggregate --group status --calc count,avg:priority
 ```
 
-```
-GET /api/kiwi/query/aggregate?group_by=status&calc=count,avg:priority
-```
-
 ## Import
 
-```bash
+<CodeGroup>
+```bash From PostgreSQL
 kiwifs import --from postgres --dsn "postgres://..." --table users --root ./knowledge
+```
+
+```bash From Obsidian
 kiwifs import --from obsidian --path ~/vault --root ./knowledge
+```
+
+```bash Dry run
 kiwifs import --from csv --path data.csv --root ./knowledge --dry-run
 ```
+</CodeGroup>
 
 ## Export
 
-```bash
+<CodeGroup>
+```bash JSONL with content
 kiwifs export --format jsonl --include-content -o knowledge.jsonl
+```
+
+```bash With embeddings
 kiwifs export --format jsonl --include-embeddings -o vectors.jsonl
 ```
 
-Document render:
-
-```bash
+```bash Document render (PDF)
 curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
   -H 'Content-Type: application/json' \
   -d '{"format":"pdf","path":"pages/report.md"}' -o report.pdf
 ```
+</CodeGroup>
 
 See [Document export](/export/documents).
 
-## Production config snippet
+## Production config
 
-```toml
+```toml .kiwi/config.toml
 [server]
 public_url = "https://wiki.example.com"
 
@@ -203,12 +217,4 @@ srv, err := kiwi.New("/data/knowledge", kiwi.WithSearch("sqlite"))
 mux.Handle("/wiki/", http.StripPrefix("/wiki", srv.Handler()))
 ```
 
-See [Go embed](/deploy/go-embed).
-
-## NFS in Kubernetes
-
-```bash
-kiwifs serve --root /data --nfs --nfs-port 2049
-```
-
-See [Alternate protocols](/guides/alternate-protocols) and [Kubernetes](/deploy/kubernetes).
+See [Go embed](/deploy/go-embed) and [Alternate protocols](/guides/alternate-protocols).

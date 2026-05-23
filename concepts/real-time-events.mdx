@@ -4,7 +4,11 @@ description: "Subscribe to write, delete, and bulk events over Server-Sent Event
 icon: "bolt"
 ---
 
-KiwiFS broadcasts knowledge-base changes over **Server-Sent Events (SSE)**. There is no WebSocket endpoint — use `GET /api/kiwi/events` for live updates in the web UI or external integrations.
+KiwiFS broadcasts knowledge-base changes over **Server-Sent Events (SSE)**. Use `GET /api/kiwi/events` for live updates in the web UI or external integrations.
+
+<Info>
+There is no WebSocket endpoint. SSE is the only real-time transport.
+</Info>
 
 ## Event stream
 
@@ -12,9 +16,7 @@ KiwiFS broadcasts knowledge-base changes over **Server-Sent Events (SSE)**. Ther
 curl -N 'http://localhost:3333/api/kiwi/events'
 ```
 
-Example stream:
-
-```
+```text SSE output
 event: write
 data: {"path":"concepts/auth.md","actor":"agent:docs-writer","timestamp":"2026-04-25T14:30:00Z"}
 
@@ -28,6 +30,8 @@ event: import
 data: {"imported":42,"source":"postgres","timestamp":"2026-04-25T14:33:00Z"}
 ```
 
+## Event types
+
 | Event | When it fires |
 | --- | --- |
 | `write` | A file was created or updated |
@@ -37,16 +41,25 @@ data: {"imported":42,"source":"postgres","timestamp":"2026-04-25T14:33:00Z"}
 
 ## Client guidance
 
-- Use `curl -N` (no buffer) or an SSE client library in your language.
-- Implement **reconnection** with backoff; the connection stays open until the client or server closes it.
+<Note>
+The SSE connection stays open indefinitely. Implement reconnection logic with backoff. Send the `Last-Event-ID` header to resume where you left off.
+</Note>
+
+- Use `curl -N` (no buffer) or a native SSE client library.
 - Authenticate the same way as other `/api/kiwi` routes when auth is enabled.
+- Events fire after the full pipeline: storage → git → index → broadcast.
 
-## Same pipeline as every protocol
+## Pipeline parity
 
-Events fire after the standard write pipeline: storage → git commit → index update. Writes through NFS, S3, WebDAV, FUSE, REST, or MCP all emit the same event types when they go through KiwiFS.
+Writes through **any** protocol (NFS, S3, WebDAV, FUSE, REST, MCP) emit the same event types.
 
 ## Related documentation
 
-- [Agent interface](/concepts/agent-interface) — protocol overview
-- [Analytics API](/api/analytics#real-time-events-sse) — curl example in API reference
-- [Webhooks](/concepts/webhooks) — outbound HTTP notifications (complementary to SSE)
+<CardGroup cols={2}>
+  <Card title="Agent interface" icon="robot" href="/concepts/agent-interface">
+    Protocol overview.
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/concepts/webhooks">
+    Outbound HTTP notifications (complementary to SSE).
+  </Card>
+</CardGroup>
