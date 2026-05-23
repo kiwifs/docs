@@ -25,13 +25,19 @@ KiwiFS ships a full **web UI** embedded in the Go binary. Open `http://localhost
     Saved DQL queries with table or board layouts.
   </Card>
   <Card title="Canvas" icon="object-group">
-    Spatial diagrams from `.canvas.json` files.
+    Interactive Flow diagrams from `.canvas.json` files.
+  </Card>
+  <Card title="Whiteboard" icon="pen">
+    Excalidraw sketches in `.excalidraw.md` files.
   </Card>
   <Card title="Kanban" icon="bars-progress">
     Boards driven by workflow state machines.
   </Card>
   <Card title="Comments" icon="comment">
     Inline annotations on specific lines.
+  </Card>
+  <Card title="Data sources" icon="database">
+    Saved import connections with auto-sync.
   </Card>
 </CardGroup>
 
@@ -43,7 +49,31 @@ The UI uses a three-pane layout:
 | --- | --- |
 | **Sidebar** | File tree, space switcher (multi-space mode) |
 | **Main** | Page view or editor |
-| **Panels** | Backlinks, ToC, comments, engagement stats |
+| **Panels** | Backlinks, ToC, comments, page view counts |
+
+## File tree
+
+The sidebar file tree supports expand/collapse, drag-and-drop reordering, and context menus for rename, duplicate, move, and delete. You can drag files from your operating system into the tree to import them as markdown pages.
+
+## Toolbar views
+
+Beyond the page editor, the header toolbar opens full-screen views:
+
+| Button | View |
+| --- | --- |
+| **Knowledge graph** | Force-directed wiki-link network |
+| **Bases** | Saved DQL queries with table or board layouts |
+| **Canvas** | Interactive Flow editor for `.canvas.json` files |
+| **Whiteboard** | Excalidraw hub for `.excalidraw.md` files |
+| **Timeline** | Recent git-backed activity |
+| **Kanban** | Workflow boards grouped by state |
+| **Data sources** | Saved import connections and sync controls |
+
+See [Canvas](/concepts/canvas), [Whiteboard](/concepts/whiteboard), and [Import connections](/import/connections).
+
+## Engagement metrics
+
+When analytics tracking is enabled, page view counts appear in the page header. The `kiwifs analytics` CLI command and `GET /api/kiwi/analytics` REST endpoint also report engagement data — top viewed pages and failed searches that indicate content gaps. See [Analytics API](/api/analytics).
 
 ## Page view and editor
 
@@ -102,5 +132,8 @@ A standalone `kiwifs-ui` npm package for React embedding is on the [roadmap](htt
   </Card>
   <Card title="Canvas" icon="object-group" href="/concepts/canvas">
     Spatial diagrams.
+  </Card>
+  <Card title="Whiteboard" icon="pen" href="/concepts/whiteboard">
+    Excalidraw sketches.
   </Card>
 </CardGroup>

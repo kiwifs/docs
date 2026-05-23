@@ -1,20 +1,44 @@
 ---
 title: "Canvas files"
-description: "JSON Canvas files for spatial diagrams — nodes, edges, and optional auto-layout from the wiki-link graph."
+description: "JSON Canvas files for spatial diagrams — nodes, edges, interactive Flow rendering, and graph-assisted layout."
 icon: "diagram-project"
 ---
 
-Canvas files are JSON documents with a **`.canvas.json`** suffix. They store `nodes` and `edges` for infinite-canvas style layouts in the web UI and for agents via API or MCP.
+Canvas files are JSON documents with a **`.canvas.json`** suffix. They store `nodes` and `edges` for infinite-canvas layouts in the web UI and for agents via API or MCP.
 
 ## File format
 
 Each canvas is JSON with top-level `nodes` and `edges` arrays. Node and edge objects carry `id`, `type`, optional coordinates (`x`, `y`), and a `data` map for extensibility.
 
+Common node types include file references, text labels, link arrows, and grouped regions.
+
+## Web UI
+
+Click **Canvas** in the toolbar to open the canvas hub. You can create, rename, and switch between canvases stored under `canvases/`. The interactive **Flow** renderer lets you drag nodes, pan and zoom, and edit the diagram visually. Changes persist to the underlying `.canvas.json` file.
+
 ## Graph-assisted layout
 
-`POST /api/kiwi/canvas/generate` can build a new canvas from the **wiki-link graph** using Graphviz-style layout (`hierarchical`, `radial`, `force`, or `circular`). You can restrict to a folder prefix so only part of the graph is laid out.
+`POST /api/kiwi/canvas/generate` builds a new canvas from the **wiki-link graph** using layout modes such as `hierarchical`, `radial`, `force`, or `circular`. Restrict to a folder prefix so only part of the graph is laid out.
+
+For canvases that already exist, `POST /api/kiwi/canvas/auto-layout?path=...` repositions nodes using Graphviz engines (`dot`, `neato`, `fdp`, `circo`).
+
+## Incremental edits
+
+Agents can apply batched operations with `PATCH /api/kiwi/canvas` instead of rewriting the full JSON document. See the [Canvas REST API](/api/canvas) for supported `op` values.
 
 ## Related documentation
 
-- [Canvas REST API](/api/canvas)
-- [MCP](/concepts/mcp) — `kiwi_canvas_list`, `kiwi_canvas_read`, `kiwi_canvas_write`, `kiwi_canvas_generate`
+<CardGroup cols={2}>
+  <Card title="Canvas REST API" icon="diagram-project" href="/api/canvas">
+    List, read, write, patch, query, and auto-layout.
+  </Card>
+  <Card title="Whiteboard" icon="pen" href="/concepts/whiteboard">
+    Excalidraw diagrams in markdown files.
+  </Card>
+  <Card title="MCP" icon="plug" href="/concepts/mcp">
+    `kiwi_canvas_list`, `kiwi_canvas_read`, `kiwi_canvas_write`.
+  </Card>
+  <Card title="Web UI" icon="window" href="/guides/web-ui">
+    Toolbar views including Canvas and Whiteboard.
+  </Card>
+</CardGroup>

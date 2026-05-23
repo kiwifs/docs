@@ -112,11 +112,26 @@ curl http://localhost:3333/readyz
 ```
 </CodeGroup>
 
-All three return:
+All three return JSON. **`/health`** and **`/healthz`** always respond with **`200`** when the process is up:
 
 ```json
 {"status": "ok"}
 ```
+
+**`/readyz`** checks storage and optional protocol health (NFS, S3, WebDAV). When storage is unreachable or an enabled protocol is unhealthy, it returns **`503`**:
+
+```json
+{
+  "status": "ok",
+  "protocols": {
+    "nfs": { "enabled": true, "healthy": true, "port": 2049 },
+    "s3": { "enabled": false },
+    "webdav": { "enabled": true, "healthy": false, "error": "listen tcp :3335: bind: address already in use" }
+  }
+}
+```
+
+Use `/readyz` for Kubernetes readiness probes when optional protocols are enabled.
 
 ## Rate limiting
 

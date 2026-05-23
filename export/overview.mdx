@@ -1,10 +1,10 @@
 ---
 title: "Data export"
-description: "Export your knowledge base as JSONL or CSV."
+description: "Export your knowledge base as JSONL, CSV, or Parquet."
 icon: "upload"
 ---
 
-KiwiFS can export your entire knowledge base (or a subset of it) as JSONL or CSV. You can export from the CLI or the REST API.
+KiwiFS can export your entire knowledge base (or a subset of it) as JSONL, CSV, or Parquet. You can export from the CLI or the REST API.
 
 ## Formats
 
@@ -32,6 +32,13 @@ With `--include-embeddings`, each object includes a vector embedding array. A `.
 
 ```json
 {"path":"concepts/auth.md","title":"Authentication","embedding":[0.0123,-0.0456,0.0789]}
+```
+</Tab>
+<Tab title="Parquet">
+Columnar export for data warehouses and analytics pipelines. Supports the same flags as JSONL (`--include-content`, `--include-links`, `--include-embeddings`, `--path`, `--limit`).
+
+```bash
+kiwifs export --format parquet --include-content -o knowledge.parquet
 ```
 </Tab>
 <Tab title="CSV">
@@ -63,6 +70,10 @@ kiwifs export --format jsonl --include-content --output full.jsonl
 kiwifs export --format csv --path students/ --columns name,status,grade -o students.csv
 ```
 
+```bash Export as Parquet
+kiwifs export --format parquet --include-content -o knowledge.parquet
+```
+
 ```bash Pipe to jq
 kiwifs export --format jsonl | jq '.title'
 ```
@@ -77,7 +88,7 @@ kiwifs export --format jsonl --include-embeddings -o vectors.jsonl
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--root` | `-r` | `./knowledge` | Knowledge root directory |
-| `--format` | | `jsonl` | Output format: `jsonl` or `csv` |
+| `--format` | | `jsonl` | Output format: `jsonl`, `csv`, or `parquet` |
 | `--output` | `-o` | stdout | Output file path |
 | `--path` | | | Scope export to a subdirectory |
 | `--columns` | | | Comma-separated frontmatter fields to include |

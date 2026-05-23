@@ -229,39 +229,60 @@ Use `--dry-run` first to preview which files will be created before writing anyt
 
 <Accordion title="export — Export knowledge base">
 
-Export your knowledge base as JSONL or CSV.
+Export structured data (JSONL, CSV, Parquet) or render markdown into publication formats (PDF, HTML, slides, static site).
 
 ```bash
 kiwifs export [flags]
 ```
 
+**Data formats**
+
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--root` | `-r` | `./knowledge` | Knowledge root |
-| `--format` | | `jsonl` | Output format: `jsonl` or `csv` |
+| `--format` | | `jsonl` | Data format: `jsonl`, `csv`, or `parquet` |
 | `--output` | `-o` | stdout | Output file |
 | `--path` | | | Scope to subdirectory |
-| `--columns` | | | Comma-separated frontmatter fields |
+| `--columns` | | | Comma-separated frontmatter fields (CSV) |
 | `--include-content` | | `false` | Include full markdown body |
 | `--include-links` | | `false` | Include outgoing/incoming links |
 | `--include-embeddings` | | `false` | Include vector embeddings |
 | `--limit` | | `0` | Max files (0 = unlimited) |
+
+**Document formats** — use `--format pdf`, `html`, `slides`, or `site` with `--path` pointing at a file or directory:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--theme` | | Theme: `paper`, `modern`, `minimal`, `dark`, `presentation` |
+| `--self-contained` | `false` | Embed assets in HTML/PDF output |
+| `--bibliography` | | Path to `.bib` or `.json` bibliography |
+| `--csl` | | Citation style: `apa`, `ieee`, `chicago`, `vancouver`, `harvard` |
+| `--crossref` | `false` | Enable figure/table/equation cross-references |
+| `--pdf-engine` | auto | PDF engine: `typst` or `xelatex` |
+| `--slide-format` | `html` | Slide output: `html`, `pdf`, or `pptx` |
+| `--site-name` | | Static site title (MkDocs) |
+| `--site-url` | | Canonical site URL |
+| `--repo-url` | | Edit-on-GitHub link for generated site |
 
 <CodeGroup>
 ```bash Export as JSONL
 kiwifs export --format jsonl -o knowledge.jsonl
 ```
 
-```bash Export as CSV with specific columns
-kiwifs export --format csv --path students/ --columns name,status,grade -o students.csv
+```bash Export as Parquet
+kiwifs export --format parquet --include-content -o knowledge.parquet
 ```
 
-```bash Pipe to jq
-kiwifs export --format jsonl | jq '.title'
+```bash Render PDF
+kiwifs export --format pdf --path docs/report.md --output report.pdf --theme paper
+```
+
+```bash Render slide deck
+kiwifs export --format slides --path talks/intro.md --output slides.html
 ```
 </CodeGroup>
 
-See the [data export guide](/export/overview) for full details on output formats and the REST API.
+See [Data export](/export/overview) and [Document export](/export/documents) for REST and MCP equivalents.
 
 </Accordion>
 
@@ -311,7 +332,7 @@ kiwifs aggregate --root ./knowledge --group status --calc count --calc avg:prior
 
 <Accordion title="analytics — Knowledge health dashboard">
 
-Display a dashboard summarizing the health and statistics of your knowledge base.
+Display a dashboard summarizing knowledge health, coverage, and engagement metrics (page views and failed searches).
 
 ```bash
 kiwifs analytics [flags]
@@ -319,11 +340,24 @@ kiwifs analytics [flags]
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--root` | `-r` | | Knowledge root |
+| `--root` | `-r` | `./knowledge` | Knowledge root |
+| `--scope` | | | Path prefix to limit results |
+| `--stale-threshold` | | `30` | Days before a page counts as stale |
+| `--format` | | `text` | Output format: `text` or `json` |
 
-```bash
+<CodeGroup>
+```bash Full dashboard
 kiwifs analytics --root ./knowledge
 ```
+
+```bash Scope to a folder
+kiwifs analytics --scope students/ --stale-threshold 14
+```
+
+```bash JSON for automation
+kiwifs analytics --format json
+```
+</CodeGroup>
 
 </Accordion>
 
@@ -347,7 +381,7 @@ kiwifs lint --root ./knowledge
 
 <Accordion title="janitor — Full health scan">
 
-Run a comprehensive health scan that combines linting, analytics, and cleanup suggestions.
+Scan for stale pages, orphans, broken links, duplicate titles, and other hygiene issues. Exits with code **1** when error-severity issues are found.
 
 ```bash
 kiwifs janitor [flags]
@@ -355,17 +389,19 @@ kiwifs janitor [flags]
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--root` | `-r` | | Knowledge root |
+| `--root` | `-r` | `./knowledge` | Knowledge root |
+| `--stale-days` | | `90` | Days before a page is considered stale |
+| `--json` | | `false` | Emit JSON instead of a human summary |
 
 ```bash
-kiwifs janitor --root ./knowledge
+kiwifs janitor --root ./knowledge --stale-days 60 --json
 ```
 
 </Accordion>
 
 <Accordion title="reindex — Rebuild search indexes">
 
-Rebuild all search indexes from scratch. Useful after bulk imports or if search results seem stale.
+Rebuild the SQLite FTS5 index from markdown files on disk. When vector search is configured, also rebuilds the vector index unless `--fts-only` is set.
 
 ```bash
 kiwifs reindex [flags]
@@ -373,11 +409,19 @@ kiwifs reindex [flags]
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--root` | `-r` | | Knowledge root |
+| `--root` | `-r` | `./knowledge` | Knowledge root |
+| `--vector` | | `false` | Force vector index rebuild (requires `[search.vector]` config) |
+| `--fts-only` | | `false` | Skip vector index even when configured |
 
-```bash
+<CodeGroup>
+```bash Rebuild FTS index
 kiwifs reindex --root ./knowledge
 ```
+
+```bash Rebuild FTS and vector indexes
+kiwifs reindex --root ./knowledge --vector
+```
+</CodeGroup>
 
 <Note>
 Reindexing locks writes briefly. Run this during low-traffic periods on production servers.
@@ -387,19 +431,38 @@ Reindexing locks writes briefly. Run this during low-traffic periods on producti
 
 <Accordion title="view — Manage computed views">
 
-Create and manage computed views that aggregate data from your knowledge base.
+Create and regenerate computed view files (`kiwi-view: true` in frontmatter).
 
 ```bash
 kiwifs view [subcommand] [flags]
 ```
 
+| Subcommand | Purpose |
+| --- | --- |
+| `refresh <path>` | Regenerate a view file from its `kiwi-query` |
+| `list` | List all computed views |
+| `create` | Create a new view file and regenerate it |
+
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--root` | `-r` | | Knowledge root |
+| `--root` | `-r` | `./knowledge` | Knowledge root |
+| `--query` | | | DQL query (`create` only, required) |
+| `--name` | | | View title and filename (`create` only, required) |
+| `--path` | | | Directory for the new file (`create` only) |
 
-```bash
-kiwifs view --root ./knowledge
+<CodeGroup>
+```bash List views
+kiwifs view list --root ./knowledge
 ```
+
+```bash Refresh one view
+kiwifs view refresh dashboards/active-students.md
+```
+
+```bash Create a new view
+kiwifs view create --query 'TABLE name, status FROM "students/" WHERE status = "active"' --name "Active Students" --path reports/
+```
+</CodeGroup>
 
 </Accordion>
 
@@ -471,9 +534,97 @@ Flags: `--title`, `--tags`, `--folder`, `--actor` (defaults to `clipper`).
 
 ```bash
 kiwifs memory report --root ./knowledge --json
+kiwifs memory report --episodes-prefix agent-runs/ --json
 ```
 
 Summarizes episodic files vs merged pages for merge pipelines (no LLM consolidation).
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--root` | `./knowledge` | Knowledge root |
+| `--json` | `false` | Emit JSON instead of text |
+| `--episodes-prefix` | from config | Override `[memory] episodes_path_prefix` |
+
+</Accordion>
+
+</AccordionGroup>
+
+## KiwiFS Cloud commands
+
+<AccordionGroup>
+
+<Accordion title="login — Authenticate with KiwiFS Cloud">
+
+Log in via OAuth device flow. Credentials are stored in `~/.kiwifs/credentials.json`.
+
+```bash
+kiwifs login
+kiwifs login --host https://app.kiwifs.com
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--host` | `https://app.kiwifs.com` | KiwiFS Cloud host |
+| `--client-id` | auto | WorkOS client ID (optional override) |
+
+</Accordion>
+
+<Accordion title="logout — Remove stored credentials">
+
+```bash
+kiwifs logout
+```
+
+Removes `~/.kiwifs/credentials.json`.
+
+</Accordion>
+
+<Accordion title="whoami — Show authenticated user">
+
+```bash
+kiwifs whoami
+```
+
+Prints the email and display name for the stored Cloud session.
+
+</Accordion>
+
+<Accordion title="connect — Generate MCP config for a workspace">
+
+Generate MCP server configuration for connecting an agent to a KiwiFS Cloud workspace.
+
+```bash
+kiwifs connect <workspace-slug> [flags]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--key` | `$KIWI_API_KEY` | API key (optional after `kiwifs login`) |
+| `--write` | | Write config to a client: `cursor`, `claude-code`, `windsurf`, `claude-desktop`, or `auto` |
+| `--host` | `https://api.kiwifs.com` | KiwiFS Cloud API host |
+| `--project` | `false` | Write project-level config instead of global |
+
+<CodeGroup>
+```bash Print config for any MCP client
+kiwifs connect my-workspace --key kiwi_sk_abc123
+```
+
+```bash Auto-write to Cursor
+kiwifs connect my-workspace --write cursor --project
+```
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="update — Self-update the CLI">
+
+Download and install the latest `kiwifs` binary from GitHub Releases.
+
+```bash
+kiwifs update
+```
+
+Replaces the currently running binary in place.
 
 </Accordion>
 
