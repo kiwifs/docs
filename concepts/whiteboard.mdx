@@ -1,0 +1,52 @@
+---
+title: "Whiteboard"
+description: "Excalidraw diagrams stored as markdown files — create, edit, and share freeform drawings in the web UI."
+icon: "pen"
+---
+
+Whiteboards are freeform diagrams stored as markdown files with an **`.excalidraw.md`** suffix. KiwiFS embeds Excalidraw scene data inside the file so drawings version with the rest of your knowledge base.
+
+## File location
+
+New whiteboards are created under `whiteboards/` by default:
+
+```
+whiteboards/brainstorm.excalidraw.md
+whiteboards/architecture.excalidraw.md
+```
+
+Each file uses YAML frontmatter and a fenced JSON block that Excalidraw can parse. The drawing data lives in a ` ```json ` fence under `## Drawing`.
+
+## Web UI
+
+<Steps>
+  <Step title="Open the whiteboard hub">
+    Click **Whiteboard** in the toolbar. The hub lists all `.excalidraw.md` files in your knowledge base.
+  </Step>
+  <Step title="Create or select a board">
+    Use **New whiteboard** to create a file under `whiteboards/`, or pick an existing board from the dropdown.
+  </Step>
+  <Step title="Draw and save">
+    Use Excalidraw tools to sketch, annotate, and connect shapes. Changes save automatically to the markdown file on disk.
+  </Step>
+</Steps>
+
+You can also open a whiteboard from the file tree like any other page. Excalidraw markdown renders inline in page view.
+
+<Tip>
+Whiteboards are plain markdown files. Agents can read and write them with `kiwi_read` and `kiwi_write` like any other page — no separate API is required.
+</Tip>
+
+## Related documentation
+
+<CardGroup cols={2}>
+  <Card title="Web UI" icon="window" href="/guides/web-ui">
+    Toolbar views and file tree.
+  </Card>
+  <Card title="Canvas" icon="diagram-project" href="/concepts/canvas">
+    Structured JSON canvas diagrams.
+  </Card>
+  <Card title="Files as truth" icon="file" href="/concepts/files-as-truth">
+    How KiwiFS stores everything on disk.
+  </Card>
+</CardGroup>

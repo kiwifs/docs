@@ -36,11 +36,11 @@ Content-Type: application/json
 </ParamField>
 
 <ParamField body="csl_style" type="string">
-  Citation style language file.
+  Citation style preset: `apa`, `ieee`, `chicago`, `vancouver`, or `harvard`.
 </ParamField>
 
 <ParamField body="pdf_engine" type="string">
-  PDF engine override (e.g. `xelatex`, `weasyprint`).
+  PDF engine: `typst` or `xelatex` (default: auto-detect).
 </ParamField>
 
 <ParamField body="slide_format" type="string">
@@ -61,28 +61,38 @@ Content-Type: application/json
 
 ## Examples
 
-<CodeGroup>
-```bash PDF single page
-curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
-  -H 'Content-Type: application/json' \
-  -d '{"format":"pdf","path":"pages/report.md"}' \
-  -o report.pdf
-```
+<Tabs>
+  <Tab title="CLI">
+    ```bash
+    kiwifs export --format pdf --path docs/report.md --output report.pdf --theme paper
+    kiwifs export --format html --path concepts/ --self-contained --output site.html
+    kiwifs export --format slides --path talks/intro.md --output slides.html
+    kiwifs export --format site --path docs/ --site-name "My Wiki" --output docs-site.zip
+    ```
+  </Tab>
+  <Tab title="REST">
+    ```bash
+    curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
+      -H 'Content-Type: application/json' \
+      -d '{"format":"pdf","path":"pages/report.md"}' \
+      -o report.pdf
+    ```
 
-```bash HTML bundle
-curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
-  -H 'Content-Type: application/json' \
-  -d '{"format":"html","path":"concepts/","self_contained":true}' \
-  -o site.html
-```
+    ```bash
+    curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
+      -H 'Content-Type: application/json' \
+      -d '{"format":"html","path":"concepts/","self_contained":true}' \
+      -o site.html
+    ```
 
-```bash Slide deck
-curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
-  -H 'Content-Type: application/json' \
-  -d '{"format":"slides","path":"talks/intro.md","slide_format":"marp"}' \
-  -o intro.pdf
-```
-</CodeGroup>
+    ```bash
+    curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
+      -H 'Content-Type: application/json' \
+      -d '{"format":"slides","path":"talks/intro.md","slide_format":"marp"}' \
+      -o intro.pdf
+    ```
+  </Tab>
+</Tabs>
 
 <Note>
 The response streams the rendered artifact with an appropriate `Content-Type`. Large exports may take up to **five minutes** server-side.
@@ -102,7 +112,7 @@ PDF and site generation depend on external tools bundled in the official Docker 
 
 <CardGroup cols={2}>
   <Card title="Export overview" icon="upload" href="/export/overview">
-    JSONL and CSV export.
+    JSONL, CSV, and Parquet export.
   </Card>
   <Card title="Import/export API" icon="arrows-rotate" href="/api/import-export">
     REST reference.

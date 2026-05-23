@@ -14,7 +14,13 @@ Native `kiwifs import --from notion` remains the simplest path for one-shot impo
 
 <Tabs>
   <Tab title="Airbyte Docker">
-    Local connector containers (Firebase RTDB, Notion, Airtable, etc.).
+    Local connector containers. Phase 1 sources routed through Docker today:
+
+    | Source | Connector |
+    | --- | --- |
+    | `firebase-rtdb` | Firebase Realtime Database |
+    | `notion` | Notion |
+    | `airtable` | Airtable |
 
     | Method | Path | Purpose |
     | --- | --- | --- |
@@ -53,6 +59,10 @@ curl 'http://localhost:3333/api/kiwi/import/sync/status'
 ```
 
 Use with saved [import connections](/import/connections) when periodic sync is enabled.
+
+## Firebase RTDB record explosion
+
+When importing Firebase Realtime Database key/value records through Airbyte, KiwiFS **explodes** each record into its own markdown page instead of collapsing the entire snapshot into one file. This makes large RTDB trees searchable and linkable in your knowledge base.
 
 ## MCP
 

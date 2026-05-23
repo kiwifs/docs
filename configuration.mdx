@@ -16,9 +16,17 @@ host = "0.0.0.0"
 port = 3333
 cors_origins = ["https://app.example.com"]
 public_url = "https://wiki.example.com"
+
+[server.cors]
+allowed_origins = ["https://app.example.com"]
+allowed_methods = ["GET", "POST", "PUT", "PATCH", "DELETE"]
+allow_credentials = true
+max_age = 86400
 ```
 
 The `public_url` is used for permalink generation. Override via `KIWI_PUBLIC_URL` env var.
+
+Use `cors_origins` for a simple allowlist, or `[server.cors]` for fine-grained CORS control (methods, credentials, preflight cache).
 
 ## Search
 
@@ -186,8 +194,10 @@ episodes_path_prefix = "episodes/"
 [drafts]
 enabled = true
 max_active = 10
-auto_discard_days = 30
+auto_discard = "720h"
 ```
+
+`auto_discard` is a duration string (for example `"720h"` for 30 days). Draft branches older than this threshold are discarded automatically.
 
 ## Workflow
 
@@ -216,6 +226,26 @@ max_retries = 3
 
 See [Webhooks](/concepts/webhooks).
 
+Register static webhooks at startup with `[[webhook_entries]]`:
+
+```toml
+[[webhook_entries]]
+url = "https://hooks.example.com/kiwifs"
+events = ["file.created", "file.updated", "file.deleted"]
+secret = "${WEBHOOK_SECRET}"
+path_glob = "concepts/**"
+```
+
+## Lint
+
+```toml
+[lint]
+auto_format = true
+reject_errors = true
+```
+
+When `auto_format` is true (default), KiwiFS normalizes markdown on write (table alignment, trailing whitespace). When `reject_errors` is true (default), writes that fail lint checks with error severity are rejected.
+
 ## Schema enforcement
 
 ```toml
@@ -231,9 +261,20 @@ When `true`, writes are validated against `.kiwi/schemas/`. See [Schemas](/conce
 [import]
 airbyte_api_key = "${AIRBYTE_API_KEY}"
 airbyte_workspace_id = "${AIRBYTE_WORKSPACE_ID}"
+docker_host = "unix:///var/run/docker.sock"
+prefer_airbyte = true
+image_prefix = "airbyte/"
+pull_policy = "if-not-present"
 ```
 
-See [Airbyte import](/import/airbyte).
+| Field | Default | Description |
+| --- | --- | --- |
+| `docker_host` | `$DOCKER_HOST` | Docker socket for local Airbyte connectors |
+| `prefer_airbyte` | `true` | Route network sources through Airbyte when available |
+| `image_prefix` | `airbyte/` | Prefix for connector Docker images |
+| `pull_policy` | `if-not-present` | Image pull policy: `always`, `if-not-present`, or `never` |
+
+See [Airbyte import](/import/airbyte) and [Import connections](/import/connections).
 
 ## Tracing
 

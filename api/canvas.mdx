@@ -1,6 +1,6 @@
 ---
 title: "Canvas"
-description: "List, read, write, and auto-generate .canvas.json files."
+description: "List, read, write, patch, query, and auto-layout .canvas.json files."
 icon: "diagram-project"
 ---
 
@@ -37,12 +37,34 @@ Body must parse as JSON with **`nodes`** and **`edges`** arrays (empty arrays ar
 
 ## Patch canvas
 
+Apply a batch of atomic operations without replacing the full document. If any operation fails, the whole batch is rejected.
+
 ```http
 PATCH /canvas?path=maps/site.canvas.json
 Content-Type: application/json
 ```
 
-Apply a partial update (merge nodes/edges) without replacing the full document.
+```json
+{
+  "operations": [
+    { "op": "add_node", "node": { "id": "n1", "type": "file", "x": 0, "y": 0, "data": { "path": "concepts/auth.md" } } },
+    { "op": "update_node", "id": "n1", "node": { "x": 120 } },
+    { "op": "remove_node", "id": "n2" },
+    { "op": "add_edge", "edge": { "id": "e1", "fromNode": "n1", "toNode": "n3" } },
+    { "op": "update_edge", "id": "e1", "edge": { "label": "depends on" } },
+    { "op": "remove_edge", "id": "e1" }
+  ]
+}
+```
+
+Supported `op` values: `add_node`, `update_node`, `remove_node`, `add_edge`, `update_edge`, `remove_edge`.
+
+<ResponseField name="nodes_added" type="integer">Nodes inserted.</ResponseField>
+<ResponseField name="nodes_updated" type="integer">Nodes merged in place.</ResponseField>
+<ResponseField name="nodes_removed" type="integer">Nodes deleted (connected edges removed too).</ResponseField>
+<ResponseField name="edges_added" type="integer">Edges inserted.</ResponseField>
+<ResponseField name="edges_updated" type="integer">Edges merged in place.</ResponseField>
+<ResponseField name="edges_removed" type="integer">Edges deleted.</ResponseField>
 
 ## Delete canvas
 
@@ -53,26 +75,53 @@ DELETE /canvas?path=maps/site.canvas.json
 ## Query canvas nodes
 
 ```http
-GET /canvas/query?path=maps/site.canvas.json&q=auth
+GET /canvas/query?path=maps/site.canvas.json&q=auth&type=file&connected=n1&nodes_only=true
 ```
 
-Filter nodes by label or metadata within a canvas file.
+<ParamField query="path" type="string" required>
+  Canvas file path.
+</ParamField>
+
+<ParamField query="q" type="string">
+  Filter nodes by label or metadata text.
+</ParamField>
+
+<ParamField query="type" type="string">
+  Filter by node type.
+</ParamField>
+
+<ParamField query="connected" type="string">
+  Return nodes connected to the given node ID.
+</ParamField>
+
+<ParamField query="nodes_only" type="boolean" default="false">
+  Return only nodes.
+</ParamField>
+
+<ParamField query="edges_only" type="boolean" default="false">
+  Return only edges.
+</ParamField>
 
 ## Auto-layout
 
+Reposition existing nodes using Graphviz. Unlike `POST /canvas/generate`, this does not build from the wiki-link graph — it lays out the current canvas content.
+
 ```http
-POST /canvas/auto-layout
+POST /canvas/auto-layout?path=maps/site.canvas.json
 Content-Type: application/json
 ```
 
 ```json
-{
-  "path": "maps/site.canvas.json",
-  "layout": "hierarchical"
-}
+{ "layout": "dot" }
 ```
 
-Repositions nodes in place using the chosen layout algorithm.
+<ParamField query="path" type="string" required>
+  Canvas file to update in place.
+</ParamField>
+
+<ParamField body="layout" type="string" default="dot">
+  Graphviz engine: `dot`, `neato`, `fdp`, or `circo`.
+</ParamField>
 
 ## Generate from link graph
 
@@ -97,6 +146,10 @@ Content-Type: application/json
 
 Returns **`503`** if the link index is unavailable.
 
+<Note>
+`POST /canvas/generate` and `PATCH /canvas` are REST-only. MCP exposes `kiwi_canvas_list`, `kiwi_canvas_read`, and `kiwi_canvas_write` — not generate or patch.
+</Note>
+
 ## MCP parity
 
-`kiwi_canvas_list`, `kiwi_canvas_read`, `kiwi_canvas_write`, `kiwi_canvas_generate` — see [MCP](/concepts/mcp).
+`kiwi_canvas_list`, `kiwi_canvas_read`, `kiwi_canvas_write` — see [MCP](/concepts/mcp).

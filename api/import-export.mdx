@@ -25,8 +25,13 @@ curl -X POST 'http://localhost:3333/api/kiwi/import' \
 ```
 
 ```json
-{"imported": 42, "skipped": 0, "errors": []}
+{"imported": 42, "skipped": 0, "archived": 3, "errors": []}
 ```
+
+<ResponseField name="imported" type="integer">Pages created or updated.</ResponseField>
+<ResponseField name="skipped" type="integer">Rows unchanged since last import.</ResponseField>
+<ResponseField name="archived" type="integer">Pages tombstoned with `_archived_at` during a full sync (when source rows disappear).</ResponseField>
+<ResponseField name="errors" type="array">Per-row error messages.</ResponseField>
 
 <AccordionGroup>
   <Accordion title="Source types">
@@ -129,7 +134,8 @@ When a connection store is enabled, the server persists **metadata only** (never
 | `GET` | `/import/connections` | List saved connections (empty array if disabled). |
 | `POST` | `/import/connections` | Save or update metadata (`from`, `name`, `dsn`, `uri`, `table`, `collection`, `database`, `database_id`, `base_id`, `table_id`, `project`, `prefix`, `id_column`, `columns`, last-run stats, etc.). |
 | `DELETE` | `/import/connections/:id` | Remove a connection. **`204`**. |
-| `POST` | `/import/connections/:id/run` | Run import again. Body may include `credentials` and/or `api_key` for that run only. Response matches `POST /import`: `{ "imported", "skipped", "errors" }`. |
+| `POST` | `/import/connections/:id/run` | Run import again. Body may include `credentials` and/or `api_key` for that run only. Response matches `POST /import`: `{ "imported", "skipped", "archived", "errors" }`. |
+| `POST` | `/import/connections/:id/sync` | Enable, pause, or change auto-sync interval. Body: `{ "enabled": true, "interval": "1h" }`. |
 
 ## Ingest from files
 

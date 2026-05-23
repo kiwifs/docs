@@ -30,9 +30,51 @@ When a connection store is enabled, the server can persist **metadata only** (no
 | `POST` | `/api/kiwi/import/connections` | Save or update metadata. |
 | `DELETE` | `/api/kiwi/import/connections/:id` | Remove a saved connection. |
 | `POST` | `/api/kiwi/import/connections/:id/run` | Run import again; **credentials must be supplied in the body** for each run. |
+| `POST` | `/api/kiwi/import/connections/:id/sync` | Enable, pause, or change auto-sync interval. |
 
 See [Import and export](/api/import-export#import-browse) for the same endpoints with request detail.
+
+## Auto-sync
+
+Sources that change over time support periodic re-import: `postgres`, `mysql`, `mongodb`, `firestore`, `notion`, `airtable`, and Airbyte `firebase-rtdb`.
+
+<Steps>
+  <Step title="Save a connection">
+    Create a saved connection from the **Data sources** panel in the web UI or via `POST /import/connections`.
+  </Step>
+  <Step title="Enable sync">
+    Toggle auto-sync in the connection detail view, or call `POST /import/connections/:id/sync` with `{ "enabled": true, "interval": "1h" }`. Valid intervals include `5m`, `1h`, `6h`, and `24h`.
+  </Step>
+  <Step title="Monitor status">
+    Check `GET /api/kiwi/import/sync/status` or the connection badge in the web UI for `idle`, `running`, or `error` states.
+  </Step>
+</Steps>
+
+### Full-sync archival
+
+When auto-sync runs, KiwiFS performs a **full sync**: pages imported from the source in previous runs that no longer appear in the latest import are tombstoned with an `_archived_at` frontmatter field rather than deleted. Re-importing a row clears the archive marker.
+
+The import response includes an `archived` count when tombstoning occurs:
+
+```json
+{ "imported": 12, "skipped": 40, "archived": 3, "errors": [] }
+```
+
+<Info>
+Full-sync archival applies to syncable live sources without a row `limit`. One-shot CLI imports with `--limit` do not tombstone missing pages.
+</Info>
 
 ## File ingestion
 
 `POST /api/kiwi/ingest` converts supported office and document formats into markdown pages via the MarkItDown pipeline. See [Import and export](/api/import-export#ingest-from-files).
+
+## Related documentation
+
+<CardGroup cols={2}>
+  <Card title="Airbyte import" icon="rotate" href="/import/airbyte">
+    Docker and Cloud connectors.
+  </Card>
+  <Card title="Web UI" icon="window" href="/guides/web-ui">
+    **Data sources** panel and import wizard.
+  </Card>
+</CardGroup>
