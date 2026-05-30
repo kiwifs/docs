@@ -5,3 +5,7 @@
 # Draft content
 drafts/
 *.draft.mdx
+
+# LLM text files (served as static assets, not doc pages)
+llms.txt
+llms-full.txt

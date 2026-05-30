@@ -85,6 +85,8 @@
           {
             "group": "Guides",
             "pages": [
+              "guides/cloud",
+              "guides/templates",
               "guides/web-ui",
               "guides/alternate-protocols",
               "guides/posix",

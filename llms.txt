@@ -1,0 +1,99 @@
+# KiwiFS
+
+> Markdown filesystem for agents and teams. Searchable. Structured. Versioned.
+
+KiwiFS is a single Go binary that turns markdown files on disk into a searchable, queryable, versioned store accessible via REST, MCP, NFS, S3, WebDAV, and FUSE.
+
+## Docs
+
+- Full documentation: https://docs.kiwifs.com
+- Full LLM reference: https://docs.kiwifs.com/llms-full.txt
+- OpenAPI spec (self-hosted): GET /api/openapi.json
+- Swagger UI (self-hosted): GET /api/docs
+
+## Quickstart
+
+    curl -fsSL https://raw.githubusercontent.com/kiwifs/kiwifs/main/install.sh | sh
+    kiwifs init --template knowledge --root ./knowledge
+    kiwifs serve --root ./knowledge
+    # Server running at http://localhost:3333
+
+## MCP Setup
+
+KiwiFS ships a built-in MCP server with 60+ tools.
+
+### Claude Desktop / Cursor (stdio)
+
+    {
+      "mcpServers": {
+        "kiwifs": {
+          "command": "kiwifs",
+          "args": ["mcp", "--root", "/path/to/knowledge"]
+        }
+      }
+    }
+
+### Remote proxy mode
+
+    kiwifs mcp --remote https://kiwi.example.com --api-key kiwi_sk_...
+
+### Streamable HTTP
+
+    kiwifs mcp --root ./knowledge --http --port 8181
+
+## KiwiFS Cloud
+
+Hosted KiwiFS at https://app.kiwifs.com. MCP and REST access via:
+
+    MCP: https://api.kiwifs.com/api/workspaces/{slug}/mcp
+    REST: https://api.kiwifs.com/api/workspaces/{slug}/file?path=README.md
+
+Authenticate with a workspace API key (Bearer token) or MCP OAuth 2.1.
+
+## REST API (key endpoints)
+
+Base URL: http://localhost:3333/api/kiwi
+
+    GET  /tree                     List files
+    GET  /file?path=<path>         Read a file
+    PUT  /file?path=<path>         Create or update a file
+    DELETE /file?path=<path>       Delete a file
+    POST /rename                   Move/rename a file
+    POST /bulk                     Atomic multi-file write
+    POST /file/append              Append without read-modify-write
+    GET  /search?q=<query>         Full-text search (BM25)
+    POST /search/semantic          Vector similarity search
+    GET  /query?q=<dql>            DQL query over frontmatter
+    GET  /versions?path=<path>     Git history
+    GET  /diff?path=<p>&from=&to=  Diff between versions
+    GET  /backlinks?path=<path>    Incoming wiki links
+    GET  /graph/analytics          PageRank, connectivity
+    POST /drafts                   Create staging branch
+    GET  /context                  Agent playbook + schema + index
+    GET  /events                   SSE real-time events
+
+Auth: Bearer token in Authorization header. Set X-Actor on writes for git attribution.
+
+## MCP Tools (60+)
+
+Core: kiwi_read, kiwi_write, kiwi_delete, kiwi_rename, kiwi_bulk_write, kiwi_append, kiwi_tree, kiwi_search, kiwi_search_semantic, kiwi_changes, kiwi_versions
+Queries: kiwi_query, kiwi_query_meta, kiwi_aggregate, kiwi_context
+Graph: kiwi_backlinks, kiwi_graph_analytics, kiwi_graph_centrality, kiwi_graph_communities, kiwi_graph_path, kiwi_graph_walk, kiwi_suggestions, kiwi_peek, kiwi_section
+Drafts: kiwi_draft_create, kiwi_draft_list, kiwi_draft_read, kiwi_draft_write, kiwi_draft_diff, kiwi_draft_merge, kiwi_draft_discard
+Views: kiwi_views_list, kiwi_views_get, kiwi_views_save, kiwi_views_delete, kiwi_views_execute
+Canvas: kiwi_canvas_list, kiwi_canvas_read, kiwi_canvas_write
+Workflows: kiwi_workflow_list, kiwi_workflow_get, kiwi_workflow_save, kiwi_workflow_advance, kiwi_workflow_board
+Import/Export: kiwi_import, kiwi_ingest, kiwi_export, kiwi_export_document
+Analytics: kiwi_analytics, kiwi_health_check, kiwi_memory_report, kiwi_velocity, kiwi_timeline, kiwi_eval, kiwi_embeddings
+Coordination: kiwi_claim, kiwi_release, kiwi_claims_list, kiwi_eligible
+Helpers: kiwi_lint, kiwi_clip, kiwi_feed, kiwi_view_refresh
+
+## Init Templates
+
+    kiwifs init --template <name>
+
+Templates: knowledge (default), wiki, runbook, research, tasks, blank
+
+## Optional
+
+- llms-full.txt: https://docs.kiwifs.com/llms-full.txt

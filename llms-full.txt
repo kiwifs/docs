@@ -1,0 +1,605 @@
+# KiwiFS — Full Reference for LLMs
+
+> Markdown filesystem for agents and teams. Searchable. Structured. Versioned.
+
+KiwiFS is a single Go binary that turns markdown files on disk into a searchable, queryable, versioned store accessible via REST, MCP, NFS, S3, WebDAV, and FUSE. Every write is a git commit. Search is built-in (BM25 via SQLite FTS5 + optional vector embeddings). Frontmatter metadata is queryable with DQL, a SQL-like language. A web UI with wiki links, knowledge graph, Bases, canvas, Kanban, and comments is included.
+
+Documentation: https://docs.kiwifs.com
+GitHub: https://github.com/kiwifs/kiwifs
+OpenAPI spec (self-hosted): GET /api/openapi.json
+
+---
+
+## Installation
+
+    # Shell one-liner
+    curl -fsSL https://raw.githubusercontent.com/kiwifs/kiwifs/main/install.sh | sh
+
+    # Go
+    go install github.com/kiwifs/kiwifs@latest
+
+    # Docker
+    docker run -p 3333:3333 -v ./knowledge:/data ameliaanhlam/kiwifs
+
+## Init and Serve
+
+    kiwifs init --template knowledge --root ./knowledge
+    kiwifs serve --root ./knowledge
+
+Server starts at http://localhost:3333 with the web UI, REST API, and optional NFS/S3/WebDAV.
+
+## Init Templates
+
+    kiwifs init --template <name> --root <dir>
+
+| Template   | Description                                             |
+|------------|---------------------------------------------------------|
+| knowledge  | LLM-maintained knowledge base with schema, episodes, playbook |
+| wiki       | Team wiki                                                |
+| runbook    | Ops/incidents runbook                                    |
+| research   | Research notes                                           |
+| tasks      | Task tracking with workflow schema                       |
+| blank      | Config only, no starter files                            |
+
+The `knowledge` template creates:
+- SCHEMA.md — directory layout, frontmatter field tables, naming conventions
+- .kiwi/playbook.md — MCP tool sequences for each operation
+- .kiwi/rules.md — agent behavior per harness (Cursor, Claude, etc.)
+- index.md — auto-maintained table of contents
+- log.md — append-only change log
+- episodes/ — episodic memory directory
+- pages/ — durable knowledge pages
+
+---
+
+## Configuration
+
+Config file: .kiwi/config.toml (supports ${ENV_VAR} expansion)
+
+Key sections:
+
+    [server]
+    host = "0.0.0.0"
+    port = 3333
+
+    [search]
+    engine = "sqlite"           # sqlite (FTS5) or grep
+    [search.vector]
+    embedder = "ollama"         # ollama, openai, or voyageai
+    store = "sqlite-vec"
+
+    [versioning]
+    strategy = "git"            # git, cow, or none
+
+    [auth]
+    type = "none"               # none, apikey, perspace, oidc
+    api_key = "kiwi_sk_..."
+
+    [backup]
+    remote = "git@github.com:org/knowledge.git"
+
+    [webhooks]
+    [schema]
+    enforce = true
+    [drafts]
+    enabled = true
+    [audit]
+    enabled = true
+
+---
+
+## REST API Reference
+
+Base URL: http://localhost:3333/api/kiwi
+Auth: Bearer token in Authorization header
+Common headers: X-Actor (git author), X-Provenance (lineage), If-Match (ETag), X-Kiwi-Space (multi-space)
+
+### Files
+
+    GET    /tree                              List all files
+    GET    /file?path=concepts/auth.md        Read file (returns content + frontmatter + ETag)
+    PUT    /file?path=concepts/auth.md        Create or update (body = markdown, set X-Actor)
+    DELETE /file?path=concepts/auth.md        Delete file
+    POST   /rename                            Move/rename: {"from": "old.md", "to": "new.md"}
+    POST   /rename-dir                        Rename directory
+    POST   /bulk                              Atomic multi-file write: {"files": [...]}
+    POST   /file/append                       Append to file: {"path": "log.md", "content": "..."}
+    POST   /assets                            Upload binary asset
+    POST   /resolve-links                     Resolve wiki-link targets
+    GET    /readlink?path=link.md             Read symlink target
+    GET    /changes?since=<checkpoint>         Incremental change list
+
+### Search
+
+    GET    /search?q=authentication            BM25 full-text search
+    GET    /search?q=auth&mode=verified        Trust-ranked results
+    POST   /search/semantic                    Vector similarity: {"query": "...", "limit": 5}
+    GET    /search/semantic?q=auth             GET form of semantic search
+
+### Versioning
+
+    GET    /versions?path=concepts/auth.md     Git history for a file
+    GET    /version?path=auth.md&version=abc   Read file at specific revision
+    GET    /diff?path=auth.md&from=abc&to=def  Diff between two revisions
+    GET    /blame?path=concepts/auth.md        Git blame
+
+### Metadata and DQL
+
+    GET    /query?q=TABLE title,status FROM 'concepts' WHERE status='draft'
+    GET    /query/aggregate?group=status&calc=count
+    GET    /meta?path=concepts/auth.md         Raw frontmatter metadata
+    GET    /backlinks?path=concepts/auth.md    Incoming wiki links
+    GET    /graph                              Full wiki-link graph (nodes + edges)
+
+### Graph Analytics
+
+    GET    /graph/analytics?limit=20           PageRank, component analysis, orphans
+    GET    /graph/centrality?limit=50          PageRank and betweenness per page
+    GET    /graph/communities                  Louvain community detection
+    GET    /graph/path?from=a.md&to=b.md       Shortest path between pages
+    GET    /graph/walk?path=a.md               One-hop neighbors and backlinks
+
+### Drafts (staging branches)
+
+    POST   /drafts                             Create: {"name": "feature-x"}
+    GET    /drafts                             List active drafts
+    GET    /drafts/:id                         Draft details
+    GET    /drafts/:id/diff                    Diff vs main
+    POST   /drafts/:id/merge                   Merge into main
+    DELETE /drafts/:id                         Discard draft
+    GET    /drafts/:id/file?path=...           Read file in draft
+    PUT    /drafts/:id/file?path=...           Write file in draft
+    DELETE /drafts/:id/file?path=...           Delete file in draft
+    GET    /drafts/:id/tree                    List files in draft
+
+### Views (Bases)
+
+    GET    /views                              List saved views
+    GET    /views/:name                        Get view definition
+    PUT    /views/:name                        Save view (DQL + layout)
+    DELETE /views/:name                        Delete view
+    GET    /views/:name/execute                Run view query, get rows
+
+### Canvas
+
+    GET    /canvases                           List canvas files
+    GET    /canvas?path=overview.canvas.json    Read canvas
+    PUT    /canvas?path=...                    Write canvas
+    DELETE /canvas?path=...                    Delete canvas
+    PATCH  /canvas?path=...                    Patch canvas nodes/edges
+    GET    /canvas/query?path=...              Query canvas elements
+    POST   /canvas/auto-layout                 Auto-layout from wiki-link graph
+    POST   /canvas/generate                    Generate canvas from graph
+
+### Workflows (Kanban)
+
+    GET    /workflows                          List workflow definitions
+    GET    /workflows/:name                    Get workflow definition
+    PUT    /workflows/:name                    Save workflow definition
+    DELETE /workflows/:name                    Delete workflow
+    POST   /workflow/assign                    Assign file to workflow
+    POST   /workflow/advance                   Advance file state
+    POST   /workflow/reorder                   Reorder items on board
+    GET    /workflow/board/:workflow            Kanban board view
+
+### Claims (cooperative leases)
+
+    POST   /claim                              Acquire lease: {"path": "...", "actor": "...", "ttl": "5m"}
+    DELETE /claim                              Release lease
+    GET    /claims                             List active claims
+
+### Publishing
+
+    POST   /publish                            Publish a page
+    POST   /publish/bulk                       Bulk publish
+    POST   /unpublish                          Unpublish a page
+    POST   /unpublish/bulk                     Bulk unpublish
+    GET    /publish/status?path=...            Check publish status
+    GET    /publish/list                       List published pages
+    GET    /p/*                                Public permalink (no auth)
+
+### Webhooks
+
+    POST   /webhooks                           Register webhook: {"url": "...", "events": ["write","delete"]}
+    GET    /webhooks                           List webhooks
+    DELETE /webhooks/:id                       Remove webhook
+
+### Schemas (JSON Schema validation)
+
+    GET    /schemas                            List schema definitions
+    GET    /schemas/:type                      Get schema for a type
+    PUT    /schemas/:type                      Save schema definition
+
+### Import and Export
+
+    POST   /import                             Import from source: {"from": "postgres", "dsn": "...", ...}
+    POST   /import/upload                      Upload file for import
+    POST   /import/browse                      Browse tables/collections
+    POST   /import/preview                     Preview records
+    GET    /import/connections                  List saved connections
+    POST   /import/connections                  Save connection
+    DELETE /import/connections/:id              Delete connection
+    POST   /import/connections/:id/run          Re-run import
+    GET    /import/sources                      List supported sources
+    POST   /ingest                             Convert binary doc to markdown
+    POST   /clip                               Web clip: {"url": "https://...", "folder": "clips/"}
+    GET    /export?format=jsonl&path=concepts/  Export as JSONL or CSV
+    POST   /export/document                    Render to PDF/HTML/slides/site
+
+### Analytics and Health
+
+    GET    /analytics                          Knowledge base health dashboard
+    GET    /analytics/overview                 Compact dashboard
+    GET    /analytics/views                    Page view stats
+    GET    /analytics/views/v2?path=auth.md    Per-page engagement
+    GET    /analytics/searches                 Search query log
+    GET    /analytics/failed-searches          Failed searches (content gaps)
+    GET    /analytics/trends                   Activity trends
+    GET    /analytics/content-gaps             Content gap suggestions
+    POST   /analytics/content-gaps/dismiss     Dismiss a suggestion
+    GET    /analytics/sources                  Pages by import source
+    GET    /health-check?path=auth.md          Per-page health
+    GET    /stale                              Overdue review pages
+    GET    /contradictions                     Conflicting claims across pages
+    GET    /suggestions?path=auth.md           Semantically similar pages
+    GET    /embeddings?path=auth.md            Raw embedding vectors
+    POST   /eval                               Search quality benchmark
+    GET    /janitor                            Full health scan
+    GET    /memory/report                      Episodic memory coverage
+    GET    /velocity?period=14d                Change velocity analysis
+
+### Utilities
+
+    GET    /context                            Agent playbook + schema + index
+    GET    /rules                              Get .kiwi/rules.md
+    GET    /rules?format=cursor                Get rules formatted for Cursor
+    PUT    /rules                              Update rules.md
+    POST   /lint                               Lint markdown
+    GET    /peek?path=auth.md                  Lightweight page summary
+    GET    /section?path=auth.md&heading=OAuth  Extract one heading section
+    GET    /toc?path=auth.md                   Table of contents
+    GET    /timeline?limit=50                  Activity timeline
+    GET    /feed.xml                           Atom feed
+    GET    /feed.json                          JSON feed
+    GET    /templates                          List page templates
+    GET    /template?name=meeting-notes        Get a page template body
+    GET    /backup/status                      Backup status
+    GET    /audit?since=2026-05-01T00:00:00Z   Audit log entries
+    GET    /space/info                         Space visibility and root
+    PUT    /space/visibility                   Set public/unlisted/private
+
+### Real-time Events (SSE)
+
+    GET    /events                             Server-Sent Events stream
+
+Event types: write, delete, bulk, import
+
+### Comments
+
+    GET    /comments?path=auth.md              List comments
+    POST   /comments?path=auth.md              Add comment: {"line": 15, "body": "..."}
+    PATCH  /comments/:id                       Resolve: {"resolved": true}
+    DELETE /comments/:id                       Delete comment
+
+### Sharing
+
+    POST   /share                              Create share link
+    GET    /share?path=auth.md                 List share links for page
+    DELETE /share/:id                          Revoke share link
+
+### Theme
+
+    GET    /theme                              Get UI theme
+    PUT    /theme                              Set theme: {"primary": "#6cbe45", "mode": "light"}
+
+### Multi-space Administration
+
+    GET    /api/spaces                         List spaces (outside /api/kiwi)
+    POST   /api/spaces                         Create space: {"name": "team", "root": "./team"}
+    DELETE /api/spaces/:name                   Delete space
+    GET    /api/init-templates                 List init templates
+
+### Infrastructure
+
+    GET    /health                             Basic health check
+    GET    /healthz                            Liveness probe (uptime, version)
+    GET    /readyz                             Readiness probe
+    GET    /metrics                            Prometheus metrics
+    GET    /api/openapi.json                   OpenAPI 3.0 spec
+    GET    /api/docs                           Swagger UI
+
+### Error Format
+
+All errors return JSON: {"error": "message"}
+Status codes: 400 (bad request), 401 (unauthorized), 404 (not found), 409 (conflict/ETag mismatch), 422 (validation), 501 (feature disabled), 503 (optional service unavailable), 500 (internal error)
+
+---
+
+## MCP Server
+
+KiwiFS ships a built-in MCP server. Transports: stdio (default), Streamable HTTP (--http).
+
+### Setup
+
+    # In-process (local)
+    kiwifs mcp --root ~/knowledge
+
+    # Proxy to remote server
+    kiwifs mcp --remote https://kiwi.example.com --api-key kiwi_sk_...
+
+    # HTTP transport
+    kiwifs mcp --root ~/knowledge --http --port 8181
+
+### Claude Desktop / Cursor config
+
+    {
+      "mcpServers": {
+        "kiwifs": {
+          "command": "kiwifs",
+          "args": ["mcp", "--root", "/path/to/knowledge"]
+        }
+      }
+    }
+
+### MCP Resources
+
+    kiwi://schema            SCHEMA.md for the knowledge root
+    kiwi://file/{path}       Read file by path
+    kiwi://tree/{path}       Directory listing
+
+### Tool Reference (60+)
+
+#### Core Files and Search
+
+| Tool                  | Description                                                       |
+|-----------------------|-------------------------------------------------------------------|
+| kiwi_read             | Read file with optional wiki-link resolution, metadata-only, ETag |
+| kiwi_write            | Create/update page with optional actor and provenance             |
+| kiwi_delete           | Delete a path (history preserved with git versioning)             |
+| kiwi_rename           | Move/rename with optional wiki-link rewrites                      |
+| kiwi_bulk_write       | Atomic multi-file commit                                          |
+| kiwi_append           | Append without read-modify-write races                            |
+| kiwi_tree             | Directory listing with depth and optional permalinks              |
+| kiwi_search           | BM25 full-text search with pagination and path_prefix             |
+| kiwi_search_semantic  | Vector similarity search (requires embeddings)                    |
+| kiwi_changes          | Incremental change list since a checkpoint                        |
+| kiwi_versions         | Git history entries for a path                                    |
+| kiwi_view_refresh     | Regenerate a computed kiwi-view markdown file                     |
+
+#### Metadata, DQL, and Analytics
+
+| Tool                  | Description                                                       |
+|-----------------------|-------------------------------------------------------------------|
+| kiwi_query_meta       | Frontmatter filters with AND/OR groups, sort, pagination          |
+| kiwi_query            | DQL queries (TABLE, LIST, COUNT, DISTINCT)                        |
+| kiwi_aggregate        | GROUP BY aggregates over metadata                                 |
+| kiwi_import           | Pull from databases, CSV/JSON, Notion, Airtable, etc.            |
+| kiwi_ingest           | Convert binary documents to markdown                              |
+| kiwi_export           | Export JSONL/CSV with optional embeddings                         |
+| kiwi_export_document  | Render to PDF, HTML, slides, or static site                       |
+| kiwi_analytics        | Knowledge base health metrics                                     |
+| kiwi_health_check     | Single-page diagnostics                                           |
+| kiwi_memory_report    | Episodic memory coverage and merge hints                          |
+| kiwi_velocity         | Change hotspots, cold pages, bursts                               |
+| kiwi_eval             | Search quality benchmark harness                                  |
+| kiwi_context          | Schema, playbook, index, rules in one call (good first tool)      |
+| kiwi_backlinks        | Incoming wiki links for a page                                    |
+| kiwi_suggestions      | Semantically similar pages excluding existing links               |
+| kiwi_embeddings       | Raw chunk embeddings for a page                                   |
+| kiwi_graph_analytics  | PageRank-based graph summary                                     |
+| kiwi_graph_centrality | PageRank and betweenness rankings per page                        |
+| kiwi_graph_communities| Louvain community detection over wiki links                       |
+| kiwi_graph_path       | Shortest path between two pages                                   |
+| kiwi_graph_walk       | Local neighborhood and siblings around a page                     |
+| kiwi_eligible         | Ranked todo-style tasks inferred from metadata                    |
+
+#### Draft Spaces
+
+| Tool                  | Description                                                       |
+|-----------------------|-------------------------------------------------------------------|
+| kiwi_draft_create     | Open a new git-backed draft branch                                |
+| kiwi_draft_list       | List active drafts                                                |
+| kiwi_draft_read       | Read file inside a draft                                          |
+| kiwi_draft_write      | Write file inside a draft                                         |
+| kiwi_draft_diff       | Unified diff vs main                                              |
+| kiwi_draft_merge      | Merge draft into live knowledge                                   |
+| kiwi_draft_discard    | Drop the draft branch                                             |
+
+#### Bases (Saved Views)
+
+| Tool                  | Description                                                       |
+|-----------------------|-------------------------------------------------------------------|
+| kiwi_views_list       | List .kiwi/views/*.json definitions                               |
+| kiwi_views_get        | Fetch a single view definition                                    |
+| kiwi_views_save       | Persist columns, filters, sort, layout, query                     |
+| kiwi_views_delete     | Remove a saved view                                               |
+| kiwi_views_execute    | Run the DQL backing a view and return rows                        |
+
+#### Canvas
+
+| Tool                  | Description                                                       |
+|-----------------------|-------------------------------------------------------------------|
+| kiwi_canvas_list      | Discover *.canvas.json files                                      |
+| kiwi_canvas_read      | Read canvas JSON                                                  |
+| kiwi_canvas_write     | Write canvas JSON                                                 |
+
+#### Workflows and Coordination
+
+| Tool                  | Description                                                       |
+|-----------------------|-------------------------------------------------------------------|
+| kiwi_workflow_list    | List workflow definitions                                         |
+| kiwi_workflow_get     | Get a workflow definition                                         |
+| kiwi_workflow_save    | Save a workflow definition                                        |
+| kiwi_workflow_advance | Validate and apply a state transition                             |
+| kiwi_workflow_board   | Kanban board grouped by state                                     |
+| kiwi_claim            | Acquire cooperative lease on a path                               |
+| kiwi_release          | Release a lease                                                   |
+| kiwi_claims_list      | List active claims                                                |
+
+#### Content Helpers and Feeds
+
+| Tool                  | Description                                                       |
+|-----------------------|-------------------------------------------------------------------|
+| kiwi_peek             | Lightweight summary (title, snippet, links, headings)             |
+| kiwi_section          | Extract a single heading section by name or index                 |
+| kiwi_timeline         | Recent activity with pagination                                   |
+| kiwi_feed             | Activity feed (JSON or Atom)                                      |
+| kiwi_clip             | Fetch URL and save as clipped markdown                            |
+| kiwi_lint             | Structural markdown lint                                          |
+
+---
+
+## CLI Reference
+
+    kiwifs serve         Start the HTTP server
+    kiwifs init          Initialize a knowledge directory with a template
+    kiwifs mcp           Start MCP server (stdio or HTTP)
+    kiwifs mount         FUSE mount a remote KiwiFS
+    kiwifs import        Import from databases, files, or SaaS
+    kiwifs export        Export as JSONL, CSV, PDF, HTML, slides, or site
+    kiwifs query         Run a DQL query
+    kiwifs aggregate     SQL-style aggregation over frontmatter
+    kiwifs analytics     Knowledge health dashboard
+    kiwifs lint          Validate markdown
+    kiwifs janitor       Full health scan
+    kiwifs reindex       Rebuild search indexes
+    kiwifs view          Manage computed views
+    kiwifs clip          Save a web page as markdown
+    kiwifs memory report Episodic memory coverage report
+    kiwifs backup        Push to git remote
+    kiwifs restore       Clone from git remote
+    kiwifs rules         View/export .kiwi/rules.md
+    kiwifs rules export  Export rules for a specific harness (--format cursor|claude|agents|openclaw)
+    kiwifs rules sync    Export and write to file (e.g., .cursor/rules/kiwi.md)
+    kiwifs token create  Create scoped API key (read/write/admin)
+    kiwifs token list    List API keys
+    kiwifs token revoke  Revoke an API key
+    kiwifs connect       Generate MCP config for a KiwiFS Cloud workspace
+    kiwifs bench         Performance benchmark
+    kiwifs update        Self-update to latest release
+
+---
+
+## KiwiFS Cloud
+
+Hosted KiwiFS at https://app.kiwifs.com. The cloud control plane manages workspaces, API keys, billing, and auth.
+
+### Authentication
+
+Two methods:
+1. API key: Pass `kiwi_sk_*` as Bearer token
+2. MCP OAuth 2.1: Browser-based login via WorkOS (PKCE)
+
+### Cloud API
+
+Base URL: https://api.kiwifs.com/api/workspaces/{slug}
+
+All KiwiFS endpoints are available under this prefix. The cloud proxy authenticates you and forwards to the workspace's KiwiFS instance.
+
+    # Read a file
+    GET /api/workspaces/{slug}/file?path=README.md
+
+    # Write a file
+    PUT /api/workspaces/{slug}/file?path=README.md
+
+    # Search
+    GET /api/workspaces/{slug}/search?q=authentication
+
+    # File tree
+    GET /api/workspaces/{slug}/tree
+
+    # MCP endpoint
+    POST /api/workspaces/{slug}/mcp
+
+### Cloud MCP Config
+
+    {
+      "mcpServers": {
+        "kiwi": {
+          "url": "https://api.kiwifs.com/api/workspaces/{slug}/mcp"
+        }
+      }
+    }
+
+For CI/headless (no browser OAuth):
+
+    {
+      "mcpServers": {
+        "kiwi": {
+          "url": "https://api.kiwifs.com/api/workspaces/{slug}/mcp",
+          "headers": {
+            "Authorization": "Bearer kiwi_sk_..."
+          }
+        }
+      }
+    }
+
+### Connect CLI
+
+    kiwifs connect <workspace-slug>
+
+Generates and writes MCP config for the workspace.
+
+---
+
+## Access Protocols
+
+| Protocol | Port  | Enable flag   |
+|----------|-------|---------------|
+| REST API | 3333  | (always on)   |
+| MCP      | 8181  | --http        |
+| NFS      | 2049  | --nfs         |
+| S3       | 3334  | --s3          |
+| WebDAV   | 3335  | --webdav      |
+| FUSE     | N/A   | kiwifs mount  |
+
+---
+
+## Agent Playbook System
+
+KiwiFS ships agent-facing files that teach agents how to interact with a knowledge base.
+
+### Core files (from kiwifs init)
+
+    SCHEMA.md            Directory layout and frontmatter field definitions
+    .kiwi/playbook.md    Step-by-step MCP sequences for each operation
+    .kiwi/rules.md       Harness-specific agent behavior
+    index.md             Auto-maintained table of contents
+    log.md               Append-only change log
+
+### Load context in one call
+
+    MCP:  kiwi_context
+    REST: GET /api/kiwi/context
+
+Returns schema, playbook, and index combined — the recommended first tool call for any agent session.
+
+### Export rules for your harness
+
+    kiwifs rules export --format cursor    # .cursorrules style
+    kiwifs rules export --format claude    # CLAUDE.md style
+    kiwifs rules export --format agents    # AGENTS.md style
+    kiwifs rules export --format openclaw  # OpenClaw format
+
+### Episodic Memory
+
+Write observations to episodes/ as episodic memory. Periodically consolidate into durable pages/ using kiwi_memory_report to identify unmerged episodes.
+
+Frontmatter for episodes: memory_kind: episodic, episode_id, derived-from, merged-from
+
+---
+
+## Key Concepts
+
+- Files are truth: every page is a plain .md file with YAML frontmatter
+- Wiki links: [[page-name]] syntax with fuzzy resolution and backlink tracking
+- DQL: SQL-like query language over frontmatter (TABLE, LIST, COUNT, DISTINCT, WHERE, SORT, GROUP BY)
+- Versioning: every write is a git commit (configurable: git, cow, none)
+- Search: BM25 full-text via FTS5 + optional vector similarity via Ollama/OpenAI
+- Schemas: JSON Schema validation on frontmatter by type field
+- Workflows: JSON state machines with Kanban board visualization
+- Drafts: git-backed staging branches for safe agent edits
+- Claims: cooperative write leases to prevent concurrent edits
+- Webhooks: signed HTTP POST on file create/update/delete events
+- SSE: real-time event stream at GET /events
+- Multi-space: multiple isolated knowledge bases on one server

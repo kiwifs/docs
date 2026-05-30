@@ -1,0 +1,131 @@
+---
+title: "Init templates"
+description: "Starter templates for new knowledge bases — knowledge, wiki, runbook, research, tasks, and blank."
+icon: "folder-open"
+---
+
+`kiwifs init` scaffolds a knowledge directory from a built-in template. Each template provides a directory layout, sample files, a `.kiwi/config.toml`, and optional agent-facing documents.
+
+```bash
+kiwifs init --template <name> --root <dir>
+```
+
+## Available templates
+
+| Template | Best for | Starter files |
+|----------|----------|---------------|
+| `knowledge` | LLM-maintained knowledge bases | SCHEMA.md, playbook, episodes, index, log, sample page |
+| `wiki` | Team wikis | Sample pages, index |
+| `runbook` | Ops and incident response | Runbook starters, checklists |
+| `research` | Research notes and literature | Note structure, bibliography |
+| `tasks` | Task tracking with workflows | Workflow schema, Kanban-ready frontmatter |
+| `blank` | Empty starting point | `.kiwi/config.toml` only |
+
+<Tip>
+In the web UI and cloud dashboard, templates are also available when creating a new workspace or space.
+</Tip>
+
+## knowledge (default)
+
+The `knowledge` template is designed for AI agents that maintain a structured knowledge base. It includes everything an agent needs to onboard itself.
+
+### Directory structure
+
+```
+knowledge/
+├── SCHEMA.md                  # Directory layout, frontmatter fields, naming conventions
+├── index.md                   # Auto-maintained table of contents
+├── log.md                     # Append-only change log
+├── pages/
+│   └── getting-started.md     # Sample durable page
+├── episodes/
+│   └── example-episode.md     # Sample episodic memory entry
+└── .kiwi/
+    ├── config.toml            # Server configuration
+    ├── playbook.md            # MCP tool sequences for each operation
+    └── rules.md               # Agent harness rules (Cursor, Claude, etc.)
+```
+
+### Key files
+
+<AccordionGroup>
+<Accordion title="SCHEMA.md">
+Describes the knowledge base layout, frontmatter field tables, and naming conventions. Agents read this (via `kiwi_context` or `kiwi://schema`) to understand where to write and what metadata to set.
+</Accordion>
+
+<Accordion title=".kiwi/playbook.md">
+Step-by-step MCP sequences for standard operations: ingest, query, deep retrieval (peek, graph_walk, section), memory consolidation, lint loop, canvas generation, and workflow management. Includes a cost table of tools to help agents minimize unnecessary calls.
+</Accordion>
+
+<Accordion title=".kiwi/rules.md">
+Harness-specific behavior rules. Export for your agent tool:
+
+```bash
+kiwifs rules export --format cursor
+kiwifs rules export --format claude
+kiwifs rules export --format agents
+```
+</Accordion>
+
+<Accordion title="index.md">
+Auto-maintained table of contents that agents update after adding pages. Seeds with a link to `pages/getting-started`.
+</Accordion>
+
+<Accordion title="log.md">
+Append-only chronological record. Agents append a line after each operation for audit trail and observability.
+</Accordion>
+
+<Accordion title="episodes/">
+Directory for episodic memory. Agents write observations here as short-lived notes with `memory_kind: episodic` frontmatter. Periodically consolidate into durable pages using `kiwi_memory_report`. See [Episodic memory](/concepts/episodic-memory).
+</Accordion>
+</AccordionGroup>
+
+## wiki
+
+A team wiki template with a flat page structure and a simple index.
+
+## runbook
+
+Operations-focused template with incident response checklists, on-call procedures, and escalation paths.
+
+## research
+
+Research template with a note-taking structure, bibliography support, and literature review pages.
+
+## tasks
+
+Task tracking template with a pre-configured workflow schema. Files use `status` and `assignee` frontmatter fields and are ready for Kanban board visualization. See [Workflows](/concepts/workflows).
+
+## blank
+
+Minimal template — creates only `.kiwi/config.toml`. Use this when you want to start from scratch or bring your own directory structure.
+
+## Listing templates via API
+
+```bash
+# Self-hosted
+curl http://localhost:3333/api/init-templates
+
+# Cloud
+curl https://api.kiwifs.com/api/workspaces/init-templates \
+  -H "Authorization: Bearer $KIWI_API_KEY"
+```
+
+Returns an array of template objects with `id`, `name`, and `description`.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Agent playbook" icon="book-open" href="/concepts/agent-playbook">
+    How agents onboard using SCHEMA.md and playbook.md.
+  </Card>
+  <Card title="Episodic memory" icon="brain" href="/concepts/episodic-memory">
+    The episode/consolidation pattern used by the knowledge template.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Full .kiwi/config.toml reference.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install and run KiwiFS in 60 seconds.
+  </Card>
+</CardGroup>

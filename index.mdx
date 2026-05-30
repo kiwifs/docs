@@ -42,6 +42,15 @@ flowchart TD
 
 All protocols flow through the same storage layer. Every write — regardless of how it enters — gets a git commit, a search index update, and an SSE broadcast.
 
+## For AI agents
+
+KiwiFS publishes machine-readable documentation for LLMs and agent frameworks:
+
+- **[llms.txt](/llms.txt)** — concise overview with key endpoints and MCP tool names
+- **[llms-full.txt](/llms-full.txt)** — complete API + MCP + CLI reference in a single file
+
+Point your agent at `llms-full.txt` to give it everything it needs to read, write, search, and manage a KiwiFS knowledge base.
+
 ## Next steps
 
 <CardGroup cols={2}>

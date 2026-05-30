@@ -1,0 +1,223 @@
+---
+title: "KiwiFS Cloud"
+description: "Connect to hosted KiwiFS workspaces — authentication, REST API, MCP, and CLI setup."
+icon: "cloud"
+---
+
+[KiwiFS Cloud](https://app.kiwifs.com) is the hosted version of KiwiFS. It handles workspace provisioning, authentication, billing, and multi-tenant routing so you can skip deployment and go straight to building.
+
+## How it works
+
+```
+Your agent / app                   KiwiFS Cloud
+─────────────────                  ──────────────────────
+kiwi_sk_* or OAuth  ──────────▶   api.kiwifs.com (proxy)
+                                        │
+                                        ▼
+                                   KiwiFS instance
+                                   (your workspace)
+```
+
+Cloud authenticates your request and forwards it to the KiwiFS instance that backs your workspace. All self-hosted KiwiFS features — REST, MCP, search, versioning, drafts, and more — are available through the cloud proxy.
+
+## Authentication
+
+<Tabs>
+<Tab title="API Key">
+Every workspace has a `kiwi_sk_*` API key. Pass it as a Bearer token:
+
+```bash
+curl https://api.kiwifs.com/api/workspaces/eng-handbook/file?path=README.md \
+  -H "Authorization: Bearer $KIWI_API_KEY"
+```
+
+Get your key from **Settings → API Key** in the workspace UI, or via the CLI:
+
+```bash
+kiwifs login
+kiwifs connect eng-handbook
+```
+</Tab>
+<Tab title="MCP OAuth 2.1">
+For interactive agent sessions (Claude Desktop, Cursor, etc.), KiwiFS Cloud supports MCP OAuth 2.1 with PKCE. The agent opens a browser window for login — no API key needed.
+
+MCP clients that support OAuth will automatically discover the flow via `WWW-Authenticate` headers.
+</Tab>
+</Tabs>
+
+## REST API
+
+Base URL: `https://api.kiwifs.com/api/workspaces/{slug}`
+
+The cloud proxy exposes the same endpoints as self-hosted KiwiFS. Key endpoints:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/tree` | List workspace files |
+| `GET` | `/file?path=README.md` | Read a file |
+| `PUT` | `/file?path=README.md` | Create or update a file |
+| `DELETE` | `/file?path=README.md` | Delete a file |
+| `GET` | `/search?q=auth` | Full-text search |
+| `POST` | `/search/semantic` | Vector search |
+| `GET` | `/query?q=TABLE ...` | DQL query |
+| `GET` | `/versions?path=...` | Git history |
+| `GET` | `/context` | Agent playbook + schema |
+
+<CodeGroup>
+```bash curl
+curl "https://api.kiwifs.com/api/workspaces/eng-handbook/file?path=README.md" \
+  -H "Authorization: Bearer $KIWI_API_KEY"
+```
+
+```javascript JavaScript
+const res = await fetch(
+  "https://api.kiwifs.com/api/workspaces/eng-handbook/file?path=README.md",
+  { headers: { Authorization: `Bearer ${process.env.KIWI_API_KEY}` } }
+);
+const content = await res.text();
+```
+
+```python Python
+import os, requests
+
+res = requests.get(
+    "https://api.kiwifs.com/api/workspaces/eng-handbook/file",
+    params={"path": "README.md"},
+    headers={"Authorization": f"Bearer {os.environ['KIWI_API_KEY']}"},
+)
+content = res.text
+```
+</CodeGroup>
+
+For the full endpoint reference, see the [REST API documentation](/api/overview). All endpoints documented there work under the cloud base URL.
+
+## MCP
+
+The MCP endpoint for a cloud workspace is:
+
+```
+https://api.kiwifs.com/api/workspaces/{slug}/mcp
+```
+
+<Tabs>
+<Tab title="Interactive (OAuth)">
+For agents that support MCP OAuth (Claude Desktop, Cursor, etc.):
+
+```json
+{
+  "mcpServers": {
+    "kiwi": {
+      "url": "https://api.kiwifs.com/api/workspaces/eng-handbook/mcp"
+    }
+  }
+}
+```
+
+The agent will open a browser login flow on first connection.
+</Tab>
+<Tab title="CI / Headless (API key)">
+For environments without a browser:
+
+```json
+{
+  "mcpServers": {
+    "kiwi": {
+      "url": "https://api.kiwifs.com/api/workspaces/eng-handbook/mcp",
+      "headers": {
+        "Authorization": "Bearer kiwi_sk_..."
+      }
+    }
+  }
+}
+```
+</Tab>
+<Tab title="CLI shortcut">
+Generate and write MCP config automatically:
+
+```bash
+kiwifs login
+kiwifs connect eng-handbook
+```
+
+This writes the appropriate config to your MCP client's config file.
+</Tab>
+</Tabs>
+
+All 60+ MCP tools are available through the cloud endpoint. See [MCP tool reference](/concepts/mcp).
+
+## CLI setup
+
+```bash
+# Authenticate with KiwiFS Cloud
+kiwifs login
+
+# Generate MCP config for a workspace
+kiwifs connect <workspace-slug>
+
+# Check who you're logged in as
+kiwifs whoami
+
+# Log out
+kiwifs logout
+```
+
+`kiwifs connect` detects your MCP client (Claude Desktop, Cursor, etc.) and writes the appropriate config file.
+
+## API key management
+
+| Operation | How |
+|-----------|-----|
+| View key | **Settings → API Key** in workspace UI |
+| Rotate key | **Settings → API Key → Rotate** or `POST /api/workspaces/{slug}/rotate-key` |
+| Scope | Keys are scoped to a single workspace |
+| Format | `kiwi_sk_` followed by 32 URL-safe characters |
+
+<Warning>
+API keys are shown once on creation or rotation. Store them securely — KiwiFS Cloud stores only a hash and cannot recover the plaintext.
+</Warning>
+
+## Public workspaces
+
+Workspaces can be set to `public` or `unlisted` visibility. Public workspaces expose read-only endpoints without authentication:
+
+```bash
+# Public tree
+GET /api/workspaces/{slug}/public/tree
+
+# Public file read
+GET /api/workspaces/{slug}/public/file?path=README.md
+
+# Public search (public workspaces only)
+GET /api/workspaces/{slug}/public/search?q=auth
+
+# Published page (any visibility)
+GET /api/workspaces/{slug}/public/page/{path}
+```
+
+## Differences from self-hosted
+
+| Feature | Self-hosted | Cloud |
+|---------|------------|-------|
+| Auth | configurable (none, apikey, perspace, OIDC) | API key + MCP OAuth 2.1 |
+| Base URL | `http://host:3333/api/kiwi` | `https://api.kiwifs.com/api/workspaces/{slug}` |
+| Multi-space | `X-Kiwi-Space` header or URL prefix | one workspace per slug |
+| Alternate protocols | NFS, S3, WebDAV, FUSE | MCP and REST only |
+| OpenAPI spec | `/api/openapi.json` | not exposed (use self-hosted spec) |
+| Billing | N/A | managed via Settings → Billing |
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="API overview" icon="terminal" href="/api/overview">
+    Full REST API reference (endpoints work the same on cloud).
+  </Card>
+  <Card title="MCP" icon="plug" href="/concepts/mcp">
+    60+ MCP tools and client setup.
+  </Card>
+  <Card title="Agent playbook" icon="book-open" href="/concepts/agent-playbook">
+    Agent onboarding with kiwi_context.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Self-hosted quickstart for local development.
+  </Card>
+</CardGroup>

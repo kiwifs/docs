@@ -139,6 +139,21 @@ When `[server.rate_limit]` in `.kiwi/config.toml` sets `requests_per_minute` gre
 
 If `requests_per_minute` is **not** configured, no built-in HTTP rate limit is applied — use a reverse proxy (nginx, Caddy, Envoy) for strict quotas or geographic rules.
 
+## Machine-readable references
+
+KiwiFS provides machine-readable documentation for agents and integrations:
+
+| Resource | URL |
+|---|---|
+| **llms.txt** | [docs.kiwifs.com/llms.txt](https://docs.kiwifs.com/llms.txt) |
+| **llms-full.txt** | [docs.kiwifs.com/llms-full.txt](https://docs.kiwifs.com/llms-full.txt) |
+| **OpenAPI spec** | `GET /api/openapi.json` on any KiwiFS instance |
+| **Swagger UI** | `GET /api/docs` on any KiwiFS instance |
+
+<Tip>
+Point your agent at `llms-full.txt` for a single-file reference of every REST endpoint, MCP tool, and CLI command. The OpenAPI spec at `/api/openapi.json` is machine-parseable for code generation.
+</Tip>
+
 ## Next steps
 
 <CardGroup cols={2}>
