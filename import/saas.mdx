@@ -1,6 +1,6 @@
 ---
 title: "SaaS imports"
-description: "Import data from Notion, Airtable, and other SaaS platforms into KiwiFS."
+description: "Import data from Notion, Airtable, Google Sheets, Obsidian, and Confluence into KiwiFS."
 icon: "cloud-arrow-down"
 ---
 
@@ -87,6 +87,69 @@ kiwifs import --from airtable --root ./knowledge
   }
 }
 ```
+
+## Google Sheets
+
+Import rows from a Google Sheets spreadsheet.
+
+```bash
+kiwifs import --from gsheets \
+  --spreadsheet-id "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms" \
+  --sheet "Sheet1" \
+  --prefix gsheets/ \
+  --root ./knowledge
+```
+
+| Flag | Description |
+|------|-------------|
+| `--spreadsheet-id` | Google Sheets spreadsheet ID (required) |
+| `--sheet` | Sheet name (defaults to first sheet) |
+| `--credentials` | Path to Google service account JSON (or set `GOOGLE_APPLICATION_CREDENTIALS`) |
+| `--id-column` | Column to use as filename |
+| `--prefix` | Path prefix in KiwiFS |
+
+The first row is treated as column headers.
+
+## Obsidian
+
+Import an Obsidian vault into KiwiFS, preserving wiki-links and frontmatter.
+
+```bash
+kiwifs import --from obsidian \
+  --path ~/my-vault \
+  --prefix vault/ \
+  --root ./knowledge
+```
+
+| Flag | Description |
+|------|-------------|
+| `--path` | Path to the Obsidian vault directory (required) |
+| `--prefix` | Path prefix in KiwiFS |
+
+<Tip>
+Obsidian's `[[wiki-link]]` syntax is preserved — KiwiFS uses the same link format natively.
+</Tip>
+
+## Confluence
+
+Import pages from a Confluence space.
+
+```bash
+kiwifs import --from confluence \
+  --url "https://your-domain.atlassian.net" \
+  --prefix confluence/ \
+  --root ./knowledge
+```
+
+| Flag | Description |
+|------|-------------|
+| `--url` | Confluence base URL (required) |
+| `--prefix` | Path prefix in KiwiFS |
+| `--limit` | Max pages to import |
+
+<Note>
+Confluence import uses the Confluence REST API. Authenticate via API token set as environment variable or passed through the Airbyte connector for richer sync. See [Airbyte import](/import/airbyte).
+</Note>
 
 ## Re-import behavior
 

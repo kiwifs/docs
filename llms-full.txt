@@ -65,7 +65,7 @@ Key sections:
     [search]
     engine = "sqlite"           # sqlite (FTS5) or grep
     [search.vector]
-    embedder = "ollama"         # ollama, openai, or voyageai
+    embedder = "ollama"         # ollama, openai, cohere, voyage, http, bedrock, vertex
     store = "sqlite-vec"
 
     [versioning]
@@ -112,7 +112,7 @@ Common headers: X-Actor (git author), X-Provenance (lineage), If-Match (ETag), X
 ### Search
 
     GET    /search?q=authentication            BM25 full-text search
-    GET    /search?q=auth&mode=verified        Trust-ranked results
+    GET    /search/verified?q=auth              Trust-ranked results
     POST   /search/semantic                    Vector similarity: {"query": "...", "limit": 5}
     GET    /search/semantic?q=auth             GET form of semantic search
 
@@ -168,7 +168,7 @@ Common headers: X-Actor (git author), X-Provenance (lineage), If-Match (ETag), X
     DELETE /canvas?path=...                    Delete canvas
     PATCH  /canvas?path=...                    Patch canvas nodes/edges
     GET    /canvas/query?path=...              Query canvas elements
-    POST   /canvas/auto-layout                 Auto-layout from wiki-link graph
+    POST   /canvas/auto-layout                 Reposition existing canvas nodes
     POST   /canvas/generate                    Generate canvas from graph
 
 ### Workflows (Kanban)
@@ -223,7 +223,7 @@ Common headers: X-Actor (git author), X-Provenance (lineage), If-Match (ETag), X
     GET    /import/sources                      List supported sources
     POST   /ingest                             Convert binary doc to markdown
     POST   /clip                               Web clip: {"url": "https://...", "folder": "clips/"}
-    GET    /export?format=jsonl&path=concepts/  Export as JSONL or CSV
+    GET    /export?format=jsonl&path=concepts/  Export as JSONL, CSV, or Parquet
     POST   /export/document                    Render to PDF/HTML/slides/site
 
 ### Analytics and Health
@@ -474,6 +474,9 @@ KiwiFS ships a built-in MCP server. Transports: stdio (default), Streamable HTTP
     kiwifs token create  Create scoped API key (read/write/admin)
     kiwifs token list    List API keys
     kiwifs token revoke  Revoke an API key
+    kiwifs login         Authenticate with KiwiFS Cloud (OAuth device flow)
+    kiwifs logout        Remove stored Cloud credentials
+    kiwifs whoami        Show current Cloud identity
     kiwifs connect       Generate MCP config for a KiwiFS Cloud workspace
     kiwifs bench         Performance benchmark
     kiwifs update        Self-update to latest release
@@ -496,11 +499,15 @@ Base URL: https://api.kiwifs.com/api/workspaces/{slug}
 
 All KiwiFS endpoints are available under this prefix. The cloud proxy authenticates you and forwards to the workspace's KiwiFS instance.
 
-    # Read a file
-    GET /api/workspaces/{slug}/file?path=README.md
-
     # Write a file
-    PUT /api/workspaces/{slug}/file?path=README.md
+    curl -X PUT "https://api.kiwifs.com/api/workspaces/{slug}/file?path=notes/hello.md" \
+      -H "Authorization: Bearer $KIWI_API_KEY" \
+      -H "X-Actor: my-app" \
+      -d "# Hello World"
+
+    # Read it back
+    curl "https://api.kiwifs.com/api/workspaces/{slug}/file?path=notes/hello.md" \
+      -H "Authorization: Bearer $KIWI_API_KEY"
 
     # Search
     GET /api/workspaces/{slug}/search?q=authentication

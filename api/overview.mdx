@@ -133,6 +133,14 @@ All three return JSON. **`/health`** and **`/healthz`** always respond with **`2
 
 Use `/readyz` for Kubernetes readiness probes when optional protocols are enabled.
 
+## Prometheus metrics
+
+```bash
+curl http://localhost:3333/metrics
+```
+
+Exposes Prometheus-formatted metrics including request counts, latencies, and active connections. Use this to wire KiwiFS into your monitoring stack (Grafana, Datadog, etc.).
+
 ## Rate limiting
 
 When `[server.rate_limit]` in `.kiwi/config.toml` sets `requests_per_minute` greater than zero, KiwiFS applies a token-bucket limiter keyed by **Bearer token hash** (or client IP when anonymous). Health, readiness, and metrics routes skip the limiter.

@@ -1,0 +1,193 @@
+---
+title: "Authentication and tokens"
+description: "Configure API authentication — global keys, per-space tokens, and OIDC — and manage tokens via the CLI."
+icon: "key"
+---
+
+KiwiFS supports four authentication modes. Choose the one that fits your deployment.
+
+## Auth modes
+
+<Tabs>
+  <Tab title="none (default)">
+    No authentication. Suitable for local development and trusted networks.
+
+    ```toml .kiwi/config.toml
+    [auth]
+    type = "none"
+    ```
+  </Tab>
+  <Tab title="apikey">
+    A single global API key protects all endpoints.
+
+    ```toml .kiwi/config.toml
+    [auth]
+    type = "apikey"
+    api_key = "kiwi_sk_your_secret_here"
+    ```
+
+    Pass the key as a Bearer token:
+
+    ```bash
+    curl http://localhost:3333/api/kiwi/tree \
+      -H "Authorization: Bearer kiwi_sk_your_secret_here"
+    ```
+  </Tab>
+  <Tab title="perspace">
+    Each space gets its own scoped API key with fine-grained permissions.
+
+    ```toml .kiwi/config.toml
+    [auth]
+    type = "perspace"
+
+    [[auth.api_keys]]
+    key = "kiwi_ro_eng_abc123"
+    space = "engineering"
+    actor = "eng-reader"
+    scope = "read"
+    prefix = ""
+
+    [[auth.api_keys]]
+    key = "kiwi_rw_eng_xyz789"
+    space = "engineering"
+    actor = "eng-writer"
+    scope = "write"
+    prefix = "concepts/"
+
+    [[auth.api_keys]]
+    key = "kiwi_admin_all"
+    space = ""
+    actor = "admin"
+    scope = "admin"
+    ```
+  </Tab>
+  <Tab title="oidc">
+    OpenID Connect for SSO via your identity provider.
+
+    ```toml .kiwi/config.toml
+    [auth]
+    type = "oidc"
+
+    [auth.oidc]
+    issuer = "https://accounts.google.com"
+    client_id = "your-client-id"
+    ```
+
+    Clients pass a JWT Bearer token from the identity provider.
+  </Tab>
+</Tabs>
+
+<Info>
+Auth configuration is hot-reloadable — send `SIGHUP` to the server process to reload from disk without restarting.
+</Info>
+
+## Per-space token fields
+
+When using `perspace` auth, each `[[auth.api_keys]]` entry supports:
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `key` | Yes | The API key string (shown once on creation via CLI) |
+| `space` | No | Restrict to a specific space (empty = all spaces) |
+| `actor` | No | Default `X-Actor` value for git attribution |
+| `scope` | Yes | Permission level: `read`, `write`, or `admin` |
+| `prefix` | No | Restrict access to paths under this prefix |
+
+### Scopes
+
+| Scope | Permissions |
+| --- | --- |
+| `read` | `GET` endpoints only — tree, file, search, query, analytics |
+| `write` | Read + `PUT`, `POST`, `DELETE` on files, drafts, canvas, workflows |
+| `admin` | Write + space management, webhook CRUD, schema changes, audit log |
+
+## Managing tokens via CLI
+
+The `kiwifs token` command creates and manages API keys stored in `.kiwi/config.toml`.
+
+### Create a token
+
+```bash
+kiwifs token create --root ./knowledge --space docs --scope read --actor ci-reader
+```
+
+The plaintext key is displayed once. Copy it immediately — it cannot be retrieved later.
+
+```
+Created API key: kiwi_ro_abc1deadbeef...
+Space: docs | Scope: read | Actor: ci-reader
+```
+
+### List tokens
+
+```bash
+kiwifs token list --root ./knowledge
+```
+
+```
+PREFIX          SPACE        SCOPE   ACTOR
+kiwi_ro_abc1   docs         read    ci-reader
+kiwi_rw_xyz7   engineering  write   eng-bot
+kiwi_admin_a   (all)        admin   admin
+```
+
+### Revoke a token
+
+```bash
+kiwifs token revoke kiwi_ro_abc1
+```
+
+Revocation removes the key from `.kiwi/config.toml`. Active requests with the revoked key are rejected on the next config reload.
+
+<Warning>
+Revoking a token does not require a server restart — KiwiFS watches the config file for changes.
+</Warning>
+
+## Path-scoped access
+
+Use the `prefix` field to restrict a token to a specific directory tree:
+
+```toml
+[[auth.api_keys]]
+key = "kiwi_rw_agent_onboarding"
+space = "engineering"
+actor = "onboarding-bot"
+scope = "write"
+prefix = "onboarding/"
+```
+
+This token can only read and write files under `onboarding/`. Requests to other paths return `401`.
+
+## Cloud authentication
+
+KiwiFS Cloud uses a separate authentication system:
+
+1. **API key** — pass `kiwi_sk_*` as a Bearer token
+2. **MCP OAuth 2.1** — browser-based login via WorkOS (PKCE)
+
+```bash
+kiwifs login                          # OAuth device flow
+kiwifs whoami                         # Show current identity
+kiwifs connect my-workspace --write cursor  # Generate MCP config
+```
+
+Cloud credentials are stored at `~/.kiwifs/credentials.json`.
+
+See [KiwiFS Cloud](/guides/cloud) for details.
+
+## Related documentation
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/configuration#authentication">
+    Full auth config reference.
+  </Card>
+  <Card title="API overview" icon="terminal" href="/api/overview#authentication">
+    Auth headers and error codes.
+  </Card>
+  <Card title="Multi-space" icon="layer-group" href="/concepts/multi-space">
+    Per-space routing and access control.
+  </Card>
+  <Card title="CLI commands" icon="terminal" href="/cli/commands">
+    Token create, list, and revoke commands.
+  </Card>
+</CardGroup>

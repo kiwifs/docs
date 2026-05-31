@@ -1,6 +1,6 @@
 ---
 title: "File imports"
-description: "Import data from CSV, JSON, and JSONL files into KiwiFS."
+description: "Import data from CSV, JSON, JSONL, YAML, and Excel files into KiwiFS."
 icon: "file-csv"
 ---
 
@@ -85,6 +85,46 @@ Each line is a JSON object:
 ```
 
 JSONL is ideal for large datasets — KiwiFS streams lines without loading the entire file into memory.
+
+## YAML
+
+```bash
+kiwifs import --from yaml \
+  --file data.yaml \
+  --prefix items/
+```
+
+Expects a YAML file containing a list of mappings:
+
+```yaml
+- name: Item A
+  status: active
+- name: Item B
+  status: draft
+```
+
+Each mapping becomes a markdown page with its keys as frontmatter fields.
+
+## Excel
+
+```bash
+kiwifs import --from excel \
+  --file data.xlsx \
+  --prefix records/ \
+  --sheet "Sheet1"
+```
+
+| Flag | Description |
+|------|-------------|
+| `--file` | Path to `.xlsx` file (required) |
+| `--sheet` | Sheet name to import (defaults to the first sheet) |
+| `--columns` | Comma-separated columns to include |
+| `--id-column` | Column to use as filename |
+| `--prefix` | Path prefix in KiwiFS |
+| `--limit` | Max rows to import |
+| `--dry-run` | Preview without writing |
+
+The first row is treated as column headers.
 
 ## MCP usage
 

@@ -52,6 +52,8 @@ curl -X POST 'http://localhost:3333/api/kiwi/import' \
     | Redis | `redis` | Import from Redis keys |
     | Elasticsearch | `elasticsearch` | Import from Elasticsearch indices |
     | Firestore | `firestore` | Import from Google Firestore |
+    | YAML | `yaml` | Import from YAML files |
+    | Excel | `excel` | Import from `.xlsx` spreadsheets |
     | Markdown | `markdown` | Import from a folder of `.md` files |
   </Accordion>
   <Accordion title="Mapping template syntax">
@@ -75,6 +77,29 @@ curl -X POST 'http://localhost:3333/api/kiwi/import' \
 <Warning>
 Large imports can take time. The endpoint responds synchronously. For very large datasets, consider using the CLI `kiwifs import` command with progress output.
 </Warning>
+
+## Upload file for import
+
+Upload a file to the server for import processing.
+
+```http
+POST /import/upload
+Content-Type: multipart/form-data
+```
+
+The uploaded file is stored temporarily and can be referenced by subsequent `POST /import` calls.
+
+## List supported sources
+
+```http
+GET /import/sources
+```
+
+Returns the list of supported import source types and their required configuration fields.
+
+```json
+["postgres", "mysql", "sqlite", "mongodb", "firestore", "dynamodb", "redis", "elasticsearch", "csv", "json", "jsonl", "yaml", "excel", "notion", "airtable", "gsheets", "obsidian", "confluence", "markdown"]
+```
 
 ## Import browse
 
@@ -166,7 +191,7 @@ Content-Type: application/json
 Export your knowledge base in structured formats.
 
 <ParamField query="format" type="string" required>
-  Output format: `jsonl` or `csv`.
+  Output format: `jsonl`, `csv`, or `parquet`.
 </ParamField>
 <ParamField query="path" type="string">
   Scope export to a subdirectory (e.g. `concepts`).

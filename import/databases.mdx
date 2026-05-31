@@ -1,6 +1,6 @@
 ---
 title: "Database imports"
-description: "Import data from PostgreSQL, MySQL, SQLite, MongoDB, and Firestore into KiwiFS."
+description: "Import data from PostgreSQL, MySQL, SQLite, MongoDB, Firestore, DynamoDB, Redis, and Elasticsearch into KiwiFS."
 icon: "database"
 ---
 
@@ -94,6 +94,62 @@ kiwifs import --from firestore \
 <Note>
 Firestore requires Google Cloud credentials. Set `GOOGLE_APPLICATION_CREDENTIALS` or run within a GCP environment.
 </Note>
+
+## DynamoDB
+
+```bash
+kiwifs import --from dynamodb \
+  --table my-table \
+  --region us-east-1 \
+  --prefix dynamo/
+```
+
+| Flag | Description |
+|------|-------------|
+| `--table` | DynamoDB table name (required) |
+| `--region` | AWS region (required) |
+| `--prefix` | Path prefix in KiwiFS |
+| `--limit` | Max items to import |
+
+<Note>
+Uses your default AWS credentials (`~/.aws/credentials`, `AWS_PROFILE`, or IAM role).
+</Note>
+
+## Redis
+
+```bash
+kiwifs import --from redis \
+  --addr "localhost:6379" \
+  --pattern "article:*" \
+  --prefix redis/
+```
+
+| Flag | Description |
+|------|-------------|
+| `--addr` | Redis address (default: `localhost:6379`) |
+| `--password` | Redis password |
+| `--redis-db` | Redis database number (default: `0`) |
+| `--pattern` | Key glob pattern to import (default: `*`) |
+| `--prefix` | Path prefix in KiwiFS |
+
+Each matching key becomes a markdown page. Hash keys become frontmatter fields; string values become the page body.
+
+## Elasticsearch
+
+```bash
+kiwifs import --from elasticsearch \
+  --url "http://localhost:9200" \
+  --table my-index \
+  --prefix search/
+```
+
+| Flag | Description |
+|------|-------------|
+| `--url` | Elasticsearch URL (required) |
+| `--table` | Index name (required) |
+| `--query` | Elasticsearch query JSON (optional, defaults to match-all) |
+| `--prefix` | Path prefix in KiwiFS |
+| `--limit` | Max documents to import |
 
 ## MCP usage
 

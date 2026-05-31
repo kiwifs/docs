@@ -78,6 +78,8 @@
               "concepts/webhooks",
               "concepts/schemas",
               "concepts/multi-space",
+              "concepts/publishing",
+              "concepts/audit-log",
               "concepts/real-time-events",
               "concepts/optional-features"
             ]
@@ -90,6 +92,7 @@
               "guides/web-ui",
               "guides/alternate-protocols",
               "guides/posix",
+              "guides/auth-tokens",
               "guides/examples",
               "guides/faq"
             ]

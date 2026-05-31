@@ -33,6 +33,32 @@ Content-Type: application/json
 
 Body is the full workflow JSON. The server sets `name` from the URL segment and validates structure.
 
+## Delete a workflow
+
+```http
+DELETE /workflows/:name
+```
+
+Removes a workflow definition. Pages referencing this workflow keep their current `state` but can no longer be advanced.
+
+## Assign a page to a workflow
+
+```http
+POST /workflow/assign
+Content-Type: application/json
+```
+
+```json
+{
+  "path": "tasks/t-42.md",
+  "workflow": "triage",
+  "state": "open",
+  "actor": "agent:bot"
+}
+```
+
+Sets the `workflow` and `state` frontmatter fields on the page. Use this to onboard a page into a workflow for the first time.
+
 ## Advance a page
 
 ```http
@@ -53,6 +79,23 @@ Content-Type: application/json
 - Writes the page with updated `state` via the normal pipeline.
 
 Returns **`409`** when the transition is not allowed.
+
+## Reorder items on the board
+
+```http
+POST /workflow/reorder
+Content-Type: application/json
+```
+
+```json
+{
+  "workflow": "triage",
+  "state": "in_progress",
+  "paths": ["tasks/t-42.md", "tasks/t-15.md", "tasks/t-99.md"]
+}
+```
+
+Sets the display order of pages within a workflow state column. The `paths` array defines the new order top-to-bottom.
 
 ## Kanban board
 

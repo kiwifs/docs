@@ -78,7 +78,7 @@ kiwifs init [flags]
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--root` | `-r` | `./knowledge` | Directory to initialize |
-| `--template` | | `knowledge` | Template: `knowledge`, `wiki`, `runbook`, `research`, or `blank` |
+| `--template` | | `knowledge` | Template: `knowledge`, `wiki`, `runbook`, `research`, `tasks`, or `blank` |
 
 <CodeGroup>
 ```bash Default template
@@ -625,70 +625,6 @@ kiwifs update
 ```
 
 Replaces the currently running binary in place.
-
-</Accordion>
-
-</AccordionGroup>
-
-## Cloud commands
-
-<AccordionGroup>
-
-<Accordion title="login — Authenticate with KiwiFS Cloud">
-
-Sign in to KiwiFS Cloud via a browser-based OAuth device flow.
-
-```bash
-kiwifs login
-```
-
-Opens a browser window to complete authentication. Your session is stored locally for subsequent CLI commands.
-
-</Accordion>
-
-<Accordion title="logout — Sign out of KiwiFS Cloud">
-
-```bash
-kiwifs logout
-```
-
-</Accordion>
-
-<Accordion title="whoami — Show current identity">
-
-```bash
-kiwifs whoami
-```
-
-Prints the email and user ID for the current session.
-
-</Accordion>
-
-<Accordion title="connect — Generate MCP config for a cloud workspace">
-
-Generate and write MCP configuration for a KiwiFS Cloud workspace. Detects your MCP client (Claude Desktop, Cursor, etc.) and writes the appropriate config file.
-
-```bash
-kiwifs connect <workspace-slug>
-```
-
-```bash
-kiwifs connect eng-handbook
-```
-
-<Tip>
-Run `kiwifs login` first if you haven't authenticated.
-</Tip>
-
-</Accordion>
-
-<Accordion title="update — Self-update to latest release">
-
-```bash
-kiwifs update
-```
-
-Downloads and installs the latest KiwiFS release.
 
 </Accordion>
 

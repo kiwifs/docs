@@ -37,7 +37,7 @@ The Dockerfile uses a three-stage build to produce a minimal runtime image.
 | Stage | Base image | Purpose |
 |-------|-----------|---------|
 | 1. Node.js | `node:22-alpine` | Builds the React UI |
-| 2. Go | `golang:1.25.5-alpine` | Compiles the Go binary with the UI embedded via `go:embed` |
+| 2. Go | `golang:1.26-alpine` | Compiles the Go binary with the UI embedded via `go:embed` |
 | 3. Runtime | `alpine:3.20` | Minimal image with `git` and `ca-certificates` |
 
 The final image contains only the compiled binary, `git` (for versioning), and root CA certificates.

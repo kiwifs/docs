@@ -173,6 +173,31 @@ Returns `503` if vector search is not enabled.
 
 ---
 
+## Eligible tasks
+
+Retrieve ranked actionable tasks inferred from frontmatter metadata — pages with `status` fields indicating they are available for work.
+
+```http
+GET /api/kiwi/eligible
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/eligible?limit=10'
+```
+
+```json
+{
+  "tasks": [
+    {"path": "tasks/t-42.md", "title": "Fix auth timeout", "status": "open", "priority": "high"},
+    {"path": "tasks/t-15.md", "title": "Update onboarding", "status": "open", "priority": "medium"}
+  ]
+}
+```
+
+Useful for agents that need to pick up the next available task. MCP: **`kiwi_eligible`**.
+
+---
+
 ## Search evaluation
 
 Benchmark your search quality against expected results.

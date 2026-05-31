@@ -52,6 +52,29 @@ curl -s 'http://localhost:3333/api/spaces/engineering'
 
 Returns `404` if the name is unknown.
 
+## List init templates
+
+```http
+GET /api/init-templates
+```
+
+```bash
+curl -s 'http://localhost:3333/api/init-templates'
+```
+
+```json Response
+[
+  {"id": "knowledge", "name": "Knowledge Base", "description": "LLM-maintained KB with schema, episodes, playbook"},
+  {"id": "wiki", "name": "Wiki", "description": "Team wiki with decisions, processes, reference docs"},
+  {"id": "runbook", "name": "Runbook", "description": "Ops procedures, incidents, postmortems"},
+  {"id": "research", "name": "Research", "description": "Notes, experiments, literature"},
+  {"id": "tasks", "name": "Tasks", "description": "Task tracking with workflow schema"},
+  {"id": "blank", "name": "Blank", "description": "Config only, no starter files"}
+]
+```
+
+Use the template `id` when creating a space with `POST /api/spaces`.
+
 ## Create a space
 
 ```http
@@ -67,10 +90,14 @@ Content-Type: application/json
   Filesystem path for the space's knowledge root.
 </ParamField>
 
+<ParamField body="template" type="string">
+  Init template to scaffold the space with (e.g. `knowledge`, `wiki`, `tasks`). Use `GET /api/init-templates` to list available templates.
+</ParamField>
+
 ```bash
 curl -X POST 'http://localhost:3333/api/spaces' \
   -H 'Content-Type: application/json' \
-  -d '{"name":"research","root":"/data/research-wiki"}'
+  -d '{"name":"research","root":"/data/research-wiki","template":"research"}'
 ```
 
 Returns `201` with space metadata. Returns `409` if the name already exists.

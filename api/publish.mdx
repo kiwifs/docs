@@ -37,6 +37,37 @@ curl -X POST 'http://localhost:3333/api/kiwi/publish' \
 `published_at` is set only on first publish. Later republish calls preserve the original timestamp.
 </Info>
 
+## Bulk publish
+
+Publish multiple pages in a single request.
+
+```http
+POST /api/kiwi/publish/bulk
+Content-Type: application/json
+```
+
+<ParamField body="paths" type="string[]" required>
+  Array of file paths to publish.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/publish/bulk' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Actor: agent:publisher' \
+  -d '{"paths":["concepts/auth.md","concepts/billing.md","concepts/users.md"]}'
+```
+
+```json Response
+{
+  "published": 3,
+  "results": [
+    {"path": "concepts/auth.md", "published": true},
+    {"path": "concepts/billing.md", "published": true},
+    {"path": "concepts/users.md", "published": true}
+  ]
+}
+```
+
 ## Unpublish
 
 ```http
@@ -49,6 +80,34 @@ Content-Type: application/json
 </ParamField>
 
 Sets `published: false` but keeps `published_at` for history.
+
+## Bulk unpublish
+
+```http
+POST /api/kiwi/unpublish/bulk
+Content-Type: application/json
+```
+
+<ParamField body="paths" type="string[]" required>
+  Array of file paths to unpublish.
+</ParamField>
+
+## List published pages
+
+```http
+GET /api/kiwi/publish/list
+```
+
+Returns all currently published pages.
+
+```json Response
+{
+  "pages": [
+    {"path": "concepts/auth.md", "published_at": "2026-05-02T14:30:00Z", "public_url": "/p/concepts/auth.md"},
+    {"path": "guides/quickstart.md", "published_at": "2026-05-01T10:00:00Z", "public_url": "/p/guides/quickstart.md"}
+  ]
+}
+```
 
 ## Publish status
 

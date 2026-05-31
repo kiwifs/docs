@@ -13,6 +13,9 @@ BM25-ranked full-text search powered by SQLite FTS5.
 <ParamField query="q" type="string" required>
   Search query. Supports boolean operators and phrase matching.
 </ParamField>
+<ParamField query="suggest_threshold" type="number">
+  Similarity threshold (0–1) for "did you mean?" suggestions when the query yields few results.
+</ParamField>
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/search?q=payment+timeout'

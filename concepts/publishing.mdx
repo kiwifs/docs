@@ -1,0 +1,142 @@
+---
+title: "Publishing and sharing"
+description: "Make pages publicly accessible via publish flags, share links, or space visibility."
+icon: "globe"
+---
+
+KiwiFS provides three ways to make content accessible without authentication: **per-page publishing**, **share links**, and **space-level visibility**.
+
+## Per-page publishing
+
+Set `published: true` in a page's frontmatter to make it accessible at `/p/{path}` without authentication.
+
+```yaml
+---
+title: "Getting Started"
+published: true
+published_at: "2026-05-02T14:30:00Z"
+---
+```
+
+Published pages are served as rendered HTML at their public permalink:
+
+```
+http://localhost:3333/p/concepts/auth.md
+```
+
+<Tabs>
+  <Tab title="REST API">
+    ```bash
+    curl -X POST 'http://localhost:3333/api/kiwi/publish' \
+      -H 'Content-Type: application/json' \
+      -d '{"path":"concepts/auth.md"}'
+    ```
+  </Tab>
+  <Tab title="MCP">
+    Use `kiwi_write` to set `published: true` in frontmatter directly.
+  </Tab>
+  <Tab title="Web UI">
+    Toggle the publish switch in the page header menu.
+  </Tab>
+</Tabs>
+
+### Bulk operations
+
+Publish or unpublish multiple pages at once:
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/publish/bulk' \
+  -H 'Content-Type: application/json' \
+  -d '{"paths":["concepts/auth.md","concepts/billing.md"]}'
+```
+
+### Listing published pages
+
+```bash
+curl 'http://localhost:3333/api/kiwi/publish/list'
+```
+
+See [Publish API](/api/publish) for full endpoint reference.
+
+## Share links
+
+Create time-limited, optionally password-protected links to individual pages. Share links work independently from publishing — a page does not need to be published to be shared.
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/share' \
+  -H 'Content-Type: application/json' \
+  -d '{"path": "concepts/auth.md", "expiresIn": "168h", "password": "optional-secret"}'
+```
+
+Recipients open the returned token URL without API authentication:
+
+```
+GET /api/kiwi/public/:token
+```
+
+<Note>
+Share links have their own view counter. Revoke a link with `DELETE /api/kiwi/share/:id` using the share `id` (not the long token).
+</Note>
+
+## Space visibility
+
+Control access at the space level with the `visibility` setting in `.kiwi/config.toml`:
+
+```toml
+[space]
+visibility = "private"   # "private", "unlisted", or "public"
+```
+
+| Visibility | Behavior |
+| --- | --- |
+| `private` | All access requires authentication (default) |
+| `unlisted` | Accessible to anyone with the URL, not listed publicly |
+| `public` | Pages with `visibility: public` in frontmatter are browseable without authentication |
+
+### Public visibility browsing
+
+When space visibility allows it, pages that declare `visibility: public` in their frontmatter are accessible via dedicated endpoints:
+
+```bash
+curl 'http://localhost:3333/api/kiwi/public/file?path=concepts/open.md'
+curl 'http://localhost:3333/api/kiwi/public/tree?path='
+```
+
+Non-public pages return `404` to avoid leaking existence.
+
+### Changing visibility at runtime
+
+```bash
+curl -X PUT 'http://localhost:3333/api/kiwi/space/visibility' \
+  -H 'Content-Type: application/json' \
+  -d '{"visibility": "public"}'
+```
+
+## How the models interact
+
+| Model | Scope | Auth needed to read? | Persisted where? |
+| --- | --- | --- | --- |
+| Published pages | Single page | No — served at `/p/{path}` | `published: true` in frontmatter |
+| Share links | Single page | No — token in URL | Server-side share store |
+| Space visibility | All public pages | No — via `/public/*` endpoints | `[space] visibility` in config + per-page `visibility` frontmatter |
+
+<Tip>
+Use **publishing** for content you want permanently public (docs, guides). Use **share links** for temporary or restricted sharing (reviews, previews). Use **space visibility** to open an entire knowledge base for browsing.
+</Tip>
+
+## Related documentation
+
+<CardGroup cols={2}>
+  <Card title="Publish API" icon="globe" href="/api/publish">
+    REST endpoints for publish, unpublish, and status.
+  </Card>
+  <Card title="Analytics" icon="chart-bar" href="/api/analytics">
+    Share links, comments, and real-time events.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration#space-visibility">
+    Space visibility settings.
+  </Card>
+  <Card title="Optional features" icon="toggle-on" href="/concepts/optional-features">
+    Feature matrix and error codes.
+  </Card>
+</CardGroup>

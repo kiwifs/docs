@@ -104,7 +104,7 @@ GET /canvas/query?path=maps/site.canvas.json&q=auth&type=file&connected=n1&nodes
 
 ## Auto-layout
 
-Reposition existing nodes using Graphviz. Unlike `POST /canvas/generate`, this does not build from the wiki-link graph — it lays out the current canvas content.
+Reposition existing nodes in a canvas using a layout algorithm. This operates on the current canvas content only — it does not generate new nodes from the wiki-link graph (use `POST /canvas/generate` for that).
 
 ```http
 POST /canvas/auto-layout?path=maps/site.canvas.json

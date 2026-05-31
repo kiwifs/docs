@@ -1,0 +1,91 @@
+---
+title: "Audit log"
+description: "Track every API request with structured audit entries for compliance and debugging."
+icon: "scroll"
+---
+
+When audit logging is enabled, KiwiFS records every API request as a structured entry. Use audit logs for compliance, debugging, and understanding how agents and users interact with your knowledge base.
+
+## Enabling audit logging
+
+```toml .kiwi/config.toml
+[audit]
+enabled = true
+```
+
+Without this setting, the audit endpoint returns `501 Not Implemented`.
+
+## Querying the audit log
+
+```http
+GET /api/kiwi/audit?since=2026-05-01T00:00:00Z&limit=100
+```
+
+<ParamField query="since" type="string">
+  ISO 8601 timestamp. Defaults to the last 24 hours.
+</ParamField>
+<ParamField query="limit" type="integer" default="100">
+  Maximum entries to return (max 10,000).
+</ParamField>
+
+```json
+[
+  {
+    "ts": "2026-05-02T14:30:00Z",
+    "method": "PUT",
+    "path": "/api/kiwi/file?path=concepts/auth.md",
+    "space": "default",
+    "actor": "agent:docs-writer",
+    "token_hash": "a1b2c3...",
+    "ip": "10.0.0.5",
+    "status": 200,
+    "duration_ms": 42
+  }
+]
+```
+
+## Entry fields
+
+| Field | Description |
+| --- | --- |
+| `ts` | Timestamp of the request |
+| `method` | HTTP method (`GET`, `PUT`, `POST`, `DELETE`) |
+| `path` | Full request path including query parameters |
+| `space` | Space name (from URL segment or `X-Kiwi-Space` header) |
+| `actor` | Value of `X-Actor` header, if present |
+| `token_hash` | Hash of the Bearer token used for authentication |
+| `ip` | Client IP address |
+| `status` | HTTP response status code |
+| `duration_ms` | Request processing time in milliseconds |
+
+## Use cases
+
+<AccordionGroup>
+  <Accordion title="Compliance and access tracking">
+    Audit logs provide a tamper-evident record of who accessed or modified knowledge. Filter by `actor` or `token_hash` to trace activity by a specific agent or user.
+  </Accordion>
+  <Accordion title="Debugging agent behavior">
+    When an agent writes unexpected content, query the audit log by time range and actor to reconstruct the sequence of API calls.
+  </Accordion>
+  <Accordion title="Performance monitoring">
+    Use `duration_ms` to identify slow requests. Combine with [Prometheus metrics](/api/overview#prometheus-metrics) for dashboards.
+  </Accordion>
+</AccordionGroup>
+
+<Tip>
+The `X-Space` header is also recorded when present, allowing you to trace cross-space operations in multi-space deployments.
+</Tip>
+
+## Related documentation
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/configuration#audit">
+    Enable audit logging in config.toml.
+  </Card>
+  <Card title="Optional features" icon="toggle-on" href="/concepts/optional-features">
+    Feature matrix — audit requires explicit opt-in.
+  </Card>
+  <Card title="Utilities API" icon="screwdriver-wrench" href="/api/utilities#audit-log">
+    REST endpoint details.
+  </Card>
+</CardGroup>

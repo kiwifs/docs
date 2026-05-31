@@ -82,19 +82,156 @@ Directory for episodic memory. Agents write observations here as short-lived not
 
 ## wiki
 
-A team wiki template with a flat page structure and a simple index.
+A structured team wiki with decision records, onboarding guides, and process documentation.
+
+### Directory structure
+
+```
+wiki/
+├── SCHEMA.md
+├── index.md
+├── welcome.md
+├── architecture.md
+├── how-we-work.md
+├── decisions/
+│   ├── index.md
+│   └── adr-001-example.md
+├── onboarding/
+│   └── index.md
+├── processes/
+│   ├── index.md
+│   ├── deployment.md
+│   ├── dev-setup.md
+│   └── incident-response.md
+├── reference/
+│   ├── index.md
+│   ├── faq.md
+│   └── glossary.md
+└── .kiwi/
+    ├── config.toml
+    ├── playbook.md
+    ├── rules.md
+    └── templates/
+        ├── decision.md
+        ├── meeting-notes.md
+        ├── onboarding.md
+        ├── product-spec.md
+        └── sop.md
+```
+
+<Accordion title="Workflow page templates">
+The wiki template includes slash-command templates in `.kiwi/templates/` for common page types: architectural decision records, meeting notes, onboarding checklists, product specs, and standard operating procedures. These appear in the web UI's "new page" menu.
+</Accordion>
 
 ## runbook
 
-Operations-focused template with incident response checklists, on-call procedures, and escalation paths.
+Operations-focused template with incident response procedures, postmortem templates, and escalation paths.
+
+### Directory structure
+
+```
+runbook/
+├── SCHEMA.md
+├── index.md
+├── procedures/
+│   ├── deploy-rollback.md
+│   ├── rotate-secrets.md
+│   └── scale-up.md
+├── incidents/
+│   └── template.md
+├── postmortems/
+│   └── template.md
+└── .kiwi/
+    ├── config.toml
+    ├── playbook.md
+    └── rules.md
+```
+
+Each procedure file includes step-by-step checklists with `severity` and `on_call` frontmatter fields.
 
 ## research
 
-Research template with a note-taking structure, bibliography support, and literature review pages.
+Research template with structured note-taking, experiment tracking, and literature review pages.
+
+### Directory structure
+
+```
+research/
+├── SCHEMA.md
+├── index.md
+├── experiments/
+│   └── exp-001-baseline.md
+├── literature/
+│   └── example-paper.md
+├── notes/
+│   └── synthesis-template.md
+└── .kiwi/
+    ├── config.toml
+    ├── playbook.md
+    └── rules.md
+```
+
+Experiment files include `hypothesis`, `status`, and `result` frontmatter fields. Literature files track `authors`, `year`, and `doi`.
 
 ## tasks
 
-Task tracking template with a pre-configured workflow schema. Files use `status` and `assignee` frontmatter fields and are ready for Kanban board visualization. See [Workflows](/concepts/workflows).
+Task tracking template with a pre-configured workflow, JSON Schema validation, and Kanban-ready frontmatter.
+
+### Directory structure
+
+```
+tasks/
+├── SCHEMA.md
+├── WORKFLOW.md
+├── index.md
+├── tasks/
+│   ├── example-task.md
+│   └── blocked-example.md
+└── .kiwi/
+    ├── config.toml
+    ├── playbook.md
+    ├── rules.md
+    └── schemas/
+        └── task.json
+```
+
+<AccordionGroup>
+  <Accordion title="Task frontmatter">
+    Each task file uses structured frontmatter validated by `.kiwi/schemas/task.json`:
+
+    ```yaml
+    ---
+    title: "Implement auth flow"
+    status: "in_progress"
+    assignee: "agent:eng-bot"
+    priority: "high"
+    workflow: "default"
+    state: "in_progress"
+    ---
+    ```
+
+    The `status` field drives Kanban board grouping. The `workflow` and `state` fields enable state-machine transitions via [Workflows](/concepts/workflows).
+  </Accordion>
+  <Accordion title="JSON Schema validation">
+    The `task.json` schema in `.kiwi/schemas/` validates that required fields (`title`, `status`) are present and that `status` is one of the allowed values. Enable enforcement with:
+
+    ```toml .kiwi/config.toml
+    [schema]
+    enforce = true
+    ```
+
+    See [Schemas](/concepts/schemas).
+  </Accordion>
+  <Accordion title="Kanban visualization">
+    With the workflow configured, the web UI renders tasks as a Kanban board grouped by state. Use the API to advance tasks programmatically:
+
+    ```bash
+    curl -X POST 'http://localhost:3333/api/kiwi/workflow/advance' \
+      -H 'Content-Type: application/json' \
+      -d '{"path":"tasks/example-task.md","target_state":"done","actor":"agent:bot"}'
+    ```
+  </Accordion>
+</AccordionGroup>
 
 ## blank
 

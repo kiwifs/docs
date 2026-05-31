@@ -28,6 +28,16 @@ The `public_url` is used for permalink generation. Override via `KIWI_PUBLIC_URL
 
 Use `cors_origins` for a simple allowlist, or `[server.cors]` for fine-grained CORS control (methods, credentials, preflight cache).
 
+### Rate limiting
+
+```toml
+[server.rate_limit]
+requests_per_minute = 600
+burst_size = 50
+```
+
+When `requests_per_minute` is greater than zero, KiwiFS applies a token-bucket limiter keyed by Bearer token hash (or client IP when anonymous). Health, readiness, and metrics routes are exempt.
+
 ## Search
 
 ```toml
@@ -48,15 +58,30 @@ enabled = true
 worker_count = 5          # default; lower for small local embedders
 
 [search.vector.embedder]
-provider = "openai"      # openai | ollama | cohere | http | bedrock | vertex
+provider = "openai"      # openai | ollama | cohere | voyage | http | bedrock | vertex
 model = "text-embedding-3-small"
 api_key = "${OPENAI_API_KEY}"
 dimensions = 1536
 # timeout = "120s"       # optional for Ollama; default is 30s
 
 [search.vector.store]
-provider = "sqlite-vec"  # sqlite-vec | qdrant | pgvector | pinecone | weaviate | milvus
+provider = "sqlite-vec"  # sqlite-vec | qdrant | pgvector | pinecone | weaviate
 ```
+
+### Chunking
+
+Control how documents are split before embedding:
+
+```toml
+[search.vector.chunk]
+size = 512
+overlap = 64
+```
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `size` | `512` | Target tokens per chunk |
+| `overlap` | `64` | Token overlap between consecutive chunks |
 
 For local Ollama on a small CPU-only VPS, lower `worker_count` and raise the Ollama request timeout. See [Ollama vector search on a small VPS](/deploy/ollama-vector-search).
 
@@ -68,6 +93,7 @@ For local Ollama on a small CPU-only VPS, lower `worker_count` and raise the Oll
 | `openai` | `api_key`, `model` |
 | `ollama` | `base_url`, `model` |
 | `cohere` | `api_key`, `model` |
+| `voyage` | `api_key`, `model` |
 | `http` | `url` (custom endpoint) |
 | `bedrock` | `region`, `model` |
 | `vertex` | `project`, `location`, `model` |
@@ -82,7 +108,6 @@ For local Ollama on a small CPU-only VPS, lower `worker_count` and raise the Oll
 | `pgvector` | Requires PostgreSQL with pgvector extension |
 | `pinecone` | Cloud-hosted |
 | `weaviate` | Self-hosted or cloud |
-| `milvus` | Self-hosted or cloud |
 
 </Accordion>
 </AccordionGroup>
@@ -204,7 +229,13 @@ auto_discard = "720h"
 ```toml
 [workflow]
 enforce_transitions = false
+transitions = ["open->in_progress", "in_progress->done", "in_progress->blocked", "blocked->in_progress"]
 ```
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `enforce_transitions` | `false` | When `true`, `POST /workflow/advance` rejects transitions not listed in the workflow definition |
+| `transitions` | `[]` | Global default transitions (workflow definitions can override per-workflow) |
 
 ## Audit
 
@@ -287,6 +318,23 @@ output = "stderr"         # "stderr" (default) or "file"
 file = "/var/log/kiwifs-trace.jsonl"
 ```
 
+## Space visibility
+
+Control whether a space is accessible without authentication.
+
+```toml
+[space]
+visibility = "private"   # "private" (default), "unlisted", or "public"
+```
+
+| Value | Behavior |
+| --- | --- |
+| `private` | Requires authentication for all access |
+| `unlisted` | Accessible to anyone with the URL, not listed publicly |
+| `public` | Browseable and searchable without authentication |
+
+Visibility can also be changed at runtime via `PUT /api/kiwi/space/visibility`.
+
 ## Multi-space
 
 Run multiple independent knowledge bases from one server.
@@ -295,10 +343,12 @@ Run multiple independent knowledge bases from one server.
 [[spaces]]
 name = "engineering"
 root = "/data/eng-wiki"
+visibility = "private"
 
 [[spaces]]
 name = "product"
 root = "/data/product-wiki"
+visibility = "unlisted"
 ```
 
 Each space gets its own API under `/api/kiwi/{name}/...` or via the `X-Kiwi-Space` header. Administrators use `/api/spaces` to create and list spaces.
