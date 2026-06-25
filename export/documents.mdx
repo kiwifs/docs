@@ -4,7 +4,7 @@ description: "Render markdown to PDF, HTML, slides, or a static site."
 icon: "file-pdf"
 ---
 
-Beyond JSONL and CSV, KiwiFS can **render** markdown into deliverable formats using Pandoc, Marp, and MkDocs tooling (bundled in the Docker image).
+Beyond JSONL and CSV, KiwiFS can **render** markdown into deliverable formats using Pandoc, Marp, MkDocs, and Typst tooling (bundled in the Docker image). The web UI also supports in-browser PDF export via Typst without server-side dependencies.
 
 ## Endpoint
 
@@ -16,7 +16,7 @@ Content-Type: application/json
 ## Request body
 
 <ParamField body="format" type="string" required>
-  Output format: `pdf`, `html`, `slides`, or `site`.
+  Output format: `pdf`, `html`, `slides`, `site`, or `mkdocs`.
 </ParamField>
 
 <ParamField body="path" type="string" required>
@@ -68,6 +68,7 @@ Content-Type: application/json
     kiwifs export --format html --path concepts/ --self-contained --output site.html
     kiwifs export --format slides --path talks/intro.md --output slides.html
     kiwifs export --format site --path docs/ --site-name "My Wiki" --output docs-site.zip
+    kiwifs export --format mkdocs --path docs/ --site-name "My Wiki" --output docs-project/
     ```
   </Tab>
   <Tab title="REST">
@@ -102,10 +103,27 @@ The response streams the rendered artifact with an appropriate `Content-Type`. L
 
 **`kiwi_export_document`** accepts the same options for agent-driven publishing workflows.
 
+## Format details
+
+<AccordionGroup>
+  <Accordion title="PDF (Typst or XeLaTeX)">
+    Uses Typst by default for fast compilation. Falls back to XeLaTeX via Pandoc when Typst is unavailable. The web UI also provides in-browser PDF export via a bundled Typst WASM compiler — no server-side tools required.
+  </Accordion>
+  <Accordion title="MkDocs project">
+    The `mkdocs` format generates a complete MkDocs project directory with `mkdocs.yml`, navigation, and theme configuration. Build the static site with `mkdocs build` or preview with `mkdocs serve`.
+  </Accordion>
+  <Accordion title="Slides (Marp)">
+    Renders Marp-formatted markdown into HTML, PDF, or PPTX slides. Use `slide_format` to control the output type.
+  </Accordion>
+  <Accordion title="Static site">
+    The `site` format produces a ready-to-deploy static site as a ZIP archive, with navigation generated from the directory structure.
+  </Accordion>
+</AccordionGroup>
+
 ## Docker requirement
 
 <Warning>
-PDF and site generation depend on external tools bundled in the official Docker image. Bare-metal installs may need Pandoc and related dependencies installed separately.
+Server-side PDF (via Pandoc/Typst CLI) and site generation depend on external tools bundled in the official Docker image. Bare-metal installs may need Pandoc and related dependencies installed separately. In-browser PDF export via the web UI works without these dependencies.
 </Warning>
 
 ## Related documentation

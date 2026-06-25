@@ -78,6 +78,7 @@
               "concepts/webhooks",
               "concepts/schemas",
               "concepts/multi-space",
+              "concepts/widgets",
               "concepts/publishing",
               "concepts/audit-log",
               "concepts/real-time-events",

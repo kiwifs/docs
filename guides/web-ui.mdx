@@ -79,27 +79,51 @@ When analytics tracking is enabled, page view counts appear in the page header. 
 
 <Tabs>
   <Tab title="View mode">
-    Rendered markdown with wiki links, Mermaid diagrams, and frontmatter-aware styling.
+    Rendered markdown with wiki links, Mermaid diagrams, charts, kanban blocks, callouts, tabs, columns, and other rich widgets. Syntax-highlighted code blocks use Shiki with line highlights and titles.
   </Tab>
   <Tab title="Edit mode">
-    Source-preserving editor (BlockNote-based). Slash commands for templates. Drag-drop images.
+    Source-preserving editor (BlockNote-based). Slash commands for templates and widgets. Drag-drop images. Markdown source mode available via toggle.
   </Tab>
   <Tab title="History">
     Git versions, unified diff, and one-click restore from the versioning panel.
   </Tab>
 </Tabs>
 
+## Rich blocks and widgets
+
+Pages can embed interactive blocks using fenced code blocks. These render as rich components in the web UI and degrade to plain code in other markdown viewers.
+
+| Block | What it renders |
+| --- | --- |
+| `kiwi-chart` | Bar, line, area, pie, radar, scatter charts |
+| `kiwi-query` | Inline DQL tables and lists |
+| `kiwi-kanban` | Inline kanban boards |
+| `kiwi-playground` | Interactive sliders, toggles, selects |
+| `kiwi-app` | Sandboxed HTML/CSS/JS |
+| `kiwi-diff` | Annotated inline diffs |
+| `kiwi-progress` | Progress bars and gauges |
+| `kiwi-color` | Color palette swatches |
+| `mermaid` | Flowcharts, sequence diagrams |
+| `widget:live` | React Live code |
+| `widget:code` | Python via Pyodide |
+
+Container directives `:::tabs` and `:::columns` provide layout control. GitHub-style callouts (`> [!NOTE]`, `> [!WARNING]`, etc.) render as styled admonitions with foldable variants.
+
+See [Widgets and block types](/concepts/widgets) for syntax and examples.
+
 ## Wiki navigation
 
 - `[[wiki links]]` render as clickable links; unresolved links are highlighted.
 - **Backlinks** panel lists pages linking to the current page.
-- **Graph** view visualizes the wiki-link network.
+- **Graph** view visualizes the wiki-link network with link-type filtering.
 
-## Publishing
+## Publishing and PDF export
 
-Use **Publish** in the page header (or `POST /api/kiwi/publish`) to set `published: true` in frontmatter. Published pages are readable at `/p/{path}`.
+Use **Publish** in the page header (or `POST /api/kiwi/publish`) to set `published: true` in frontmatter. Published pages are readable at `/p/{path}` with a themed reader view.
 
-See [Publish API](/api/publish).
+The page actions menu also supports in-browser PDF export via Typst.
+
+See [Publishing](/concepts/publishing) and [Document export](/export/documents).
 
 ## Themes
 
@@ -110,19 +134,30 @@ Built-in themes: kiwi, ocean, forest, sunset, neutral. Users can switch unless l
 theme_locked = false
 ```
 
+Published pages at `/p/*` use a separate reader theme configurable via `PUT /api/kiwi/theme`.
+
+## Analytics
+
+When analytics tracking is enabled, the UI shows an analytics dashboard with page views, search analytics, content gaps, and trend charts. Per-page view counts appear in the page header.
+
+See [Analytics API](/api/analytics).
+
+## Keyboard shortcuts
+
+Configurable keyboard shortcuts for navigation, editing, and search. View and customize via `GET /api/kiwi/keybindings` or the settings panel.
+
 ## Mobile
 
 The UI is responsive. Reading works well on phones; editing is best on desktop.
-
-<Tip>
-A standalone `kiwifs-ui` npm package for React embedding is on the [roadmap](https://github.com/kiwifs/kiwifs/blob/main/docs/ROADMAP.md). Until then, use [Go embed](/deploy/go-embed) or proxy `GET /` from your app.
-</Tip>
 
 ## Related documentation
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="rocket" href="/quickstart">
     Install and run in 60 seconds.
+  </Card>
+  <Card title="Widgets" icon="puzzle-piece" href="/concepts/widgets">
+    Charts, kanban, playground, and other rich blocks.
   </Card>
   <Card title="Wiki links" icon="link" href="/concepts/wiki-links">
     Syntax and backlink behavior.

@@ -1,6 +1,6 @@
 ---
 title: "MCP (Model Context Protocol)"
-description: "Connect Claude, Cursor, and other AI tools to KiwiFS — stdio, HTTP, and 60+ tools."
+description: "Connect Claude, Cursor, and other AI tools to KiwiFS — stdio, HTTP, and 68+ tools."
 icon: "plug"
 ---
 
@@ -17,9 +17,16 @@ kiwifs mcp --remote http://host:3333 --api-key kiwi_sk_...
 
 # Streamable HTTP transport (remote agents, LAN tools)
 kiwifs mcp --root ~/knowledge --http --port 8181
+
+# Streamable HTTP on the main server port (no separate process)
+kiwifs serve --root ~/knowledge --mcp
 ```
 
 Use `--space <name>` when the knowledge root hosts multiple configured spaces. Remote HTTP MCP should stay behind TLS and reuse the same API keys you trust for REST.
+
+<Tip>
+The `--mcp` flag on `kiwifs serve` mounts the MCP endpoint at `/mcp` on the main HTTP server, so agents can reach both REST and MCP on the same port.
+</Tip>
 
 ## Configure Claude Desktop / Cursor
 
@@ -36,7 +43,7 @@ Use `--space <name>` when the knowledge root hosts multiple configured spaces. R
 
 ## Tool inventory
 
-The server currently registers **60+** tools (exact count may change release to release). They are grouped below; every name is invoked as listed.
+The server currently registers **68+** tools (exact count may change release to release). They are grouped below; every name is invoked as listed.
 
 <AccordionGroup>
 <Accordion title="Core files and search">
@@ -119,6 +126,21 @@ Canvas **generate**, **patch**, **query**, and **auto-layout** are REST-only —
 | `kiwi_workflow_board` | Kanban-style board grouped by `state`. |
 | `kiwi_claim` / `kiwi_release` | Cooperative leases on paths (requires actor headers in practice). |
 | `kiwi_claims_list` | Inspect active claims. |
+</Accordion>
+
+<Accordion title="Task orchestration">
+| Tool | Summary |
+| --- | --- |
+| `kiwi_task_create` | Create a new task page with structured frontmatter and workflow state. |
+| `kiwi_task_progress` | Append a timestamped progress entry to a task page. |
+| `kiwi_cite` | Generate a citation reference for a source or paper. |
+</Accordion>
+
+<Accordion title="Memory">
+| Tool | Summary |
+| --- | --- |
+| `kiwi_remember` | Save an episodic observation to `episodes/{date}/{uuid}.md`. |
+| `kiwi_forget` | Mark an episode as superseded (`memory_status: superseded`). |
 </Accordion>
 
 <Accordion title="Content helpers and feeds">
