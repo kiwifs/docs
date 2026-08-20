@@ -39,6 +39,18 @@ KiwiFS extends standard markdown with fenced code blocks that render as interact
   <Card title="Live widget" icon="bolt">
     React Live code blocks that render in the browser.
   </Card>
+  <Card title="Calc" icon="calculator">
+    Back-of-envelope math with tunable assumptions.
+  </Card>
+  <Card title="Steps" icon="list-ol">
+    Stepped Mermaid walkthroughs with playback.
+  </Card>
+  <Card title="Structured data" icon="table-list">
+    `kiwi-data` records queryable with `FROM RECORDS`.
+  </Card>
+  <Card title="Claims" icon="stamp">
+    Provenance badges for sourced vs inferred assertions.
+  </Card>
 </CardGroup>
 
 ---
@@ -259,6 +271,140 @@ import math
 print(f"Pi is approximately {math.pi:.4f}")
 ```
 ````
+
+---
+
+## kiwi-calc
+
+Interactive back-of-envelope math. Assumptions sit above `---`. Derivations below it recompute live. Click **Tune** in the web UI to adjust sliders.
+
+````markdown
+```kiwi-calc
+dau:        10 million
+writes:     100
+write_size: 1 KB
+---
+qps:     dau * writes / day
+daily:   dau * writes * write_size
+yearly:  daily * year
+```
+````
+
+<Tip>
+Units like `KB`, `million`, and `/ day` are parsed as quantities. Derivations stay in the page so agents can read the same numbers without the UI.
+</Tip>
+
+## kiwi-steps
+
+A Mermaid diagram plus a step list. Each step can focus or dim nodes and show a note. Playback controls appear under the diagram.
+
+````markdown
+```kiwi-steps
+diagram: |
+  graph LR
+    C[Client] --> A[API]
+    A --> DB[(Postgres)]
+steps:
+  - focus: [C, A]
+    note: write lands on the API
+  - focus: [A, DB]
+    dim: [C]
+    note: then it commits
+```
+````
+
+Sequence diagrams also work — omit `messages` and KiwiFS reveals one hop per step.
+
+## kiwi-data
+
+Structured records, not code. The server indexes them so DQL can query `FROM RECORDS "<kind>"`.
+
+````markdown
+```kiwi-data
+kind: dataset-schema
+records:
+  - name: target
+    dtype: float
+  - name: id
+    dtype: int
+    nullable: true
+```
+````
+
+```sql
+TABLE name, dtype
+FROM RECORDS "dataset-schema"
+WHERE dtype = "float"
+```
+
+<Note>
+A parse error falls back to the raw source plus the parser's complaint — the same mistake the indexer logs.
+</Note>
+
+## Claims
+
+Mark assertions so sourced claims look different from unsupported ones.
+
+```markdown
+:::claim{evidence=stated confidence=0.9 source=sources/architecture.md}
+A non-linear level-2 stacker wins when the dominant feature is sparse.
+:::
+
+Inline: :claim[hill-climbing is worse]{evidence=inferred confidence=0.6}
+```
+
+| Attribute | Meaning |
+| --- | --- |
+| `evidence` | `stated`, `inferred`, or similar — changes badge tone |
+| `confidence` | `0`–`1`, shown as a percentage |
+| `source` | Path or citation; omitted claims are marked **unsourced** |
+
+## Figures and embeds
+
+Wrap media so it can go wide, pin while scrolling, or embed a canvas / Excalidraw file.
+
+```markdown
+:::figure{width=wide pin caption="Architecture overview"}
+![[diagrams/arch.excalidraw.md|wide]]
+:::
+
+![[canvases/flow.canvas.json]]
+```
+
+`![[path]]` embeds `.excalidraw.md` and `.canvas.json` inline. Use `|wide` or `|full` for layout.
+
+## Reading order
+
+Place `_book.yaml` next to a chapter to drive prev/next navigation at the bottom of each page:
+
+```yaml
+title: System Design Primer
+parts:
+  - chapter-01/_index.md
+  - chapter-01/intro.md
+  - chapter-02/_index.md
+```
+
+If the manifest is missing, KiwiFS falls back to frontmatter `order`, then filename.
+
+## Page tracker
+
+Progress widgets for curricula or checklists. Modes switch which frontmatter fields are shown.
+
+````markdown
+```widget:tracker
+state: leetcode-progress
+modes:
+  - id: tags
+    label: Tags
+    fields: [tags]
+  - id: companies
+    label: Companies
+    fields: [companies]
+```
+````
+
+Bookmarks persist per page. Banner chips under the title come from `[ui.tags] banner` in config.
 
 ---
 

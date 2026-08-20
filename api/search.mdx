@@ -122,6 +122,66 @@ curl 'http://localhost:3333/api/kiwi/search/semantic?query=how+does+auth+work&li
 Semantic search requires vector embeddings. Configure an embedder provider (OpenAI, Ollama, Cohere, etc.) in your `.kiwi/config.toml` under `[search.vector]`.
 </Note>
 
+## Hybrid search
+
+Fuse FTS and semantic ranks with Reciprocal Rank Fusion. Degrades to lexical-only when no vector index exists.
+
+<ParamField query="mode" type="string">
+  Set to `hybrid` to enable RRF fusion.
+</ParamField>
+<ParamField query="q" type="string" required>
+  Search query.
+</ParamField>
+<ParamField query="limit" type="integer" default="10">
+  Maximum number of results.
+</ParamField>
+<ParamField query="rrf_k" type="integer" default="60">
+  RRF constant. Higher values flatten rank differences.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/search?mode=hybrid&q=payment+timeout&limit=10'
+```
+
+```json
+{
+  "query": "payment timeout",
+  "engines": ["fts", "semantic"],
+  "results": [
+    {
+      "path": "concepts/payments.md",
+      "title": "Payments",
+      "score": 0.032,
+      "fts_rank": 1,
+      "semantic_rank": 3
+    }
+  ]
+}
+```
+
+## Context pack
+
+Retrieve pages and pack extracted sections into a token budget. The pack never summarizes. Overflow is listed so you can see what was dropped.
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/brief' \
+  -H "Content-Type: application/json" \
+  -d '{"query": "how does auth work?", "budget_tokens": 4000, "max_pages": 20}'
+```
+
+<ParamField body="query" type="string" required>
+  Retrieval query.
+</ParamField>
+<ParamField body="budget_tokens" type="integer">
+  Maximum tokens in the packed context.
+</ParamField>
+<ParamField body="max_pages" type="integer">
+  Cap on candidate pages before packing.
+</ParamField>
+<ParamField body="path_prefix" type="string">
+  Restrict retrieval to a directory.
+</ParamField>
+
 ## Metadata query
 
 Query pages by their frontmatter fields using JSON path syntax.

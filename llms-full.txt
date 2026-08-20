@@ -23,7 +23,7 @@ OpenAPI spec (self-hosted): GET /api/openapi.json
 
 ## Init and Serve
 
-    kiwifs init --template knowledge --root ./knowledge
+    kiwifs init --template kb --root ./knowledge
     kiwifs serve --root ./knowledge
 
 Server starts at http://localhost:3333 with the web UI, REST API, and optional NFS/S3/WebDAV.
@@ -347,7 +347,7 @@ KiwiFS ships a built-in MCP server. Transports: stdio (default), Streamable HTTP
     kiwi://file/{path}       Read file by path
     kiwi://tree/{path}       Directory listing
 
-### Tool Reference (60+)
+### Tool Reference (71)
 
 #### Core Files and Search
 

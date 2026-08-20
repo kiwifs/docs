@@ -106,7 +106,8 @@
               "import/files",
               "import/saas",
               "import/connections",
-              "import/airbyte"
+              "import/airbyte",
+              "import/croissant"
             ]
           },
           {

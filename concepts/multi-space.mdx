@@ -36,8 +36,17 @@ Multi-space mode lets one KiwiFS process host **multiple independent knowledge b
 </Tabs>
 
 <Info>
-The first registered space is the **default** — requests without a space identifier route there.
+The **primary** space is the one you serve from `--root`, optionally named with `[space] name`. Requests without a space identifier route there. Additional `[[spaces]]` entries are extra isolated knowledge bases.
 </Info>
+
+## Browser URLs
+
+| Space | Page URL |
+| --- | --- |
+| Primary | `/page/{path}` |
+| Other | `/s/{space}/page/{path}` |
+
+Legacy `/page/{space}/{path}` links still resolve when `{space}` is a registered name.
 
 ## Request routing
 
@@ -47,7 +56,7 @@ Resolution order:
 | --- | --- | --- |
 | 1 | `X-Kiwi-Space` header | Set by a reverse proxy (subdomain → space name) |
 | 2 | URL path prefix | `/api/kiwi/{space}/tree` |
-| 3 | Default space | First registered space |
+| 3 | Primary space | `[space] name`, or `"default"` |
 
 <CodeGroup>
 ```bash Path-based routing

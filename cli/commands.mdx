@@ -78,7 +78,7 @@ kiwifs init [flags]
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--root` | `-r` | `./knowledge` | Directory to initialize |
-| `--template` | | `knowledge` | Template: `knowledge`, `wiki`, `runbook`, `research`, `tasks`, or `blank` |
+| `--template` | | `kb` | Template: `kb`, `wiki`, `memory`, `tasks`, `data`, `cms`, `runbook`, `adr`, `prompt`, `research`, `log`, or `blank` |
 
 <CodeGroup>
 ```bash Default template
@@ -625,6 +625,40 @@ kiwifs update
 ```
 
 Replaces the currently running binary in place.
+
+</Accordion>
+
+<Accordion title="eval — Retrieval quality benchmark">
+
+Score FTS, semantic, and hybrid search against a golden set in `.kiwi/eval/`.
+
+```bash
+kiwifs eval --set leave-one-out --exclude-prefix drafts/ --min-hit-rate 0.6
+```
+
+Topics and TREC qrels live under `.kiwi/eval/`. You can also POST the same payload to `/api/kiwi/eval`. See [Search](/concepts/search).
+
+</Accordion>
+
+<Accordion title="check — Workspace hygiene">
+
+Scan for sequence gaps, broken conventions, and CI-style hygiene issues.
+
+```bash
+kiwifs check --root ./knowledge
+```
+
+Used by templates that rely on `<!-- seq:N -->` markers (for example `log`). Pair with `[sequences]` in config.
+
+</Accordion>
+
+<Accordion title="model download — Offline embedder">
+
+Download ONNX embedder artifacts for local vector search (`provider = "onnx"`).
+
+```bash
+kiwifs model download
+```
 
 </Accordion>
 

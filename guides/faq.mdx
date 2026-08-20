@@ -70,7 +70,7 @@ Three ways:
 
 1. **Filesystem** — NFS or FUSE mount: `cat`, `echo`, `grep`
 2. **REST** — `PUT /api/kiwi/file`
-3. **MCP** — `kiwifs mcp --root ~/knowledge` (60+ tools)
+3. **MCP** — `kiwifs mcp --root ~/knowledge` (71 tools)
 </Accordion>
 
 <Accordion title="Can agents use KiwiFS without a running server?">
@@ -170,6 +170,10 @@ kiwifs import --from notion --api-key $KEY --database-id $ID --root ./knowledge
 ## License
 
 <AccordionGroup>
+
+<Accordion title="Is KiwiFS open source?">
+No. KiwiFS is **Fair Source** under [BSL 1.1](https://github.com/kiwifs/kiwifs/blob/main/LICENSE). The source is public and you can self-host, modify, and embed it. You cannot offer KiwiFS itself as a competing hosted service. Each release converts to Apache 2.0 four years later. See [fair.io](https://fair.io/licenses/).
+</Accordion>
 
 <Accordion title="Commercial use?">
 BSL 1.1 — self-host and embed freely. You cannot offer KiwiFS itself as a commercial hosted service. Each release converts to Apache 2.0 after four years.

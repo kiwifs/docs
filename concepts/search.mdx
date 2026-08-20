@@ -1,10 +1,10 @@
 ---
 title: "Search"
-description: "Three tiers of search: grep, SQLite FTS5, and vector embeddings."
+description: "Grep, SQLite FTS5, hybrid RRF fusion, vector embeddings, and token-budgeted context packs."
 icon: "magnifying-glass"
 ---
 
-KiwiFS provides three tiers of search, from zero-dependency grep to semantic vector similarity. You can start simple and scale up without changing your data or workflow.
+KiwiFS provides three tiers of search, from zero-dependency grep to semantic vector similarity, plus a hybrid mode that fuses lexical and vector ranks. You can start simple and scale up without changing your data or workflow.
 
 ## Tier 1: grep
 
@@ -67,6 +67,7 @@ provider = "sqlite-vec"
 | Vertex AI | Google Cloud embeddings |
 | Bedrock | AWS embeddings |
 | Custom HTTP | Any endpoint returning a vector array |
+| ONNX | Offline local model via `kiwifs model download` |
 
 ### Supported vector stores
 
@@ -79,13 +80,48 @@ provider = "sqlite-vec"
 | Weaviate | Self-hosted or cloud |
 | Milvus | Self-hosted or cloud |
 
+## Hybrid search
+
+When both FTS and a vector index exist, `mode=hybrid` fuses the two ranked lists with Reciprocal Rank Fusion. If embeddings are not configured, the same request degrades to lexical-only.
+
+```bash
+curl 'http://localhost:3333/api/kiwi/search?mode=hybrid&q=payment+timeout&limit=10'
+```
+
+Results include `engines` (`fts`, `semantic`), per-engine ranks, and the fused RRF `score`. Tune fusion with `rrf_k` (default `60`) and `boost`.
+
+## Context packs
+
+`POST /api/kiwi/brief` retrieves pages with hybrid search, extracts sections, and packs them into a token budget. It never summarizes — overflow is listed in a dropped manifest so you can see what was cut.
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/brief' \
+  -H "Content-Type: application/json" \
+  -d '{"query": "how does auth work?", "budget_tokens": 4000, "max_pages": 20}'
+```
+
+Use this as the first retrieval step for an agent instead of dumping whole files.
+
+## Retrieval evaluation
+
+Score FTS, semantic, and hybrid engines against a golden set in `.kiwi/eval/`:
+
+```bash
+kiwifs eval --set leave-one-out --exclude-prefix drafts/ --min-hit-rate 0.6
+```
+
+Or `POST /api/kiwi/eval` with `{ "set": "leave-one-out" }` or an inline `queries` array. Metrics include hit rate and nDCG.
+
 ## API endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/kiwi/search` | GET | Full-text search |
+| `/api/kiwi/search` | GET | Full-text search (`mode=hybrid` for RRF) |
 | `/api/kiwi/search/verified` | GET | Trust-ranked search |
 | `/api/kiwi/search/semantic` | GET, POST | Vector similarity search |
+| `/api/kiwi/brief` | POST | Token-budgeted context pack |
+| `/api/kiwi/eval` | POST | Retrieval quality benchmark |
+| `/api/kiwi/similar` | GET | Frontmatter similarity profiles |
 | `/api/kiwi/meta` | GET | Frontmatter metadata query |
 
 ## MCP tools
@@ -93,7 +129,11 @@ provider = "sqlite-vec"
 | Tool | Description |
 |------|-------------|
 | `kiwi_search` | Full-text search with pagination |
+| `kiwi_search_hybrid` | RRF fusion of FTS and semantic |
 | `kiwi_search_semantic` | Vector similarity search |
+| `kiwi_brief` | Token-budgeted context pack |
+| `kiwi_similar` | Frontmatter similarity profiles |
+| `kiwi_eval` | Search quality benchmark |
 | `kiwi_query_meta` | Frontmatter metadata query |
 | `kiwi_query` | DQL queries over metadata |
 

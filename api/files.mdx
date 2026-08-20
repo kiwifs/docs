@@ -292,6 +292,40 @@ curl 'http://localhost:3333/api/kiwi/templates?name=runbook'
 {"name": "runbook", "content": "---\ntype: runbook\ntitle: \nstatus: draft\n---\n\n# Title\n\n## Steps\n\n1. ..."}
 ```
 
+## Patch frontmatter
+
+Update YAML frontmatter without rewriting the markdown body. The body is preserved byte-for-byte.
+
+<Tabs>
+  <Tab title="PATCH /file?merge=frontmatter">
+    Send a JSON object of fields to merge.
+
+    ```bash
+    curl -X PATCH 'http://localhost:3333/api/kiwi/file?path=runbooks/high-cpu.md&merge=frontmatter' \
+      -H "Content-Type: application/json" \
+      -H "If-Match: \"abc123\"" \
+      -d '{"status": "published", "execution_count": 2}'
+    ```
+  </Tab>
+  <Tab title="PATCH /file/frontmatter">
+    Same merge with an explicit `fields` object.
+
+    ```bash
+    curl -X PATCH 'http://localhost:3333/api/kiwi/file/frontmatter?path=adr.md' \
+      -H "Content-Type: application/json" \
+      -d '{"fields": {"reviewed_by": "alice"}}'
+    ```
+  </Tab>
+</Tabs>
+
+<ParamField query="path" type="string" required>
+  Markdown file to update.
+</ParamField>
+
+<Info>
+Send `If-Match` with the current ETag to refuse stale writes. A conflict returns `409`.
+</Info>
+
 ## Resolve wiki links
 
 Resolve `[[wiki-links]]` to their canonical file paths and permalinks.

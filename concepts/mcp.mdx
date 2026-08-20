@@ -1,6 +1,6 @@
 ---
 title: "MCP (Model Context Protocol)"
-description: "Connect Claude, Cursor, and other AI tools to KiwiFS — stdio, HTTP, and 68+ tools."
+description: "Connect Claude, Cursor, and other AI tools to KiwiFS — stdio, HTTP, and 71 tools."
 icon: "plug"
 ---
 
@@ -43,7 +43,7 @@ The `--mcp` flag on `kiwifs serve` mounts the MCP endpoint at `/mcp` on the main
 
 ## Tool inventory
 
-The server currently registers **68+** tools (exact count may change release to release). They are grouped below; every name is invoked as listed.
+The server currently registers **71** tools (exact count may change release to release). They are grouped below; every name is invoked as listed.
 
 <AccordionGroup>
 <Accordion title="Core files and search">
@@ -57,7 +57,10 @@ The server currently registers **68+** tools (exact count may change release to 
 | `kiwi_append` | Append without read-modify-write races. |
 | `kiwi_tree` | Directory listing with depth and optional permalinks. |
 | `kiwi_search` | BM25 full-text search with pagination and `path_prefix`. |
+| `kiwi_search_hybrid` | RRF fusion of FTS and semantic ranks. |
 | `kiwi_search_semantic` | Vector similarity search (requires embeddings). |
+| `kiwi_brief` | Token-budgeted context pack — never summarizes. |
+| `kiwi_similar` | Frontmatter similarity profiles. |
 | `kiwi_changes` | Incremental change list since a checkpoint. |
 | `kiwi_versions` | Git history entries for a path. |
 | `kiwi_view_refresh` | Regenerate a computed `kiwi-view` markdown file. |

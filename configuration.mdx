@@ -95,6 +95,7 @@ For local Ollama on a small CPU-only VPS, lower `worker_count` and raise the Oll
 | `cohere` | `api_key`, `model` |
 | `voyage` | `api_key`, `model` |
 | `http` | `url` (custom endpoint) |
+| `onnx` | `model_path`, `tokenizer_path` (`kiwifs model download`) |
 | `bedrock` | `region`, `model` |
 | `vertex` | `project`, `location`, `model` |
 
@@ -161,7 +162,49 @@ allowed_types = ["image/png", "image/jpeg", "image/gif", "image/webp", "applicat
 ```toml
 [ui]
 theme_locked = false      # when true, users cannot change the theme
+start_page = "welcome"    # welcome | recent | dashboard | or a path
+custom_css = ".kiwi/custom.css"
+keybindings_file = ".kiwi/keybindings.json"
+
+[ui.features]
+edit = true
+history = true
+publish = true
+graph = true
+kanban = true
+canvas = true
+whiteboard = true
+timeline = true
+bases = true
+data_sources = true
+
+[ui.toolbar]
+views = ["graph", "kanban", "bases", "canvas", "whiteboard", "timeline"]
+
+[ui.tags]
+banner = ["status", "difficulty", "tags"]
+hide = ["internal_id"]
+
+[ui.tags.colors]
+easy = "emerald"
+google = "#4285F4"
+
+[ui.sidebar]
+pinned = ["index.md"]
+hidden = [".kiwi/"]
+
+[[ui.sidebar.sections]]
+label = "Guides"
+paths = ["getting-started/", "guides/"]
+
+[ui.branding]
+name = "My Wiki"
+logo_url = "assets/logo.png"
+welcome_title = "Welcome"
+welcome_message = "Start here."
 ```
+
+Set a `[ui.features]` flag to `false` to hide that chrome. Banner tags render as chips under the page title. See [Web UI](/guides/web-ui).
 
 ## Backup
 
@@ -282,9 +325,11 @@ When `auto_format` is true (default), KiwiFS normalizes markdown on write (table
 ```toml
 [schema]
 enforce = false
+discriminator = "type"    # frontmatter field that selects .kiwi/schemas/{value}.json
+enforce_level = "reject"  # "reject" (default) or "warn"
 ```
 
-When `true`, writes are validated against `.kiwi/schemas/`. See [Schemas](/concepts/schemas).
+When `enforce = true`, writes are validated against `.kiwi/schemas/`. `enforce_level = "warn"` logs violations but still commits. Use `discriminator = "kind"` if your pages key schemas on `kind` instead of `type`. See [Schemas](/concepts/schemas).
 
 ## Import (Airbyte)
 
@@ -324,8 +369,11 @@ Control whether a space is accessible without authentication.
 
 ```toml
 [space]
+name = "docs"            # primary space name in the selector and API routes
 visibility = "private"   # "private" (default), "unlisted", or "public"
 ```
+
+`name` labels the primary space. Unset, it is `"default"`. Browser URLs stay `/page/{path}` for the primary space and use `/s/{space}/page/{path}` for others.
 
 | Value | Behavior |
 | --- | --- |

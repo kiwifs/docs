@@ -1,0 +1,45 @@
+---
+title: "Croissant"
+description: "Import MLCommons Croissant dataset metadata as a queryable markdown page."
+icon: "database"
+---
+
+[MLCommons Croissant](https://mlcommons.org/croissant/) describes a dataset — not rows. KiwiFS imports one Croissant document as one page: the dataset description lands in frontmatter, and the column schema lands in `kiwi-data` blocks so you can query it with DQL.
+
+## Import
+
+<Tabs>
+  <Tab title="URL">
+    ```bash
+    kiwifs import --from croissant --url https://www.kaggle.com/datasets/OWNER/NAME/croissant/download --root ./knowledge
+    ```
+  </Tab>
+  <Tab title="File">
+    ```bash
+    kiwifs import --from croissant --file croissant.json --root ./knowledge
+    ```
+  </Tab>
+</Tabs>
+
+## Query the schema
+
+```sql
+TABLE name, dtype, column, source-file
+FROM RECORDS "dataset-schema"
+WHERE dtype = "float"
+```
+
+<Note>
+Croissant is JSON-LD. The importer expands the document to absolute IRIs before reading it, so two emitters can use different property names for the same dataset. Contexts resolve offline: an inline `@context` (what Kaggle and Hugging Face emit) and the well-known MLCommons context URL both work with no network. Any other remote context is refused rather than fetched.
+</Note>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Import overview" icon="download" href="/import/overview">
+    All supported sources.
+  </Card>
+  <Card title="Widgets" icon="puzzle-piece" href="/concepts/widgets">
+    `kiwi-data` blocks and `FROM RECORDS`.
+  </Card>
+</CardGroup>

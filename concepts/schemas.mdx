@@ -10,30 +10,32 @@ Schema validation lets you enforce structure on pages by type. When enabled, eve
 
 <Mermaid>
 flowchart LR
-  Write["PUT /file"] --> Check{"frontmatter has\n`type` field?"}
+  Write["PUT /file"] --> Check{"discriminator field\nset? (default `type`)"}
   Check -- No --> Commit["Git Commit"]
-  Check -- Yes --> Validate["Validate against\nschemas/type.json"]
+  Check -- Yes --> Validate["Validate against\nschemas/{value}.json"]
   Validate -- Pass --> Commit
-  Validate -- Fail --> Reject["400 Bad Request"]
+  Validate -- Fail --> Reject["400 or warn"]
 </Mermaid>
 
-1. A page is written with a `type` field in its frontmatter.
-2. KiwiFS looks up `.kiwi/schemas/{type}.json`.
+1. A page is written with a discriminator field in its frontmatter (default `type`).
+2. KiwiFS looks up `.kiwi/schemas/{value}.json`.
 3. If the schema exists and enforcement is on, the frontmatter is validated.
-4. Invalid pages are rejected before they reach git.
+4. Invalid pages are rejected — or logged when `enforce_level = "warn"`.
 
 ## Enabling enforcement
 
 ```toml
 [schema]
 enforce = true
+discriminator = "type"    # or "kind"
+enforce_level = "reject"  # or "warn" while you adopt schemas
 ```
 
 When `enforce = false` (default), schemas are stored but not checked on writes.
 
 ## Creating schemas
 
-Schemas live in `.kiwi/schemas/` as standard JSON Schema files. The filename (minus `.json`) matches the frontmatter `type` field.
+Schemas live in `.kiwi/schemas/` as standard JSON Schema files. The filename (minus `.json`) matches the discriminator value — `type` by default, or whatever you set in `[schema] discriminator`.
 
 ```bash
 curl -X PUT 'http://localhost:3333/api/kiwi/schemas/runbook' \

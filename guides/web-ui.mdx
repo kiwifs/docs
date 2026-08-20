@@ -22,7 +22,7 @@ KiwiFS ships a full **web UI** embedded in the Go binary. Open `http://localhost
     Force-directed wiki-link network.
   </Card>
   <Card title="Bases" icon="table">
-    Saved DQL queries with table or board layouts.
+    Saved DQL queries with table, cards, list, and map layouts.
   </Card>
   <Card title="Canvas" icon="object-group">
     Interactive Flow diagrams from `.canvas.json` files.
@@ -38,6 +38,12 @@ KiwiFS ships a full **web UI** embedded in the Go binary. Open `http://localhost
   </Card>
   <Card title="Data sources" icon="database">
     Saved import connections with auto-sync.
+  </Card>
+  <Card title="Analytics" icon="chart-line">
+    Views, searches, content gaps, and trend charts.
+  </Card>
+  <Card title="Publish" icon="globe">
+    Public reader URLs at `/p/{path}`.
   </Card>
 </CardGroup>
 
@@ -62,7 +68,7 @@ Beyond the page editor, the header toolbar opens full-screen views:
 | Button | View |
 | --- | --- |
 | **Knowledge graph** | Force-directed wiki-link network |
-| **Bases** | Saved DQL queries with table or board layouts |
+| **Bases** | Saved DQL queries with table, cards, list, or map layouts |
 | **Canvas** | Interactive Flow editor for `.canvas.json` files |
 | **Whiteboard** | Excalidraw hub for `.excalidraw.md` files |
 | **Timeline** | Recent git-backed activity |
@@ -103,6 +109,11 @@ Pages can embed interactive blocks using fenced code blocks. These render as ric
 | `kiwi-diff` | Annotated inline diffs |
 | `kiwi-progress` | Progress bars and gauges |
 | `kiwi-color` | Color palette swatches |
+| `kiwi-calc` | Back-of-envelope math with sliders |
+| `kiwi-steps` | Stepped Mermaid walkthroughs |
+| `kiwi-data` | Structured records (`FROM RECORDS`) |
+| `:::claim` | Provenance badges on assertions |
+| `:::figure` / `![[…]]` | Wide/pinned figures and canvas embeds |
 | `mermaid` | Flowcharts, sequence diagrams |
 | `widget:live` | React Live code |
 | `widget:code` | Python via Pyodide |
@@ -116,6 +127,15 @@ See [Widgets and block types](/concepts/widgets) for syntax and examples.
 - `[[wiki links]]` render as clickable links; unresolved links are highlighted.
 - **Backlinks** panel lists pages linking to the current page.
 - **Graph** view visualizes the wiki-link network with link-type filtering.
+- **Reading order** — `_book.yaml` or frontmatter `order` drives prev/next pills at the bottom of the page.
+
+## Clip URL
+
+**Clip URL** in the page actions menu fetches a public page and saves it as markdown under `clips/` (or a folder you choose). Same as `POST /api/kiwi/clip`.
+
+## Theme editor
+
+Open the theme editor from settings to override brand tokens, import/export a theme JSON, and persist it with `PUT /api/kiwi/theme`. Lock the theme for readers with `[ui] theme_locked = true`.
 
 ## Publishing and PDF export
 
@@ -132,7 +152,26 @@ Built-in themes: kiwi, ocean, forest, sunset, neutral. Users can switch unless l
 ```toml .kiwi/config.toml
 [ui]
 theme_locked = false
+start_page = "welcome"   # welcome | recent | dashboard | or a path
+
+[ui.features]
+edit = true
+history = true
+publish = true
+graph = true
+kanban = true
+canvas = true
+whiteboard = true
+timeline = true
+bases = true
+data_sources = true
+
+[ui.tags]
+banner = ["status", "difficulty", "tags"]
+hide = ["internal_id"]
 ```
+
+Set a feature to `false` to hide that button from the chrome. Banner tags appear as chips under the page title.
 
 Published pages at `/p/*` use a separate reader theme configurable via `PUT /api/kiwi/theme`.
 
@@ -170,5 +209,8 @@ The UI is responsive. Reading works well on phones; editing is best on desktop.
   </Card>
   <Card title="Whiteboard" icon="pen" href="/concepts/whiteboard">
     Excalidraw sketches.
+  </Card>
+  <Card title="Storybook" icon="book-open" href="https://demo.kiwifs.com/storybook/">
+    Live component gallery.
   </Card>
 </CardGroup>

@@ -14,13 +14,13 @@ KiwiFS is a single Go binary that turns markdown files on disk into a searchable
 ## Quickstart
 
     curl -fsSL https://raw.githubusercontent.com/kiwifs/kiwifs/main/install.sh | sh
-    kiwifs init --template knowledge --root ./knowledge
+    kiwifs init --template kb --root ./knowledge
     kiwifs serve --root ./knowledge
     # Server running at http://localhost:3333
 
 ## MCP Setup
 
-KiwiFS ships a built-in MCP server with 60+ tools.
+KiwiFS ships a built-in MCP server with 71 tools.
 
 ### Claude Desktop / Cursor (stdio)
 
@@ -74,7 +74,7 @@ Base URL: http://localhost:3333/api/kiwi
 
 Auth: Bearer token in Authorization header. Set X-Actor on writes for git attribution.
 
-## MCP Tools (60+)
+## MCP Tools (71)
 
 Core: kiwi_read, kiwi_write, kiwi_delete, kiwi_rename, kiwi_bulk_write, kiwi_append, kiwi_tree, kiwi_search, kiwi_search_semantic, kiwi_changes, kiwi_versions
 Queries: kiwi_query, kiwi_query_meta, kiwi_aggregate, kiwi_context

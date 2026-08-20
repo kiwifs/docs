@@ -4,75 +4,86 @@ description: "Install and run KiwiFS in 60 seconds."
 icon: "rocket"
 ---
 
-## 1. Install
+<Steps>
+  <Step title="Install">
+    <Tabs>
+      <Tab title="Shell">
+        ```bash
+        curl -fsSL https://raw.githubusercontent.com/kiwifs/kiwifs/main/install.sh | sh
+        ```
+      </Tab>
+      <Tab title="Homebrew">
+        ```bash
+        brew install kiwifs/tap/kiwifs
+        ```
+      </Tab>
+      <Tab title="Go">
+        ```bash
+        go install github.com/kiwifs/kiwifs@latest
+        ```
+      </Tab>
+      <Tab title="Docker">
+        ```bash
+        docker run -p 3333:3333 -v ./knowledge:/data ameliaanhlam/kiwifs
+        ```
 
-<Tabs>
-  <Tab title="Shell">
+        <Note>
+        The Docker image runs `kiwifs serve` with default settings. Skip to step 4 — init and serve are handled automatically.
+        </Note>
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Initialize a knowledge base">
     ```bash
-    curl -fsSL https://raw.githubusercontent.com/kiwifs/kiwifs/main/install.sh | sh
+    kiwifs init --template kb --root ./knowledge
     ```
-  </Tab>
-  <Tab title="Go">
+
+    This creates a directory with starter files, a schema, and an agent playbook.
+
+    <Tip>
+    Templates: `kb`, `wiki`, `memory`, `tasks`, `data`, `cms`, `runbook`, `adr`, `prompt`, `research`, `log`, and `blank`. See [Init templates](/guides/templates).
+    </Tip>
+  </Step>
+
+  <Step title="Start the server">
     ```bash
-    go install github.com/kiwifs/kiwifs@latest
+    kiwifs serve --root ./knowledge
     ```
-  </Tab>
-  <Tab title="Docker">
+
+    KiwiFS is now running at `http://localhost:3333`. Open it in your browser to see the web UI.
+  </Step>
+
+  <Step title="Write from your agent">
+    <CodeGroup>
+    ```bash Via REST
+    curl -X PUT 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
+      -H "X-Actor: my-agent" \
+      -d "# Authentication
+
+    OAuth2 + JWT based authentication system."
+    ```
+
+    ```bash Via filesystem
+    echo "# Authentication" > ./knowledge/concepts/auth.md
+    ```
+
+    ```bash Via MCP
+    kiwifs mcp --root ./knowledge
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Search">
     ```bash
-    docker run -p 3333:3333 -v ./knowledge:/data ameliaanhlam/kiwifs
+    curl 'http://localhost:3333/api/kiwi/search?q=authentication'
     ```
 
-    <Note>
-    The Docker image runs `kiwifs serve` with default settings. Skip to step 4 — init and serve are handled automatically.
-    </Note>
-  </Tab>
-</Tabs>
-
-## 2. Initialize a knowledge base
-
-```bash
-kiwifs init --template knowledge --root ./knowledge
-```
-
-This creates a directory with starter files, a schema, and an agent playbook.
-
-<Tip>
-Templates available: `knowledge` (default), `wiki`, `runbook`, `research`, `tasks`, `blank`. See [Init templates](/guides/templates) for details on each.
-</Tip>
-
-## 3. Start the server
-
-```bash
-kiwifs serve --root ./knowledge
-```
-
-KiwiFS is now running at `http://localhost:3333`. Open it in your browser to see the web UI.
-
-## 4. Write from your agent
-
-<CodeGroup>
-```bash Via REST
-curl -X PUT 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
-  -H "X-Actor: my-agent" \
-  -d "# Authentication
-
-OAuth2 + JWT based authentication system."
-```
-
-```bash Via filesystem
-echo "# Authentication" > ./knowledge/concepts/auth.md
-```
-
-```bash Via MCP
-kiwifs mcp --root ./knowledge
-```
-</CodeGroup>
-
-## 5. Search
-
-```bash
-curl 'http://localhost:3333/api/kiwi/search?q=authentication'
-```
+    <Check>
+    You now have a searchable, versioned knowledge base. Every write is a git commit.
+    </Check>
+  </Step>
+</Steps>
 
 ## Connect an AI agent
 
@@ -89,7 +100,7 @@ Add KiwiFS as an MCP server in Claude Desktop or Cursor:
 }
 ```
 
-Your agent now has access to **60+ MCP tools** for reading, writing, searching, querying, drafts, and more. See [MCP](/concepts/mcp) for the full tool reference.
+Your agent now has access to **71 MCP tools** for reading, writing, searching, querying, drafts, and more. See [MCP](/concepts/mcp) for the full tool reference.
 
 ## Next steps
 
@@ -100,6 +111,9 @@ Your agent now has access to **60+ MCP tools** for reading, writing, searching, 
   <Card title="Agent Interface" icon="robot" href="/concepts/agent-interface">
     Filesystem, REST, and MCP access patterns.
   </Card>
+  <Card title="Search" icon="magnifying-glass" href="/concepts/search">
+    Grep, FTS5, hybrid, and vector search.
+  </Card>
   <Card title="DQL" icon="database" href="/concepts/dql">
     Query frontmatter metadata with a SQL-like language.
   </Card>
@@ -108,8 +122,5 @@ Your agent now has access to **60+ MCP tools** for reading, writing, searching, 
   </Card>
   <Card title="Web UI" icon="window" href="/guides/web-ui">
     Tree, editor, graph, Bases, and search.
-  </Card>
-  <Card title="Episodic memory" icon="brain" href="/concepts/episodic-memory">
-    Episodes, consolidation, and memory reports.
   </Card>
 </CardGroup>
