@@ -1,142 +1,145 @@
 ---
 title: "Agent playbook"
-description: "SCHEMA.md, playbook.md, rules.md, and kiwi_context — how agents onboard to a knowledge base."
+description: "SCHEMA.md, the playbook, and rules.md tell an agent where to write, what frontmatter to use, and which tools to call."
 icon: "book-open"
 ---
 
-Every `kiwifs init` template ships agent-facing documents beside your markdown pages. Together they tell agents **where** to write, **what** frontmatter to use, and **which** MCP tools to call.
+Every `kiwifs init` template except `blank` ships a few agent-facing files beside your pages. An agent loads them with one call to `kiwi_context` and knows the layout, the frontmatter conventions, and the house rules before it writes anything.
 
-## Core files
+## The files
 
-| File | Purpose |
-| --- | --- |
-| `SCHEMA.md` | Directory layout, frontmatter field tables, naming conventions |
-| `.kiwi/playbook.md` | Step-by-step MCP sequences for each operation |
-| `.kiwi/rules.md` | Harness-specific behavior (Cursor, Claude, etc.) |
-| `index.md` | Auto-maintained table of contents |
-| `log.md` | Optional append-only chronological record |
+| File | Purpose | Who edits it |
+| --- | --- | --- |
+| `SCHEMA.md` | Folder layout, frontmatter fields, naming conventions | You, per knowledge base |
+| `.kiwi/playbook.md` | Step-by-step tool sequences for common operations | You; the template provides a starting point |
+| `.kiwi/rules.md` | Always and never rules for every connected agent | You, with the CLI or the API |
+| `index.md` | Entry page that links to every section | Agents keep it current |
+| `log.md` | Append-only record of changes (`memory` template) | Agents append to it |
 
-<Info>
-The **`knowledge`** template also includes `episodes/` for episodic memory. See [Episodic memory](/concepts/episodic-memory).
-</Info>
+`kiwifs init` copies the template's playbook to `.kiwi/playbook.md`, which is the copy `kiwi_context` serves. `.kiwi/playbook.md` and `.kiwi/rules.md` are the only `.kiwi/` files reachable through the file API.
 
 ## Load context in one call
 
 <Tabs>
   <Tab title="MCP">
-    ```
-    kiwi_context
-    ```
+    Call `kiwi_context` with no arguments. It returns the schema, playbook, index, and rules as one document. Agents should call it first when they connect.
 
-    Returns `schema`, `playbook`, and `index` in one response.
+    The schema alone is also available as the read-only resource `kiwi://schema`.
   </Tab>
   <Tab title="REST">
-    ```bash
-    curl -s 'http://localhost:3333/api/kiwi/context'
+    ```bash Terminal
+    curl 'http://localhost:3333/api/kiwi/context'
     ```
 
     ```json
     {
-      "playbook": "# Playbook\n...",
       "schema": "# Schema\n...",
-      "index": "# Index\n..."
+      "playbook": "# Playbook\n...",
+      "index": "# Index\n...",
+      "rules": "# Agent Rules\n..."
     }
     ```
+
+    A missing file comes back as an empty string.
   </Tab>
 </Tabs>
 
-MCP also exposes read-only resource **`kiwi://schema`** for the schema document alone.
+## Typical operations
 
-## Playbook operations
+Each template's playbook spells out its own sequences. These are the common shapes.
 
 <AccordionGroup>
-  <Accordion title="Ingest — process a new source">
-    ```
+  <Accordion title="Ingest: add a new source">
+    ```text
     kiwi_context
-    kiwi_search("authentication")
-    kiwi_write("pages/auth.md", content)
+    kiwi_search("authentication")                 # update instead of duplicating
+    kiwi_write("pages/auth.md", content, provenance="ingest:rfc-6749")
     kiwi_read("index.md")
-    kiwi_write("index.md", updated_index)
-    kiwi_append("log.md", "- added auth page")
+    kiwi_write("index.md", updated_index, if_match=etag)
+    kiwi_append("log.md", "- added pages/auth.md")
     ```
   </Accordion>
-
-  <Accordion title="Query — answer a question">
-    ```
-    kiwi_search("payment timeout")
-    kiwi_read("pages/payments.md")
-    ```
-  </Accordion>
-
-  <Accordion title="Remember — save episodic observations">
-    ```
-    kiwi_append("episodes/2026-05-21.md", observation)
+  <Accordion title="Query: answer a question">
+    ```text
+    kiwi_brief("how does auth work?")             # one token-budgeted pack
+    kiwi_read("pages/auth.md")                    # if you need the whole page
     ```
   </Accordion>
-
-  <Accordion title="Consolidate — merge episodes into durable pages">
+  <Accordion title="Remember: record an observation">
+    ```text
+    kiwi_remember(content, scope="user:alice")   # writes episodes/<date>/<id>.md
     ```
+  </Accordion>
+  <Accordion title="Consolidate: fold episodes into durable pages">
+    ```text
     kiwi_memory_report
-    kiwi_read("episodes/2026-05-21.md")
-    kiwi_write("pages/topic.md", merged_content)
+    kiwi_read("episodes/2026-05-21/run-7f3a.md")
+    kiwi_write("pages/topic.md", merged_content)  # with merged-from in frontmatter
     ```
   </Accordion>
-
-  <Accordion title="Lint — audit health">
+  <Accordion title="Restructure: move or merge pages">
+    ```text
+    kiwi_refactor_plan(manifest)                  # preview and digest, nothing written
+    kiwi_refactor_apply(manifest, digest)         # one commit, links kept intact
     ```
-    kiwi_analytics
-    kiwi_health_check("pages/auth.md")
+  </Accordion>
+  <Accordion title="Audit: check health">
+    ```text
     kiwi_lint
+    kiwi_health_check("pages/auth.md")
+    kiwi_analytics
     ```
   </Accordion>
 </AccordionGroup>
 
-## Rules for your harness
+## Rules
 
-Export `.kiwi/rules.md` in a format your agent tool understands:
+`.kiwi/rules.md` holds rules that apply to every agent, such as "search before creating a page" or "never store secrets". `kiwi_context` includes it, so MCP agents get it automatically. For agents that read rules from their own config, export it.
 
-<CodeGroup>
-```bash Print rules
-kiwifs rules
-```
-
-```bash Export for Cursor
-kiwifs rules export --format cursor
-```
-
-```bash Sync to project config
+```bash Terminal
+kiwifs rules                                          # print the rules
+kiwifs rules edit                                     # open in $EDITOR
+kiwifs rules export --format claude                   # print in a harness format
 kiwifs rules sync --format cursor --output .cursor/rules/kiwi.md
+kiwifs rules sync --format skill                      # writes .cursor/skills/team-wiki/SKILL.md
 ```
-</CodeGroup>
 
-REST: `GET /api/kiwi/rules`, `PUT /api/kiwi/rules` — see [Utilities API](/api/utilities#rules-file).
+Formats are `cursor`, `claude`, `agents`, `openclaw`, and `skill`. `sync` needs `--output` for every format except `skill`. Add `--remote http://host:3333` to read the rules from a running server instead of the local file.
+
+Over REST, `GET /api/kiwi/rules` reads the rules (add `format=` for an export) and `PUT /api/kiwi/rules` replaces them. See [Utilities API](/api/utilities#rules-file).
 
 ## Provenance on writes
 
-```bash
-curl -X PUT 'http://localhost:3333/api/kiwi/file?path=episodes/run-249.md' \
+Record which run produced a page. KiwiFS appends an entry to its `derived-from` frontmatter.
+
+<CodeGroup>
+
+```bash REST
+curl -X PUT 'http://localhost:3333/api/kiwi/file?path=pages/auth.md' \
   -H 'X-Actor: agent:researcher' \
   -H 'X-Provenance: run:run-249' \
-  -d '# Session notes...'
+  --data-binary @auth.md
 ```
 
-<Note>
-KiwiFS injects `derived-from` into frontmatter automatically from these headers.
-</Note>
+```text MCP
+kiwi_write("pages/auth.md", content, actor="agent:researcher", provenance="run:run-249")
+```
 
-## Related documentation
+</CodeGroup>
+
+## Related
 
 <CardGroup cols={2}>
   <Card title="MCP" icon="plug" href="/concepts/mcp">
-    Full tool reference.
+    Client setup and the full tool reference.
   </Card>
   <Card title="Episodic memory" icon="brain" href="/concepts/episodic-memory">
-    Episodes, consolidation, and merge reports.
+    Episodes, consolidation, and coverage reports.
   </Card>
   <Card title="Schemas" icon="shield-check" href="/concepts/schemas">
-    JSON Schema validation on writes.
+    Validate frontmatter on every write.
   </Card>
-  <Card title="Examples" icon="lightbulb" href="/guides/examples">
-    Practical workflow recipes.
+  <Card title="Templates" icon="layer-group" href="/guides/templates">
+    What each `kiwifs init` template ships.
   </Card>
 </CardGroup>

@@ -1,104 +1,142 @@
 ---
-title: "Schema Validation"
-description: "Enforce structure on your markdown with JSON Schema validation on writes."
+title: "Schema validation"
+description: "Validate page frontmatter against JSON Schema on every write, keyed by a type field."
 icon: "shield-check"
 ---
 
-Schema validation lets you enforce structure on pages by type. When enabled, every write validates the page's frontmatter against a JSON Schema before committing. This prevents agents and users from creating malformed pages.
+Schema validation keeps page types consistent. You write a JSON Schema for each type, such as `runbook` or `decision`, and KiwiFS checks the frontmatter of every page of that type before the write lands. Agents and people get an immediate error instead of leaving half-filled pages behind.
 
 ## How it works
 
-<Mermaid>
+```mermaid
 flowchart LR
-  Write["PUT /file"] --> Check{"discriminator field\nset? (default `type`)"}
-  Check -- No --> Commit["Git Commit"]
-  Check -- Yes --> Validate["Validate against\nschemas/{value}.json"]
+  Write["Write a page"] --> Check{"Discriminator set and<br/>schema exists?"}
+  Check -- No --> Commit["Commit and index"]
+  Check -- Yes --> Validate["Validate frontmatter"]
   Validate -- Pass --> Commit
-  Validate -- Fail --> Reject["400 or warn"]
-</Mermaid>
+  Validate -- "Fail, reject" --> Reject["422 error, nothing written"]
+  Validate -- "Fail, warn" --> Log["Log the violation"] --> Commit
+```
 
-1. A page is written with a discriminator field in its frontmatter (default `type`).
-2. KiwiFS looks up `.kiwi/schemas/{value}.json`.
-3. If the schema exists and enforcement is on, the frontmatter is validated.
-4. Invalid pages are rejected — or logged when `enforce_level = "warn"`.
+1. A page declares its type in a discriminator field, `type` by default.
+2. KiwiFS looks for `.kiwi/schemas/{value}.json`.
+3. If that schema exists, the page's frontmatter is validated against it.
+4. Pages with no discriminator, or with a type that has no schema, are never checked.
 
-## Enabling enforcement
+Validation runs inside the write pipeline, so it covers REST, MCP, imports, and the filesystem protocols alike. Only frontmatter is validated, not the page body.
 
-```toml
+## Turn on enforcement
+
+```toml .kiwi/config.toml
 [schema]
 enforce = true
-discriminator = "type"    # or "kind"
-enforce_level = "reject"  # or "warn" while you adopt schemas
+discriminator = "type"    # frontmatter field that names the schema
+enforce_level = "reject"  # or "warn"
 ```
 
-When `enforce = false` (default), schemas are stored but not checked on writes.
+| Key | Default | Description |
+| --- | --- | --- |
+| `enforce` | `false` | Validate writes. While `false`, schemas are stored and served but never checked. |
+| `discriminator` | `type` | Frontmatter field whose value picks the schema, for example `kind` or `category`. |
+| `enforce_level` | `reject` | `reject` blocks invalid writes. `warn` logs the violation and lets the write through. |
 
-## Creating schemas
+<Tip>
+Start with `enforce_level = "warn"` on an existing knowledge base. Fix the pages the server log reports, then switch to `reject`.
+</Tip>
 
-Schemas live in `.kiwi/schemas/` as standard JSON Schema files. The filename (minus `.json`) matches the discriminator value — `type` by default, or whatever you set in `[schema] discriminator`.
+## Write a schema
 
-```bash
-curl -X PUT 'http://localhost:3333/api/kiwi/schemas/runbook' \
-  -H "Content-Type: application/json" \
-  -d '{
-    "type": "object",
-    "required": ["title", "status", "owner"],
-    "properties": {
-      "title": {"type": "string"},
-      "status": {"type": "string", "enum": ["draft", "reviewed", "verified"]},
-      "owner": {"type": "string"},
-      "review-by": {"type": "string", "format": "date"}
-    }
-  }'
-```
+Schemas are standard JSON Schema files, one per type. The filename without `.json` is the type value.
 
-Now any page with `type: runbook` in its frontmatter must have `title`, `status`, and `owner`:
+<Tree>
+  <Tree.Folder name=".kiwi" defaultOpen>
+    <Tree.Folder name="schemas" defaultOpen>
+      <Tree.File name="runbook.json" />
+      <Tree.File name="decision.json" />
+    </Tree.Folder>
+  </Tree.Folder>
+</Tree>
 
-```markdown
+<Tabs>
+  <Tab title="REST">
+    ```bash Terminal
+    curl -X PUT 'http://localhost:3333/api/kiwi/schemas/runbook' \
+      -H 'Content-Type: application/json' \
+      -d '{
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "required": ["type", "title", "owner", "severity"],
+        "properties": {
+          "type": { "const": "runbook" },
+          "title": { "type": "string", "minLength": 1 },
+          "owner": { "type": "string" },
+          "severity": { "type": "string", "enum": ["P1", "P2", "P3", "P4"] },
+          "services": { "type": "array", "items": { "type": "string" } }
+        }
+      }'
+    ```
+
+    Saving through the API reloads the schemas immediately.
+  </Tab>
+  <Tab title="File on disk">
+    Create `.kiwi/schemas/runbook.json` with the same JSON. Schemas edited on disk are picked up when the server restarts or when any schema is saved through the API.
+  </Tab>
+</Tabs>
+
+Type names may contain letters, digits, hyphens, and underscores. Schema files are configuration, not pages: saving one does not create a git commit.
+
+With that schema in place, this page is accepted:
+
+```markdown runbooks/db-failover.md
 ---
 type: runbook
-title: Deploy Checklist
-status: draft
+title: Database failover
 owner: team-platform
+severity: P1
+services: ["[[postgres-primary]]"]
 ---
 
-# Deploy Checklist
+## Steps
 ...
 ```
 
-## Listing schemas
-
-```bash
-curl 'http://localhost:3333/api/kiwi/schemas'
-```
-
-```json
-["runbook", "concept", "episode"]
-```
-
-## Reading a schema
-
-```bash
-curl 'http://localhost:3333/api/kiwi/schemas/runbook'
-```
-
-Returns the raw JSON Schema document.
+The `runbook`, `tasks`, `data`, `adr`, and other `kiwifs init` templates ship with schemas in `.kiwi/schemas/`. Enforcement stays off until you turn it on.
 
 ## Validation errors
 
-When a write fails validation, you get a `400` response with details:
+With `enforce_level = "reject"`, an invalid write returns `422 Unprocessable Entity` and nothing is written. The message names the type and each violation:
 
-```json
+```json 422 Unprocessable Entity
 {
-  "error": "schema validation failed",
-  "type": "runbook",
-  "violations": [
-    "missing required property: owner",
-    "status must be one of: draft, reviewed, verified"
-  ]
+  "error": "validation failed: validation failed for type \"runbook\": at '': missing property 'owner'"
 }
 ```
 
-<Tip>
-Use schemas to standardize page types across your knowledge base. For example, define schemas for `runbook`, `decision`, `episode`, and `concept` to ensure agents always create well-formed pages.
-</Tip>
+MCP write tools return the same message as a tool error, so agents can fix the frontmatter and retry.
+
+## List and read schemas
+
+```bash Terminal
+curl 'http://localhost:3333/api/kiwi/schemas'
+# ["decision","runbook"]
+
+curl 'http://localhost:3333/api/kiwi/schemas/runbook'
+# returns the raw JSON Schema document
+```
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Schemas REST API" icon="shield-check" href="/api/schemas">
+    List, read, and save schemas.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration#schema-enforcement">
+    The `[schema]` section.
+  </Card>
+  <Card title="Templates" icon="copy" href="/guides/templates">
+    Init templates that include schemas.
+  </Card>
+  <Card title="Files as truth" icon="file" href="/concepts/files-as-truth">
+    Frontmatter as structured data.
+  </Card>
+</CardGroup>

@@ -1,74 +1,234 @@
 ---
 title: "Drafts"
-description: "Create, edit, merge, or discard git-backed draft workspaces under /api/kiwi/drafts."
-icon: "code-branch"
+description: "Create git-backed draft branches, edit files in them, then merge or discard."
+icon: "code-pull-request"
 ---
 
-All paths below are under `http://localhost:3333/api/kiwi` unless you use [multi-space URLs](/api/overview) or the [`X-Kiwi-Space`](/api/overview) header.
+A draft is a git branch with its own worktree. An agent can write a batch of changes there, you review the diff, and then merge it into main in one fast-forward or throw it away. Main stays untouched until the merge.
 
-Drafts return **`501 Not Implemented`** when the server was started without a draft manager.
+Drafts are off by default. Turn them on in `.kiwi/config.toml`:
 
-## Create draft
-
-```http
-POST /drafts
+```toml .kiwi/config.toml
+[drafts]
+enabled = true
+max_active = 10   # default 10
 ```
 
-Optional JSON body:
+When drafts are off, every endpoint on this page returns `501`. All paths are relative to `http://localhost:3333/api/kiwi`. See [Draft spaces](/concepts/draft-spaces) for the workflow.
 
-```json
-{ "actor": "agent:planner" }
+## Create a draft
+
+Branches from the current `HEAD` and returns the new draft.
+
+**`POST /drafts`**
+
+<ParamField body="actor" type="string">
+  Who owns the draft. Falls back to `X-Actor`, then `api`.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/drafts' \
+  -H "Content-Type: application/json" \
+  -d '{"actor": "agent:planner"}'
 ```
 
-If `actor` is empty, the server uses `X-Actor`, then falls back to `api`.
+<ResponseField name="id" type="string">Eight-character hex ID used in every other draft route.</ResponseField>
+<ResponseField name="branch" type="string">Git branch, `draft/{id}`.</ResponseField>
+<ResponseField name="actor" type="string">Owner.</ResponseField>
+<ResponseField name="created_at" type="string">Creation time (RFC 3339).</ResponseField>
 
-**Response `201`:** `{ "id", "branch", "actor", "created_at" }`
+```json 201 Created
+{
+  "id": "3fa9c21e",
+  "branch": "draft/3fa9c21e",
+  "actor": "agent:planner",
+  "created_at": "2026-10-19T09:30:00Z"
+}
+```
+
+Returns `409` when `max_active` drafts already exist or the repository has no commits yet.
 
 ## List drafts
 
-```http
-GET /drafts
+Returns all active drafts as an array of the same objects.
+
+**`GET /drafts`**
+
+```bash
+curl 'http://localhost:3333/api/kiwi/drafts'
 ```
 
-Returns a JSON array of draft summaries (same fields as create).
-
-## Get draft
-
-```http
-GET /drafts/:id
+```json Response
+[
+  {"id": "3fa9c21e", "branch": "draft/3fa9c21e", "actor": "agent:planner", "created_at": "2026-10-19T09:30:00Z"}
+]
 ```
 
-## Diff draft against main
+## Get a draft
 
-```http
-GET /drafts/:id/diff
+Returns one draft.
+
+**`GET /drafts/:id`**
+
+<ParamField path="id" type="string" required>
+  Draft ID.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/drafts/3fa9c21e'
 ```
 
-Returns `{ "diff": "<unified diff text>" }`.
+Returns the draft object, or `404` if the ID is unknown.
 
-## Merge or discard
+## Read a file in a draft
 
-```http
-POST /drafts/:id/merge
+Returns a file's content as it is in the draft, with an `ETag` header.
+
+**`GET /drafts/:id/file`**
+
+<ParamField path="id" type="string" required>
+  Draft ID.
+</ParamField>
+<ParamField query="path" type="string" required>
+  File path.
+</ParamField>
+
+```bash
+curl -i 'http://localhost:3333/api/kiwi/drafts/3fa9c21e/file?path=concepts/auth.md'
 ```
 
-Returns `{ "status": "merged" }`. Conflicts return `409`.
+The body is `text/markdown`. Returns `404` if the draft or file does not exist.
 
-```http
-DELETE /drafts/:id
+## Write a file in a draft
+
+Creates or replaces a file on the draft branch. The body is the full file content.
+
+**`PUT /drafts/:id/file`**
+
+<ParamField path="id" type="string" required>
+  Draft ID.
+</ParamField>
+<ParamField query="path" type="string" required>
+  File path.
+</ParamField>
+<ParamField header="X-Actor" type="string" default="draft-api">
+  Commit author on the draft branch.
+</ParamField>
+
+```bash
+curl -X PUT 'http://localhost:3333/api/kiwi/drafts/3fa9c21e/file?path=concepts/auth.md' \
+  -H "X-Actor: agent:planner" \
+  --data-binary @auth.md
 ```
 
-Returns **`204`** on success.
+```json Response
+{"path": "concepts/auth.md", "etag": "c3d4e5f6..."}
+```
 
-## Files inside a draft
+<Note>
+Draft writes do not check `If-Match`. The merge is a plain git fast-forward, so review the diff before you merge.
+</Note>
 
-| Method | Path | Notes |
-|--------|------|-------|
-| `GET` | `/drafts/:id/file?path=...` | Raw markdown body; **`ETag`** header set. |
-| `PUT` | `/drafts/:id/file?path=...` | Body is markdown; uses `X-Actor` (default `draft-api`). Returns `{ "path", "etag" }`. |
-| `DELETE` | `/drafts/:id/file?path=...` | Deletes file inside the draft branch. **`204`**. |
-| `GET` | `/drafts/:id/tree?path=` | Same tree shape as [`GET /tree`](/api/files); omit `path` for root. |
+## Delete a file in a draft
 
-## MCP parity
+Deletes a file on the draft branch.
 
-Use the `kiwi_draft_*` tools from [MCP](/concepts/mcp) for the same operations from Claude, Cursor, or other MCP clients.
+**`DELETE /drafts/:id/file`**
+
+<ParamField path="id" type="string" required>
+  Draft ID.
+</ParamField>
+<ParamField query="path" type="string" required>
+  File path.
+</ParamField>
+<ParamField header="X-Actor" type="string" default="draft-api">
+  Commit author.
+</ParamField>
+
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/drafts/3fa9c21e/file?path=concepts/old.md'
+```
+
+Returns `204` with no body.
+
+## Get a draft's tree
+
+Returns the draft's folder hierarchy, in the same shape as [`GET /tree`](/api/files#get-the-directory-tree).
+
+**`GET /drafts/:id/tree`**
+
+<ParamField path="id" type="string" required>
+  Draft ID.
+</ParamField>
+<ParamField query="path" type="string" default="/">
+  Folder to start from.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/drafts/3fa9c21e/tree'
+```
+
+## Diff a draft
+
+Returns everything the draft changed since it branched from main, as a unified diff.
+
+**`GET /drafts/:id/diff`**
+
+<ParamField path="id" type="string" required>
+  Draft ID.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/drafts/3fa9c21e/diff'
+```
+
+```json Response
+{"diff": "diff --git a/concepts/auth.md b/concepts/auth.md\n--- a/concepts/auth.md\n+++ b/concepts/auth.md\n@@ -1,3 +1,3 @@\n..."}
+```
+
+## Merge a draft
+
+Fast-forwards main to the draft branch, then removes the draft. Uncommitted files in the draft worktree are committed first.
+
+**`POST /drafts/:id/merge`**
+
+<ParamField path="id" type="string" required>
+  Draft ID.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/drafts/3fa9c21e/merge'
+```
+
+```json Response
+{"status": "merged"}
+```
+
+Returns `409` when main has moved since the draft was created, because only fast-forward merges are allowed. Recreate the draft from the new `HEAD`, or apply the changes to main directly.
+
+## Discard a draft
+
+Deletes the draft's branch and worktree. Main is unchanged.
+
+**`DELETE /drafts/:id`**
+
+<ParamField path="id" type="string" required>
+  Draft ID.
+</ParamField>
+
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/drafts/3fa9c21e'
+```
+
+Returns `204` with no body, or `404` if the ID is unknown.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Draft spaces" icon="code-branch" href="/concepts/draft-spaces">
+    When to stage changes in a draft.
+  </Card>
+  <Card title="MCP tools" icon="robot" href="/concepts/mcp">
+    The `kiwi_draft_*` tools do the same from an agent.
+  </Card>
+</CardGroup>

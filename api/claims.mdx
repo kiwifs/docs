@@ -1,55 +1,134 @@
 ---
 title: "Claims"
-description: "Claim, release, and list cooperative write leases on file paths."
+description: "Claim, release, and list cooperative leases on file paths."
 icon: "lock"
 ---
 
-Claims require a configured claim store. Otherwise endpoints return **`503`** with `"claims not enabled"`.
+A claim is a time-limited lease that tells other agents you are working on a path. Claims are cooperative: they don't block writes, but agents that check claims before working avoid doing the same task twice. Refactor plans also refuse to move claimed pages and keep claims attached to pages they move. See [Claims](/concepts/claims) for patterns.
 
-**`X-Actor` is mandatory** for claim and release.
-
-Base path: `http://localhost:3333/api/kiwi`.
+Claims are stored in `.kiwi/state/` and are on by default. If the claim store can't open, every endpoint returns `503` with `claims not enabled`.
 
 ## Claim a path
 
+Acquire a lease on an existing file, or extend a lease you already hold.
+
 ```http
-POST /claim
-Content-Type: application/json
+POST /api/kiwi/claim
 ```
+
+<ParamField header="X-Actor" type="string" required>
+  Who is claiming the path. Returns `400` if missing.
+</ParamField>
+<ParamField body="path" type="string" required>
+  File path. Returns `404` if the file does not exist.
+</ParamField>
+<ParamField body="lease_duration" type="string" default="30m">
+  Go duration such as `45m` or `2h`. Values under `1m` are raised to `1m`. Values over `24h` return `400`.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/claim' \
+  -H "Content-Type: application/json" \
+  -H "X-Actor: agent:deployer" \
+  -d '{"path": "runbooks/deploy.md", "lease_duration": "45m"}'
+```
+
+<ResponseField name="path" type="string">Claimed path.</ResponseField>
+<ResponseField name="claimed_by" type="string">Actor holding the lease.</ResponseField>
+<ResponseField name="claimed_at" type="string">When the lease started (RFC 3339, UTC).</ResponseField>
+<ResponseField name="expires_at" type="string">When the lease ends (RFC 3339, UTC).</ResponseField>
 
 ```json
 {
   "path": "runbooks/deploy.md",
-  "lease_duration": "45m"
+  "claimed_by": "agent:deployer",
+  "claimed_at": "2026-10-19T14:00:00Z",
+  "expires_at": "2026-10-19T14:45:00Z"
 }
 ```
 
-- `lease_duration` is optional (Go duration syntax). The server enforces **1m ≤ lease ≤ 24h** (default **30m**).
-- Returns **`409`** JSON `{ "error": "already claimed", "active_claim": { ... } }` when another actor holds the lease.
-
-## Release
-
-```http
-DELETE /claim
-Content-Type: application/json
-```
+If another actor holds an unexpired lease, the server returns `409` with that lease:
 
 ```json
-{ "path": "runbooks/deploy.md" }
+{
+  "error": "already claimed",
+  "active_claim": {
+    "path": "runbooks/deploy.md",
+    "claimed_by": "agent:other",
+    "claimed_at": "2026-10-19T13:50:00Z",
+    "expires_at": "2026-10-19T14:20:00Z"
+  }
+}
 ```
 
-Returns **`403`** if the caller is not the current holder.
+## Release a claim
+
+Release a lease you hold. The body goes on a `DELETE` request.
+
+```http
+DELETE /api/kiwi/claim
+```
+
+<ParamField header="X-Actor" type="string" required>
+  Must match the actor that holds the lease.
+</ParamField>
+<ParamField body="path" type="string" required>
+  Claimed path.
+</ParamField>
+
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/claim' \
+  -H "Content-Type: application/json" \
+  -H "X-Actor: agent:deployer" \
+  -d '{"path": "runbooks/deploy.md"}'
+```
+
+Returns `403` if the caller does not hold a claim on the path.
+
+```json
+{ "status": "released" }
+```
 
 ## List active claims
 
+Return every unexpired claim.
+
 ```http
-GET /claims
+GET /api/kiwi/claims
 ```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/claims'
+```
+
+<ResponseField name="claims" type="object[]">
+  Active claims, with the same fields as the [claim response](#claim-a-path).
+</ResponseField>
 
 ```json
-{ "claims": [/* active claim objects */] }
+{
+  "claims": [
+    {
+      "path": "runbooks/deploy.md",
+      "claimed_by": "agent:deployer",
+      "claimed_at": "2026-10-19T14:00:00Z",
+      "expires_at": "2026-10-19T14:45:00Z"
+    }
+  ]
+}
 ```
 
-## MCP parity
+## MCP equivalents
 
-`kiwi_claim`, `kiwi_release`, `kiwi_claims_list` — see [MCP](/concepts/mcp).
+`kiwi_claim`, `kiwi_release`, and `kiwi_claims_list`.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Claims concepts" icon="lock" href="/concepts/claims">
+    How agents coordinate with leases.
+  </Card>
+  <Card title="Workflows" icon="bars-progress" href="/api/workflows">
+    Move claimed tasks through workflow states.
+  </Card>
+</CardGroup>

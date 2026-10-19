@@ -1,0 +1,501 @@
+---
+title: "Refactor"
+description: "Move, merge, split, and bulk-edit pages in one reviewable commit without breaking wiki links."
+icon: "shuffle"
+---
+
+Refactoring restructures the knowledge base in one step. You describe the change in a **manifest** (moves, merges, splits, frontmatter edits, tag renames), KiwiFS builds a **plan** that shows every page that moves and every link it respells, and applying the plan writes everything as a single git commit. Every wiki link and markdown link that resolved before still resolves to the same page afterwards, and comments and personal state follow the pages they belong to. A commit can be reverted the same way.
+
+Use this instead of looping over [rename](/api/files#rename-a-file) calls: one plan, one review, one commit.
+
+<Steps>
+  <Step title="Plan">
+    Send the manifest to [`POST /refactor/plan`](#preview-a-plan). Nothing is written. Review the moves, link edits, `errors`, and `warnings`, and keep the `digest`.
+  </Step>
+  <Step title="Approve (agents only)">
+    If an agent's plan exceeds the workspace's size limits, a human reviews it in [`GET /refactor/pending`](#list-plans-waiting-for-approval) and [approves](#approve-a-plan-for-an-agent) it by digest.
+  </Step>
+  <Step title="Apply">
+    Send the same manifest and the digest to [`POST /refactor/apply`](#apply-a-plan). If any affected file changed since you reviewed, nothing is written and you get the fresh plan back.
+  </Step>
+  <Step title="Revert">
+    Pass the returned `commit` to [`POST /refactor/revert`](#revert-a-commit) to undo it as a new commit.
+  </Step>
+</Steps>
+
+## The manifest
+
+A manifest is YAML or JSON. Unknown keys are an error, so a typo can't silently drop part of a restructuring. It needs at least one of `moves`, `merges`, `edits`, `rename_tags`, `relinks`, or `split`.
+
+```yaml manifest.yaml
+moves:
+  - from: guides/old-name.md          # one file
+    to:   guides/new-name.md
+  - from: drafts/                     # a folder and everything in it
+    to:   archive/drafts/
+  - from: notes/*-meeting.md          # a glob into a folder (** spans folders)
+    to:   meetings/
+  - from_regex: ^journal/(\d{4})-(\d{2})-.*\.md$
+    to: journal/$1/$2/                # $1 or ${name} expand capture groups
+merges:
+  - from: faq/duplicate.md            # deleted; its links, comments, and state
+    into: faq/canonical.md            # move to the target
+delete_empty_dirs: true
+edits:
+  - select: {query: 'status = "draft"', glob: 'notes/**'}
+    set: {status: archived}
+    unset: [reviewer]
+    add_tags: [archived]
+    remove_tags: [wip]
+    replace: [{find: 'Acme Corp', with: 'Acme'}]
+rename_tags:
+  - {from: ml, to: machine-learning}
+```
+
+<AccordionGroup>
+  <Accordion title="moves">
+    Each entry has `from` (a file, a folder ending in `/`, or a glob) or `from_regex`, plus `to`. A `to` ending in `/` is a destination folder that keeps each file's name.
+  </Accordion>
+  <Accordion title="merges">
+    `from` is deleted and everything that pointed at it now points at `into`. The body of `into` is left as it is, so write the combined page first, then merge.
+  </Accordion>
+  <Accordion title="edits">
+    `select` picks pages by `paths`, `glob`, and/or `query` (a DQL `WHERE` expression). At least one criterion is required; use `glob: "**"` for everything. Then, in order: `when` (an expression that filters the selection), `set`, `compute` (keys set from expressions such as `slug(title)`), `unset`, `add_tags`, `remove_tags`, `replace` (`find`, `with`, optional `regex`), and `move_to` (a destination template such as `archive/{{year}}/{{slug}}.md`). `on_conflict` is `error` (default) or `suffix("-%d")`. `force` lets the edit change frontmatter keys owned by another field manager. Selection always sees paths as they were before the manifest.
+  </Accordion>
+  <Accordion title="rename_tags">
+    Renames a tag in frontmatter `tags` lists and inline `#tags`.
+  </Accordion>
+  <Accordion title="relinks">
+    Repairs references after a move made outside KiwiFS (a WebDAV or NFS rename, a shell `mv`). Same shape as `moves`. See [raw moves](#list-moves-that-left-references-behind).
+  </Accordion>
+  <Accordion title="split">
+    Breaks a page into one page per heading. Fields: `from`, `level` (default `2`), `into` (default: a folder named after the page), and `confirm`. A split stays plan-only until `confirm: true`.
+  </Accordion>
+  <Accordion title="delete_empty_dirs and now">
+    `delete_empty_dirs: true` removes folders the plan leaves empty. `now` pins the clock that `when`, `compute`, and `move_to` expressions see; pass back the plan's `now` to apply exactly what you reviewed.
+  </Accordion>
+</AccordionGroup>
+
+Workspace rules live in the `[refactor]` section of `.kiwi/config.toml`: `approval_files` and `approval_links` (agent plans above these sizes need approval; `0` means the defaults of 50 files and 200 links, `-1` turns the check off), `protect` (globs no plan may touch), and `scope` (the only folder plans may touch). Plans also refuse to move pages another actor has [claimed](/api/claims).
+
+## Preview a plan
+
+Build the plan for a manifest without writing anything.
+
+```http
+POST /api/kiwi/refactor/plan
+```
+
+<ParamField body="manifest" type="object" required>
+  The request body is the manifest itself, as YAML or JSON (1 MB limit).
+</ParamField>
+<ParamField query="diffs" type="boolean" default="false">
+  Add a `diffs` array with a unified diff for every written page.
+</ParamField>
+<ParamField query="format" type="string">
+  `workspace-edit` returns the plan as an LSP `WorkspaceEdit` instead, for editors.
+</ParamField>
+<ParamField header="X-Actor" type="string">
+  Who will apply the plan. Pages claimed by anyone else can't be moved.
+</ParamField>
+<ParamField header="X-Kiwi-Client" type="string" default="rest">
+  Names the calling tool in the plan and the commit trailers. Values starting with `mcp` are treated as agents for approval.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/refactor/plan' \
+  -H "Content-Type: application/yaml" \
+  -H "X-Actor: agent:librarian" \
+  --data-binary @manifest.yaml
+```
+
+Returns `400` if the manifest can't be parsed or is empty. A plan with problems still returns `200`; check `errors`. With `format=workspace-edit`, a plan with errors returns `422` with `error` and `plan`.
+
+<ResponseField name="digest" type="string">Identifies this exact plan. Pass it to apply.</ResponseField>
+<ResponseField name="moves" type="object[]">Every path that moves, as `from` and `to`.</ResponseField>
+<ResponseField name="merges" type="object[]">Every merged page, as `from` and `to`.</ResponseField>
+<ResponseField name="edits" type="object[]">
+  Pages whose links are rewritten.
+  <Expandable title="properties">
+    <ResponseField name="path" type="string">Where the page lives after the refactor.</ResponseField>
+    <ResponseField name="from" type="string">Previous path, when the page also moves.</ResponseField>
+    <ResponseField name="links" type="object[]">Rewritten references: `line`, `old`, `new` (path text only).</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="content_edits" type="object[]">Pages changed by `edits` or `rename_tags`: `path`, `from`, and a `changes` list.</ResponseField>
+<ResponseField name="comments" type="object[]">Comment files migrated, as `from` and `to`.</ResponseField>
+<ResponseField name="state" type="object[]">Personal-state files updated: `file`, `changes`, `conflicts`.</ResponseField>
+<ResponseField name="removed_dirs" type="string[]">Folders removed because they end up empty.</ResponseField>
+<ResponseField name="splits" type="object[]">Each split page (`from`) and the `pages` it becomes.</ResponseField>
+<ResponseField name="errors" type="string[]">Problems that block apply. A plan with errors can't be applied.</ResponseField>
+<ResponseField name="rejected" type="object[]">The subset of errors that concern one page (`path`, `error`). Drop those pages and plan again to proceed.</ResponseField>
+<ResponseField name="conflicts" type="object[]">
+  Destinations that can't be used, by `code`: `exists`, `many_to_one`, `case_or_normalization`, `forbidden_chars`, `too_long`, `trailing_dot_or_space`, `empty_name`, `dir_cycle`, `parent_is_file`, or `is_folder`. Each entry has `path`, `detail`, and optionally `from` and `with`.
+</ResponseField>
+<ResponseField name="plan_only" type="string[]">Why a valid plan can't be applied yet, such as an unconfirmed split.</ResponseField>
+<ResponseField name="warnings" type="string[]">Non-blocking issues worth reading before applying.</ResponseField>
+<ResponseField name="approval" type="object">For agent callers: `required` and `reason`.</ResponseField>
+<ResponseField name="integrity" type="object">
+  Link health after the plan: `unresolved` (links that already pointed nowhere), `orphaned` (pages that lose all inbound links), and `complete` (`false` when the plan didn't read every page).
+</ResponseField>
+<ResponseField name="now" type="string">The clock the manifest's expressions used, if any.</ResponseField>
+<ResponseField name="base" type="string">Git `HEAD` when the plan was built.</ResponseField>
+<ResponseField name="stats" type="object">Counts: `pages`, `links`, `rewritten`, `unresolved`.</ResponseField>
+
+```json
+{
+  "digest": "4f1c9a7e2b3d5f6a8c0e1d2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b",
+  "moves": [{ "from": "guides/old-name.md", "to": "guides/new-name.md" }],
+  "merges": [{ "from": "faq/duplicate.md", "to": "faq/canonical.md" }],
+  "edits": [
+    { "path": "index.md", "links": [{ "line": 12, "old": "guides/old-name", "new": "guides/new-name" }] }
+  ],
+  "integrity": { "unresolved": 0, "complete": true },
+  "base": "a1b2c3d",
+  "stats": { "pages": 214, "links": 1830, "rewritten": 7, "unresolved": 0 }
+}
+```
+
+## Apply a plan
+
+Rebuild the plan for a manifest and apply it as one commit.
+
+```http
+POST /api/kiwi/refactor/apply
+```
+
+<ParamField body="manifest" type="object" required>
+  The same manifest you planned, as JSON.
+</ParamField>
+<ParamField body="digest" type="string">
+  Digest of the plan you reviewed. If set and the workspace changed since, nothing is written. Strongly recommended.
+</ParamField>
+<ParamField body="approved" type="boolean">
+  For agent clients: the user confirmed this plan (for example through MCP elicitation).
+</ParamField>
+<ParamField header="X-Actor" type="string">
+  Commit author.
+</ParamField>
+<ParamField header="X-Kiwi-Client" type="string" default="rest">
+  Calling tool. Values starting with `mcp` must have approval for plans over the workspace's limits.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/refactor/apply' \
+  -H "Content-Type: application/json" \
+  -H "X-Actor: agent:librarian" \
+  -d '{
+    "manifest": {"moves": [{"from": "guides/old-name.md", "to": "guides/new-name.md"}]},
+    "digest": "4f1c9a7e2b3d5f6a8c0e1d2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b"
+  }'
+```
+
+| Status | Meaning |
+| --- | --- |
+| `400` | Unparseable body, unknown field, or empty manifest. |
+| `409` | The digest no longer matches (body has `error` and the fresh `plan`), or a file changed while applying. |
+| `422` | The plan has errors. Body has `error` and `plan`. |
+| `428` | An agent's plan needs a human's approval. Body has `error` and `plan`; the plan appears in [pending approvals](#list-plans-waiting-for-approval). |
+
+<ResponseField name="applied" type="object">
+  What changed.
+  <Expandable title="properties">
+    <ResponseField name="written" type="integer">Pages written.</ResponseField>
+    <ResponseField name="deleted" type="integer">Pages deleted.</ResponseField>
+    <ResponseField name="side_files" type="integer">Comment and personal-state files updated.</ResponseField>
+    <ResponseField name="removed_dirs" type="integer">Empty folders removed.</ResponseField>
+    <ResponseField name="commit" type="string">The commit, when git versioning is on. Pass it to revert.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="plan" type="object">The plan that was applied.</ResponseField>
+
+```json
+{
+  "applied": { "written": 2, "deleted": 1, "side_files": 0, "removed_dirs": 0, "commit": "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d" },
+  "plan": { "digest": "4f1c9a7e...", "moves": [/* ... */] }
+}
+```
+
+## Revert a commit
+
+Undo a commit as a new commit. Every page the commit changed goes back to its previous bytes, and comment and personal-state files a restructuring rewrote go back too. It works on any commit, not only refactors.
+
+```http
+POST /api/kiwi/refactor/revert
+```
+
+<ParamField body="commit" type="string" required>
+  Commit ID to revert.
+</ParamField>
+<ParamField body="dry_run" type="boolean" default="false">
+  Return the revert plan without applying it.
+</ParamField>
+<ParamField body="digest" type="string">
+  Digest of the revert plan you reviewed with `dry_run`.
+</ParamField>
+<ParamField header="X-Actor" type="string">
+  Commit author.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/refactor/revert' \
+  -H "Content-Type: application/json" \
+  -d '{"commit": "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d", "dry_run": true}'
+```
+
+With `dry_run`, the response is the revert plan (same shape as [a plan](#preview-a-plan), with `reverts` set to the commit). Otherwise it is `applied` and `plan`, as for [apply](#apply-a-plan).
+
+Returns `400` for a missing or invalid commit ID, `409` if the digest no longer matches or a file changed while applying, `422` if any affected file changed since the commit (a revert never discards later work), and `501` when git versioning is off.
+
+## Approve a plan for an agent
+
+Record a human's approval of a plan so an agent can apply it once within the next hour, even though it exceeds the workspace's approval limits.
+
+```http
+POST /api/kiwi/refactor/approve
+```
+
+<ParamField body="manifest" type="object" required>
+  The manifest being approved.
+</ParamField>
+<ParamField body="digest" type="string" required>
+  Digest of the plan being approved.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/refactor/approve' \
+  -H "Content-Type: application/json" \
+  -d '{"manifest": {"moves": [{"from": "drafts/", "to": "archive/drafts/"}]}, "digest": "4f1c9a7e..."}'
+```
+
+The manifest is planned again. Returns `400` if either field is missing, and `409` with the fresh `plan` if the plan has errors or no longer produces that digest.
+
+```json
+{ "approved": "4f1c9a7e...", "expires_in": "1h" }
+```
+
+## List plans waiting for approval
+
+Return the plans agents tried to apply that exceed the workspace's approval limits.
+
+```http
+GET /api/kiwi/refactor/pending
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/refactor/pending'
+```
+
+<ResponseField name="pending" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="digest" type="string">Plan digest to approve.</ResponseField>
+    <ResponseField name="manifest" type="object">The manifest the agent sent.</ResponseField>
+    <ResponseField name="actor" type="string">Agent that tried to apply it.</ResponseField>
+    <ResponseField name="client" type="string">Calling tool.</ResponseField>
+    <ResponseField name="reason" type="string">Why approval is needed.</ResponseField>
+    <ResponseField name="at" type="string">When the agent tried (RFC 3339).</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{
+  "pending": [
+    {
+      "digest": "4f1c9a7e...",
+      "manifest": { "moves": [{ "from": "drafts/", "to": "archive/drafts/" }] },
+      "actor": "mcp-agent",
+      "client": "mcp/claude-code",
+      "reason": "120 files (limit 50)",
+      "at": "2026-10-19T14:02:11Z"
+    }
+  ]
+}
+```
+
+## Compute a manifest with a script
+
+Run a [Starlark](https://github.com/bazelbuild/starlark) (Python-like) program that returns a manifest, for selection logic too irregular for globs, DQL, and expressions. Nothing is written; apply the result with [apply](#apply-a-plan).
+
+```http
+POST /api/kiwi/refactor/script
+```
+
+<ParamField body="script" type="string" required>
+  Starlark source. Return the manifest from `main()` or set a global `manifest`. Available functions: `query(dql)`, `files(glob="**")`, `read(path)`, `frontmatter(path)`, `links(path)`, `slug(text)`, `json.encode`, `json.decode`, and `print` (captured).
+</ParamField>
+<ParamField header="X-Actor" type="string">
+  Who will apply the plan.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/refactor/script' \
+  -H "Content-Type: application/json" \
+  -d '{"script": "def main():\n    return {\"moves\": [{\"from\": p, \"to\": \"archive/\"} for p in query(\"status = \\\"done\\\"\")]}"}'
+```
+
+The script runs in a separate read-only process with no `while` loops or recursion, and is bounded by steps, memory (256 MB), and time (30 seconds). Returns `400` for an empty script and `422` if the script fails or returns an invalid manifest.
+
+<ResponseField name="manifest" type="object">The manifest the script returned.</ResponseField>
+<ResponseField name="output" type="string">What the script printed.</ResponseField>
+<ResponseField name="plan" type="object">The [plan](#preview-a-plan) for that manifest.</ResponseField>
+
+## Plan an editor's file renames
+
+Turn an LSP `WorkspaceEdit` (an editor's rename refactoring) into a manifest and plan it. Only the file renames are kept; text edits are ignored and recomputed by the planner.
+
+```http
+POST /api/kiwi/refactor/from-workspace-edit
+```
+
+<ParamField body="documentChanges" type="object[]">
+  LSP document changes. `rename` entries (`oldUri`, `newUri`) become moves.
+</ParamField>
+<ParamField body="changes" type="object">
+  LSP text edits by URI. Ignored.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/refactor/from-workspace-edit' \
+  -H "Content-Type: application/json" \
+  -d '{"documentChanges": [{"kind": "rename", "oldUri": "file:///srv/kb/guides/a.md", "newUri": "file:///srv/kb/guides/b.md"}]}'
+```
+
+Returns `400` if a rename points outside the knowledge base or the edit renames no files.
+
+<ResponseField name="manifest" type="object">The manifest built from the renames.</ResponseField>
+<ResponseField name="plan" type="object">Its [plan](#preview-a-plan).</ResponseField>
+<ResponseField name="ignored" type="string[]">Parts of the edit that were not used, and why.</ResponseField>
+
+## List moves that left references behind
+
+Return moves made without relinking (WebDAV or NFS renames, renames with link updates turned off, or files moved on disk while the server was watching) whose old paths are still referenced, plus a `relinks` manifest that repairs them. Plan and apply that manifest like any other.
+
+```http
+GET /api/kiwi/refactor/raw-moves
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/refactor/raw-moves'
+```
+
+<ResponseField name="moves" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="from" type="string">Old path.</ResponseField>
+    <ResponseField name="to" type="string">New path.</ResponseField>
+    <ResponseField name="actor" type="string">Who moved it.</ResponseField>
+    <ResponseField name="at" type="string">When (RFC 3339).</ResponseField>
+    <ResponseField name="via" type="string">`rename` (a protocol rename), `links-kept` (a move that asked not to relink), or `watcher` (seen on disk).</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="manifest" type="object">A manifest with `relinks` that repairs the references.</ResponseField>
+
+```json
+{
+  "moves": [
+    { "from": "notes/standup.md", "to": "meetings/standup.md", "actor": "webdav", "at": "2026-10-18T16:40:00Z", "via": "rename" }
+  ],
+  "manifest": { "relinks": [{ "from": "notes/standup.md", "to": "meetings/standup.md" }] }
+}
+```
+
+## List broken links
+
+Return every wiki link that doesn't resolve to an existing file, with the best fuzzy match when there is one.
+
+```http
+GET /api/kiwi/links/broken
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/links/broken'
+```
+
+<ResponseField name="broken" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="source" type="string">Page containing the link.</ResponseField>
+    <ResponseField name="target" type="string">Link target as written.</ResponseField>
+    <ResponseField name="match" type="string">Closest existing file, if any.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="count" type="integer">Number of broken links.</ResponseField>
+
+```json
+{
+  "broken": [
+    { "source": "index.md", "target": "guides/setup", "match": "guides/getting-started/setup.md" }
+  ],
+  "count": 1
+}
+```
+
+## List orphan pages
+
+Return pages that no other page links to.
+
+```http
+GET /api/kiwi/links/orphans
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/links/orphans'
+```
+
+```json
+{ "orphans": [{ "path": "notes/scratch.md" }], "count": 1 }
+```
+
+## Fix broken links
+
+Rewrite broken wiki links to their best fuzzy match: an exact path, then a path-suffix match (ignoring numeric folder prefixes such as `06-`), then a matching file name. Links with no match are left alone.
+
+```http
+POST /api/kiwi/refactor/fix-broken
+```
+
+<ParamField body="dry_run" type="boolean" default="false">
+  Report the fixes without writing. Also accepted as a `dry_run=true` query parameter when there is no JSON body.
+</ParamField>
+<ParamField header="X-Actor" type="string">
+  Commit author.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/refactor/fix-broken' \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run": true}'
+```
+
+Unlike [apply](#apply-a-plan), each fixed page is written as its own commit.
+
+<ResponseField name="fixes" type="object[]">Each fix: `source`, `old_target`, `new_target`.</ResponseField>
+<ResponseField name="count" type="integer">Number of fixes.</ResponseField>
+<ResponseField name="dry_run" type="boolean">Whether anything was written.</ResponseField>
+
+```json
+{
+  "fixes": [{ "source": "index.md", "old_target": "guides/setup", "new_target": "guides/getting-started/setup.md" }],
+  "count": 1,
+  "dry_run": true
+}
+```
+
+## MCP equivalents
+
+`kiwi_refactor_plan`, `kiwi_refactor_apply`, `kiwi_refactor_script`, and `kiwi_refactor_revert` cover plan, apply, script, and revert. Over MCP, plans larger than the workspace's limits ask the user to confirm, or wait for approval in the web UI if the client can't ask. Approve, pending, raw moves, workspace edits, and the link-health endpoints are REST-only.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Wiki links" icon="link" href="/concepts/wiki-links">
+    How links resolve, and why moves keep them working.
+  </Card>
+  <Card title="Files" icon="file" href="/api/files">
+    Single-file rename and directory rename.
+  </Card>
+  <Card title="Claims" icon="lock" href="/api/claims">
+    Claimed pages can't be moved by other actors.
+  </Card>
+  <Card title="MCP tools" icon="plug" href="/concepts/mcp">
+    The refactor tools agents use.
+  </Card>
+</CardGroup>

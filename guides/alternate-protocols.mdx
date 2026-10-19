@@ -1,25 +1,29 @@
 ---
 title: "Alternate protocols"
-description: "Mount and integrate KiwiFS over NFS, S3, WebDAV, and FUSE alongside REST and MCP."
+description: "Mount or sync a KiwiFS knowledge base over NFS, S3, WebDAV, and FUSE alongside REST and MCP."
 icon: "network-wired"
 ---
 
-Every access path flows through the **same storage layer**: atomic write → git commit → search index → SSE broadcast.
+Besides REST and MCP, KiwiFS can expose your knowledge base over NFS, an S3-compatible API, WebDAV, and a FUSE client. Use them when a tool already speaks a filesystem or object-store protocol: an agent sandbox that runs `grep`, a backup job that runs `aws s3 sync`, or a desktop that maps a network drive.
+
+Every write, whatever the protocol, goes through the same pipeline: atomic write, git commit, search index update, and SSE broadcast.
 
 ## Quick comparison
 
-| Protocol | Port | Best for |
-| --- | --- | --- |
-| REST | `3333` | Web UI, curl, CI scripts |
-| MCP | stdio or `8181` | Claude, Cursor, custom agents |
-| NFS | `2049` | Docker / Kubernetes mounts |
-| S3 | `3334` | Backup tools, ETL, S3-compatible clients |
-| WebDAV | `3335` | Desktop sync, mapped drives |
-| FUSE | — | Developer workstation remote mount |
+| Protocol | Default port | Enable with | Best for |
+| --- | --- | --- | --- |
+| REST + web UI | `3333` | always on | Web UI, curl, CI scripts |
+| MCP | stdio, or `8181` with `--http` | `kiwifs mcp` | Claude, Cursor, custom agents |
+| NFS (v3) | `2049` | `kiwifs serve --nfs` | Docker and Kubernetes mounts |
+| S3-compatible | `3334` | `kiwifs serve --s3` | Backups, ETL, S3 clients |
+| WebDAV | `3335` | `kiwifs serve --webdav` | Finder, Explorer, desktop sync |
+| FUSE | — | `kiwifs mount` (client) | Mounting a remote server on a workstation |
 
-## Enable on serve
+## Enable protocols
 
-```bash
+The NFS, S3, and WebDAV servers start with `kiwifs serve` and listen on `--host` (default `0.0.0.0`):
+
+```bash Terminal
 kiwifs serve --root ./knowledge \
   --nfs --nfs-allow 10.0.0.0/8 \
   --s3 \
@@ -27,65 +31,134 @@ kiwifs serve --root ./knowledge \
 ```
 
 <AccordionGroup>
-  <Accordion title="NFS" icon="hard-drive">
-    Mount from Linux or Kubernetes:
-
-    ```bash
-    sudo mount -t nfs -o vers=3 localhost:/ /mnt/kiwi
-    ```
-
-    Agents use normal shell tools:
-
-    ```bash
-    cat /mnt/kiwi/pages/auth.md
-    grep -r "timeout" /mnt/kiwi/
-    echo "# Note" >> /mnt/kiwi/episodes/session.md
-    ```
-
-    NFS supports symlinks, open-then-delete semantics, and advisory locks. Internal dirs (`.git`, `.kiwi`) are hidden from listings.
-
-    <Note>
-    Restrict access with `--nfs-allow <CIDR>` in production.
-    </Note>
-  </Accordion>
-
-  <Accordion title="S3-compatible API" icon="bucket">
-    Point any S3 client at `http://localhost:3334`:
-
-    ```bash
-    aws s3 sync s3://knowledge/ /backup/ --endpoint-url http://localhost:3334
-    ```
-
-    Useful for `aws s3 sync` backups or S3-compatible ETL pipelines.
-  </Accordion>
-
-  <Accordion title="WebDAV" icon="desktop">
-    Connect from macOS **Finder → Connect to Server** or Windows mapped drive:
-
-    ```
-    http://localhost:3335/
-    ```
-
-    WebDAV uses buffered writes with spill-to-disk for large uploads.
-  </Accordion>
-
-  <Accordion title="FUSE remote mount" icon="folder-open">
-    Mount a **remote** KiwiFS as a local folder:
-
-    ```bash
-    kiwifs mount --remote http://host:3333 --mountpoint ~/kiwi-mount
-    ```
-
-    Optional auth:
-
-    ```bash
-    export KIWIFS_API_KEY=my-secret
-    kiwifs mount --remote http://host:3333 --mountpoint ~/kiwi-mount
-    ```
-
-    FUSE reports sub-second mtime and supports symlinks. **mmap** is not available (HTTP-backed I/O).
+  <Accordion title="Protocol flags">
+    | Flag | Default | Description |
+    | --- | --- | --- |
+    | `--nfs` | `false` | Start the userspace NFSv3 server |
+    | `--nfs-port` | `2049` | NFS listen port |
+    | `--nfs-allow` | localhost only | Comma-separated IPs or CIDRs allowed to mount |
+    | `--s3` | `false` | Start the S3-compatible API |
+    | `--s3-port` | `3334` | S3 listen port |
+    | `--webdav` | `false` | Start the WebDAV server |
+    | `--webdav-port` | `3335` | WebDAV listen port |
   </Accordion>
 </AccordionGroup>
+
+`GET /readyz` reports whether each enabled protocol is accepting connections, and returns `503` if one isn't.
+
+## NFS
+
+KiwiFS runs a userspace NFSv3 server. Without `--nfs-allow`, only loopback clients (`127.0.0.0/8` and `::1`) can mount. There is no portmapper, so pass the port explicitly:
+
+<CodeGroup>
+```bash Linux
+sudo mkdir -p /mnt/kiwi
+sudo mount -t nfs -o vers=3,tcp,port=2049,mountport=2049,nolock localhost:/ /mnt/kiwi
+```
+
+```bash macOS
+sudo mkdir -p /private/tmp/kiwi
+sudo mount -t nfs -o vers=3,tcp,port=2049,mountport=2049,nolocks localhost:/ /private/tmp/kiwi
+```
+
+```yaml Kubernetes PersistentVolume
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: kiwi-knowledge
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes: [ReadWriteMany]
+  mountOptions: [vers=3, tcp, port=2049, mountport=2049, nolock]
+  nfs:
+    server: kiwifs.internal
+    path: /
+```
+</CodeGroup>
+
+Agents then use ordinary shell tools:
+
+```bash Terminal
+cat /mnt/kiwi/pages/auth.md
+grep -r "timeout" /mnt/kiwi/
+echo "- 2026-10-19: rotated keys" >> /mnt/kiwi/log.md
+```
+
+NFS supports symlinks, open-then-delete, and file handles that stay valid across server restarts. `.git` and `.kiwi` are hidden from listings.
+
+<Warning>
+NFS has no authentication. Access is controlled only by `--nfs-allow`, so allow the narrowest network range you can.
+</Warning>
+
+## S3-compatible API
+
+The whole knowledge base is one bucket named `knowledge`. With multiple spaces, each space is its own bucket. Object keys are file paths.
+
+```bash Terminal
+export AWS_ACCESS_KEY_ID=kiwi AWS_SECRET_ACCESS_KEY=kiwi AWS_DEFAULT_REGION=us-east-1
+
+aws s3 ls s3://knowledge/ --recursive --endpoint-url http://localhost:3334
+aws s3 sync s3://knowledge/ ./backup/ --endpoint-url http://localhost:3334
+aws s3 cp notes.md s3://knowledge/pages/notes.md --endpoint-url http://localhost:3334
+```
+
+The S3 server doesn't check AWS signatures, so any access key works. It supports `ListObjectsV2` with delimiters and pagination, which `aws s3 sync`, boto3, and rclone rely on.
+
+## WebDAV
+
+Connect a desktop client to `http://<host>:3335/`:
+
+- **macOS:** in Finder, choose **Go → Connect to Server** and enter `http://localhost:3335/`.
+- **Windows:** map a network drive to `http://localhost:3335/`.
+- **Linux:** use `davfs2`, or open the URL in your file manager.
+
+WebDAV supports `MOVE`, `COPY`, `MKCOL`, and `DELETE`. Large uploads are buffered to disk before they're committed.
+
+## FUSE remote mount
+
+`kiwifs mount` mounts a **remote** KiwiFS server as a local folder over HTTP. The mount point is a positional argument:
+
+```bash Terminal
+kiwifs mount --remote http://host:3333 ~/kiwi
+```
+
+<AccordionGroup>
+  <Accordion title="Mount flags">
+    | Flag | Env fallback | Description |
+    | --- | --- | --- |
+    | `--remote` | — | Server URL (required) |
+    | `--bearer` | `KIWIFS_BEARER` | Sends `Authorization: Bearer <token>`. Use this with KiwiFS API keys. |
+    | `--api-key` | `KIWIFS_API_KEY` | Sends `X-API-Key: <key>`, for proxies that expect that header |
+    | `--basic-user`, `--basic-pass` | `KIWIFS_BASIC_PASS` | HTTP Basic auth, for proxies |
+    | `--space` | — | Mount a non-default space |
+  </Accordion>
+</AccordionGroup>
+
+```bash Terminal
+export KIWIFS_BEARER=kiwi_rw_...
+kiwifs mount --remote https://wiki.example.com --space acme ~/acme-wiki
+```
+
+The mount stays in the foreground until you unmount it. FUSE reports sub-second mtimes, supports `O_APPEND`, symlinks, and directory renames, but not kernel `mmap`.
+
+<Note>
+FUSE needs [macFUSE](https://osxfuse.github.io/) on macOS or `fuse3` on Linux. `kiwifs mount` isn't available on Windows; use WebDAV or REST instead.
+</Note>
+
+## Authentication
+
+| Protocol | How it authenticates |
+| --- | --- |
+| REST, MCP over HTTP | Every [auth mode](/guides/auth-tokens) |
+| S3 | `Authorization: Bearer <api_key>` in `apikey` mode |
+| WebDAV | Bearer, or Basic auth with any username and the API key as password, in `apikey` mode |
+| NFS | None. IP allowlist only |
+| FUSE | Uses the remote server's REST auth |
+
+<Warning>
+S3 and WebDAV check only the global `[auth] api_key`. With `perspace` or `oidc` auth, or with no auth, they accept every request. Most S3 clients can't send a bearer header, so in practice keep S3 and WebDAV on a private network or behind a firewall in production.
+</Warning>
 
 ## POSIX semantics
 
@@ -93,29 +166,25 @@ kiwifs serve --root ./knowledge \
 | --- | --- |
 | Local knowledge root | Full |
 | NFS mount | Near-full |
-| FUSE mount | Near-full (no mmap) |
+| FUSE mount | Near-full (no `mmap`) |
 | WebDAV | Partial |
-| REST / S3 / MCP | HTTP or tool semantics |
+| REST, S3, MCP | HTTP or tool semantics |
 
-See [POSIX guide](/guides/posix) for the full matrix.
+See [POSIX and filesystem semantics](/guides/posix) for the full matrix.
 
-<Warning>
-Run alternate protocol ports behind a firewall in production. NFS, S3, and WebDAV endpoints are sensitive network surfaces.
-</Warning>
-
-## Related documentation
+## Related
 
 <CardGroup cols={2}>
   <Card title="Agent interface" icon="robot" href="/concepts/agent-interface">
-    Protocol overview.
+    How agents reach KiwiFS.
   </Card>
-  <Card title="CLI serve flags" icon="terminal" href="/cli/commands">
-    Full `kiwifs serve` reference.
+  <Card title="CLI commands" icon="terminal" href="/cli/commands">
+    Full `kiwifs serve` and `kiwifs mount` reference.
   </Card>
-  <Card title="POSIX" icon="file-code" href="/guides/posix">
-    Compliance details.
+  <Card title="POSIX semantics" icon="file-code" href="/guides/posix">
+    What works on each mount.
   </Card>
-  <Card title="Real-time events" icon="bolt" href="/concepts/real-time-events">
-    SSE broadcast.
+  <Card title="Authentication" icon="key" href="/guides/auth-tokens">
+    API keys, scopes, and OIDC.
   </Card>
 </CardGroup>

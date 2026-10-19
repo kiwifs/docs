@@ -1,80 +1,187 @@
 ---
-title: "Browse, preview, and saved connections"
-description: "Discover tables and collections, preview import rows, and re-run imports without storing credentials on disk."
+title: "Browse, preview, and sync imports"
+sidebarTitle: "Preview and sync"
+description: "List tables, preview pages before writing them, save connections, schedule auto-sync, and ingest documents."
 icon: "link"
 ---
 
-Beyond a one-shot `POST /api/kiwi/import`, KiwiFS supports a small **import pipeline** for interactive tools and agents.
+Beyond a one-shot `POST /api/kiwi/import`, the REST API lets tools and agents explore a source first, preview the exact pages an import would write, and keep a source in sync. The web UI import wizard in the **Data sources** panel is built on these endpoints.
 
-## Browse metadata
-
-`POST /api/kiwi/import/browse` lists **tables or collections** for a connected source. Supported `from` values today include `postgres`, `mysql`, `mongodb`, and `firestore`. The body mirrors connection fields (`dsn`, `uri`, `database`, `project`, credentials, and so on) documented in [Import and export](/api/import-export).
-
-Response shape:
-
-```json
-{ "tables": [{ "name": "users" }, { "name": "orders" }] }
-```
-
-## Preview rows
-
-`POST /api/kiwi/import/preview` streams a few records through the same importer stack and returns **path**, **frontmatter**, and a short **body_preview** for each — without writing pages. Optional `limit` (capped) controls sample size.
-
-## Saved connections
-
-When a connection store is enabled, the server can persist **metadata only** (no secrets):
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/api/kiwi/import/connections` | List saved connections. |
-| `POST` | `/api/kiwi/import/connections` | Save or update metadata. |
-| `DELETE` | `/api/kiwi/import/connections/:id` | Remove a saved connection. |
-| `POST` | `/api/kiwi/import/connections/:id/run` | Run import again; **credentials must be supplied in the body** for each run. |
-| `POST` | `/api/kiwi/import/connections/:id/sync` | Enable, pause, or change auto-sync interval. |
-
-See [Import and export](/api/import-export#import-browse) for the same endpoints with request detail.
-
-## Auto-sync
-
-Sources that change over time support periodic re-import: `postgres`, `mysql`, `mongodb`, `firestore`, `notion`, `airtable`, and Airbyte `firebase-rtdb`.
+A typical flow:
 
 <Steps>
-  <Step title="Save a connection">
-    Create a saved connection from the **Data sources** panel in the web UI or via `POST /import/connections`.
+  <Step title="Browse">
+    List the tables or collections in the source.
   </Step>
-  <Step title="Enable sync">
-    Toggle auto-sync in the connection detail view, or call `POST /import/connections/:id/sync` with `{ "enabled": true, "interval": "1h" }`. Valid intervals include `5m`, `1h`, `6h`, and `24h`.
+  <Step title="Infer fields">
+    Sample records and get suggested field names and types.
   </Step>
-  <Step title="Monitor status">
-    Check `GET /api/kiwi/import/sync/status` or the connection badge in the web UI for `idle`, `running`, or `error` states.
+  <Step title="Preview">
+    See the paths and frontmatter for a few records without writing anything.
+  </Step>
+  <Step title="Import">
+    Run `POST /api/kiwi/import`. Live sources are saved as connections and auto-synced.
   </Step>
 </Steps>
 
-### Full-sync archival
+## Browse tables and collections
 
-When auto-sync runs, KiwiFS performs a **full sync**: pages imported from the source in previous runs that no longer appear in the latest import are tombstoned with an `_archived_at` frontmatter field rather than deleted. Re-importing a row clears the archive marker.
+`POST /api/kiwi/import/browse` lists the tables or collections in a `postgres`, `mysql`, `mongodb`, or `firestore` source.
 
-The import response includes an `archived` count when tombstoning occurs:
+```bash Terminal
+curl -X POST http://localhost:3333/api/kiwi/import/browse \
+  -H "Content-Type: application/json" \
+  -d '{"from": "postgres", "dsn": "postgres://user:pass@db:5432/mydb"}'
+```
 
-```json
+```json Response
+{ "tables": [{ "name": "users", "estimated_count": 1200 }, { "name": "orders" }] }
+```
+
+| Source | Required fields |
+|--------|-----------------|
+| `postgres`, `mysql` | `dsn` |
+| `mongodb` | `uri`, `database` |
+| `firestore` | `project`, plus optional `credentials` (service account JSON) |
+
+## Preview pages
+
+`POST /api/kiwi/import/preview` reads a few records and returns the path, frontmatter, and the start of the body for each one, without writing pages. It takes the same body as `POST /api/kiwi/import`, including `path` for `markdown` and `obsidian` and `query` for SQL sources.
+
+```bash Terminal
+curl -X POST http://localhost:3333/api/kiwi/import/preview \
+  -H "Content-Type: application/json" \
+  -d '{"from": "obsidian", "path": "/srv/vaults/research", "limit": 3}'
+```
+
+```json Response
+{
+  "records": [
+    {
+      "path": "research/ideas/graph-search.md",
+      "frontmatter": { "tags": ["search"], "_source": "research" },
+      "body_preview": "# Graph search\n\nNotes on ..."
+    }
+  ]
+}
+```
+
+`limit` defaults to `5` and is capped at `20`.
+
+## Infer fields
+
+`POST /api/kiwi/import/infer-fields` samples up to 100 records and suggests a type for each field. It takes the same body as preview.
+
+```json Response
+{
+  "fields": [
+    { "source": "email", "target": "email", "type": "string" },
+    { "source": "signup_date", "target": "signup_date", "type": "date" }
+  ]
+}
+```
+
+Send the edited list back as `field_mappings` on preview or import to rename, retype, or skip fields. Each mapping has `source`, `target`, `type` (`string`, `number`, `boolean`, or `date`), and `skip`. When you send any mappings, fields you leave out are dropped.
+
+## Saved connections
+
+KiwiFS saves connection metadata in `.kiwi/state/imports.json` so you can re-run an import or keep it in sync. A successful `POST /api/kiwi/import` saves or updates a connection automatically, matched by source and prefix.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/kiwi/import/connections` | List saved connections |
+| `POST` | `/api/kiwi/import/connections` | Save or update a connection |
+| `DELETE` | `/api/kiwi/import/connections/:id` | Remove a connection |
+| `POST` | `/api/kiwi/import/connections/:id/run` | Run the import again |
+| `POST` | `/api/kiwi/import/connections/:id/sync` | Turn auto-sync on or off, or change its interval |
+| `GET` | `/api/kiwi/import/sync/status` | List connections with auto-sync on |
+
+Re-running a connection takes the secrets again in the body, because KiwiFS never stores the `credentials` or `api_key` fields:
+
+```bash Terminal
+curl -X POST http://localhost:3333/api/kiwi/import/connections/CONNECTION_ID/run \
+  -H "Content-Type: application/json" \
+  -d '{"api_key": "ntn_..."}'
+```
+
+<Warning>
+The `dsn` and `uri` fields are saved as you send them. If a connection string contains a password, that password is written to `.kiwi/state/imports.json`. Keep that directory out of version control, as it is by default.
+</Warning>
+
+## Auto-sync
+
+Live sources can re-import on a schedule: `postgres`, `mysql`, `mongodb`, `firestore`, `notion`, `airtable`, and the Airbyte source `firebase-rtdb`.
+
+When you import one of these sources over REST, KiwiFS saves the connection with auto-sync on and an interval of `1h`. A background scheduler checks for due connections every 30 seconds.
+
+```bash Terminal
+curl -X POST http://localhost:3333/api/kiwi/import/connections/CONNECTION_ID/sync \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true, "interval": "6h"}'
+```
+
+`interval` is a Go duration such as `5m`, `1h`, or `24h`. Send `{"enabled": false}` to pause. Each connection reports a `sync_status` of `idle`, `running`, or `error`, with details in `sync_error`.
+
+Scheduled runs don't receive request secrets. They work when the connection string carries its own credentials, or when the server has them from its environment, such as `NOTION_API_KEY`, `AIRTABLE_API_KEY`, or Google Application Default Credentials.
+
+### Archived records
+
+Scheduled syncs and REST imports of live sources without a `limit` run as a full sync. Pages from the same source that no longer appear in the latest run get an `_archived_at` timestamp in their frontmatter instead of being deleted. If the record comes back, the next import rewrites the page without the marker.
+
+```json Response
 { "imported": 12, "skipped": 40, "archived": 3, "errors": [] }
 ```
 
-<Info>
-Full-sync archival applies to syncable live sources without a row `limit`. One-shot CLI imports with `--limit` do not tombstone missing pages.
-</Info>
+CLI and MCP imports never archive pages.
 
-## File ingestion
+## Ingest documents
 
-`POST /api/kiwi/ingest` converts supported office and document formats into markdown pages via the MarkItDown pipeline. See [Import and export](/api/import-export#ingest-from-files).
+`POST /api/kiwi/ingest` converts a PDF, Word, PowerPoint, Excel, HTML, EPUB, or image file into markdown pages with [MarkItDown](https://github.com/microsoft/markitdown). Use it for documents. Use `import` for structured records.
 
-## Related documentation
+```bash Terminal
+curl -X POST http://localhost:3333/api/kiwi/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "file": "/srv/inbox/annual-report.pdf",
+    "split_mode": "sections",
+    "prefix": "reports/annual-2026",
+    "extract_keywords": true
+  }'
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `file` | | Path on the server (required) |
+| `split_mode` | `single` | `single` writes one page. `sections` writes one page per top-level heading. |
+| `prefix` | From file name | Output folder |
+| `extract_keywords` | `false` | Add TF-IDF keywords to frontmatter |
+| `max_keywords` | `10` | Keywords per section |
+| `convert_crossrefs` | `false` | Turn "See Section 2.1" references into wiki links |
+| `actor` | | Name recorded in the commit |
+
+```json Response
+{
+  "source_file": "/srv/inbox/annual-report.pdf",
+  "format": "pdf",
+  "total_sections": 6,
+  "output_files": ["reports/annual-2026/overview.md", "..."],
+  "top_keywords": ["revenue", "growth"]
+}
+```
+
+Agents can call the same pipeline with the `kiwi_ingest` MCP tool.
+
+<Note>
+Ingest runs the `markitdown` command, which isn't in the KiwiFS Docker image. Install it on the server with `pip install 'markitdown[all]'`.
+</Note>
+
+## Related
 
 <CardGroup cols={2}>
-  <Card title="Airbyte import" icon="rotate" href="/import/airbyte">
-    Docker and Cloud connectors.
+  <Card title="Import API" icon="arrows-rotate" href="/api/import-export">
+    Full request and response reference.
   </Card>
-  <Card title="Web UI" icon="window" href="/guides/web-ui">
-    **Data sources** panel and import wizard.
+  <Card title="Web UI" icon="window-maximize" href="/guides/web-ui">
+    The **Data sources** panel and import wizard.
   </Card>
 </CardGroup>

@@ -1,57 +1,86 @@
 ---
 title: "API overview"
-description: "Base URL, authentication, common headers, and error handling for the KiwiFS REST API."
+description: "Base URL, authentication, headers, concurrency, errors, and health endpoints for the KiwiFS REST API."
 icon: "terminal"
 ---
 
-The KiwiFS REST API gives you full read/write access to your markdown filesystem over HTTP. Every operation available in the web UI and MCP interface is also available as a REST endpoint.
+The KiwiFS REST API gives you read and write access to a markdown filesystem over HTTP. Everything the web UI does goes through these endpoints, and most MCP tools have a REST equivalent.
 
 ## Base URL
 
-```
+```text
 http://localhost:3333/api/kiwi
 ```
 
-All endpoints are prefixed with `/api/kiwi/`. In multi-space mode, endpoints include the space name:
+Every knowledge endpoint lives under `/api/kiwi/`. Health, metrics, OpenAPI, raw files, `llms.txt`, and MCP sit at the server root.
 
+### Selecting a space
+
+A server can host several spaces. Pick one in either of two ways:
+
+<CodeGroup>
+```bash Path segment
+curl 'http://localhost:3333/api/kiwi/engineering/file?path=concepts/auth.md'
 ```
-/api/kiwi/{space}/file?path=concepts/auth.md
+
+```bash X-Kiwi-Space header
+curl 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
+  -H "X-Kiwi-Space: engineering"
 ```
+</CodeGroup>
 
-You can also keep the path **`/api/kiwi/...`** (no `{space}` segment) and send the header **`X-Kiwi-Space: engineering`** so reverse proxies or the FUSE client can dispatch to a configured space without changing URL shapes.
-
-Space **administration** (`GET/POST/DELETE /api/spaces`) is documented in [Spaces API](/api/spaces). See [Multi-space](/concepts/multi-space).
+The header takes precedence over the path. An unknown name in `X-Kiwi-Space` returns `404` instead of falling back to another space. Requests with neither go to the primary space. Space administration (`/api/spaces`) is covered in [Spaces admin](/api/spaces).
 
 ## Authentication
 
-Configure the auth type in `.kiwi/config.toml` under `[auth] type`.
+Set the mode with `[auth] type` in `.kiwi/config.toml`. Every mode except `none` expects an `Authorization: Bearer <token>` header on `/api/kiwi/*` requests.
 
 <Tabs>
   <Tab title="none (default)">
-    No authentication required. Suitable for local development and trusted networks.
+    No credentials. Use this for local development and trusted networks.
 
     ```bash
     curl http://localhost:3333/api/kiwi/tree
     ```
   </Tab>
   <Tab title="apikey">
-    Pass a global API key via the `Authorization: Bearer` header.
+    One shared key from `auth.api_key`. Values like `${KIWI_API_KEY}` are expanded from the environment.
+
+    ```toml .kiwi/config.toml
+    [auth]
+    type = "apikey"
+    api_key = "${KIWI_API_KEY}"
+    ```
 
     ```bash
     curl http://localhost:3333/api/kiwi/tree \
-      -H "Authorization: Bearer kiwi_sk_abc123"
+      -H "Authorization: Bearer $KIWI_API_KEY"
     ```
   </Tab>
   <Tab title="perspace">
-    Each space has its own API key. Use the same header format as `apikey` mode.
+    A list of keys, each bound to an actor and optionally to a space, a scope, and a path prefix.
+
+    ```toml .kiwi/config.toml
+    [auth]
+    type = "perspace"
+
+    [[auth.api_keys]]
+    key = "${ENG_KEY}"
+    space = "engineering"
+    actor = "agent:eng-bot"
+    scope = "write"        # read | write | admin (default admin)
+    prefix = "runbooks/"   # optional path restriction
+    ```
 
     ```bash
     curl http://localhost:3333/api/kiwi/engineering/tree \
-      -H "Authorization: Bearer kiwi_sk_eng_xyz789"
+      -H "Authorization: Bearer $ENG_KEY"
     ```
+
+    A `read` key can only send `GET` and `HEAD`. A key with `space` or `prefix` gets `403` for any `?path=` (or `/bulk` file path) outside that scope. The key's `actor` replaces whatever `X-Actor` the client sends.
   </Tab>
   <Tab title="oidc">
-    OpenID Connect authentication. Pass a JWT Bearer token issued by your identity provider.
+    A JWT from your identity provider, verified against `auth.oidc.issuer` and `auth.oidc.client_id`. The token's `email` claim (or `sub`) becomes the actor.
 
     ```bash
     curl http://localhost:3333/api/kiwi/tree \
@@ -60,49 +89,115 @@ Configure the auth type in `.kiwi/config.toml` under `[auth] type`.
   </Tab>
 </Tabs>
 
-## Common headers
+Send `SIGHUP` to the server process to reload `[auth]` from disk without a restart. See [Auth tokens](/guides/auth-tokens) for key management.
+
+### What auth covers
+
+| Route | When auth is on |
+|---|---|
+| `/api/kiwi/*` | Requires a valid bearer token. |
+| `GET /api/kiwi/*` with `[space] visibility = "public"` | Open to anonymous reads. Writes still need a token. |
+| `GET /file`, `/peek`, `/section` with `visibility = "unlisted"` | Open when `?path=` is set. Listing, tree, and search still need a token. |
+| `/raw/*` | Needs a bearer token, a signed URL from [`GET /raw-sign`](/api/files#sign-a-raw-file-url), or a target that is already public. |
+| `/llms.txt`, `/llms-full.txt` | Stay reachable without a token, but only list pages marked public or published (unless the space is public). |
+| `/api/kiwi/public/*`, `/p/*` | Always anonymous. See [Publish](/api/publish). |
+| `/health`, `/healthz`, `/readyz`, `/metrics`, `/api/docs`, `/api/openapi.json` | Always anonymous. |
+| `/api/spaces`, `/api/init-templates` | Not checked by KiwiFS. Protect them at your proxy. |
+
+<Warning>
+`/mcp` only checks credentials in `apikey` mode, using the same key. With `perspace` or `oidc`, put `/mcp` behind your proxy's auth or disable it.
+</Warning>
+
+## Request headers
 
 | Header | Purpose | Example |
 |---|---|---|
-| `X-Actor` | Attribution for the git commit author | `agent:my-agent` |
-| `X-Provenance` | Lineage tracking for audit trails | `run:run-249` |
-| `If-Match` | Optimistic locking using ETag (git blob SHA) | `a1b2c3d4e5f6` |
-| `Content-Type` | Body format | `text/markdown` or `application/json` |
-| `X-Kiwi-Space` | Target space when using the shared `/api/kiwi/...` prefix | `engineering` |
-| `X-Space` | Recorded on audit log entries when present | `engineering` |
+| `Authorization` | Bearer token for any auth mode other than `none` | `Bearer kiwi_sk_abc123` |
+| `X-Actor` | Commit author for writes. Ignored when `perspace` or `oidc` auth sets the actor. Defaults to `anonymous`. | `agent:my-agent` |
+| `X-Provenance` | Adds a `derived-from` entry (`type`, `id`, `date`, `actor`) to the page's frontmatter on `PUT /file` and `POST /bulk`. Format is `type:id`. | `run:run-249` |
+| `If-Match` | ETag the file must still have for the write to succeed | `"a1b2c3d4..."` |
+| `If-None-Match` / `If-Modified-Since` | Conditional read on `GET /file`; returns `304` when unchanged | `"a1b2c3d4..."` |
+| `X-Field-Manager` | Names the owner of frontmatter keys set by a [frontmatter patch](/api/files#patch-frontmatter) | `agent:triage` |
+| `X-Kiwi-Space` | Target space on the shared `/api/kiwi/...` prefix | `engineering` |
+| `X-Kiwi-Source` | Source label recorded with page-view analytics on `GET /file` | `slack-bot` |
 
 <Tip>
-Always set `X-Actor` on write operations. KiwiFS uses this value as the git commit author, making it easy to trace which agent or user made each change.
+Set `X-Actor` on every write when you use `none` or `apikey` auth. It becomes the git commit author, so you can trace which agent changed what with [blame](/api/versioning#blame).
 </Tip>
 
-## Error handling
+## Optimistic concurrency
 
-All errors return a JSON body with a single `error` field and a standard HTTP status code.
+Every file read returns an `ETag` header: the quoted git blob hash of the content. Writes return the new ETag in both the `ETag` header and the JSON `etag` field.
+
+Send that value back in `If-Match` to make a write conditional. If someone else changed the file since your read, the write is rejected with `409` and nothing is written.
+
+```bash
+# 1. Read and capture the ETag
+ETAG=$(curl -sI 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
+  | awk 'tolower($1)=="etag:" {print $2}' | tr -d '\r')
+
+# 2. Write only if the file is unchanged
+curl -X PUT 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
+  -H "X-Actor: agent:updater" \
+  -H "If-Match: $ETAG" \
+  --data-binary @auth.md
+```
+
+```json 409 Conflict
+{"error": "file modified since last read — re-fetch and retry"}
+```
+
+`If-Match` works on `PUT /file`, `PATCH /file`, and `PATCH /file/frontmatter`. For `POST /bulk`, set `if_match` per file; one mismatch fails the whole batch. Quotes around the ETag are optional.
+
+## Errors
+
+Errors return a JSON body with a single `error` field. Server-side failures (`5xx`) return a generic message; details go to the server log.
 
 ```json
-{"error": "file not found: concepts/missing.md"}
+{"error": "path is required"}
 ```
 
-| Status code | Meaning |
+| Status | Meaning |
 |---|---|
-| `400` | Bad request (malformed query, missing required field) |
-| `401` | Unauthorized (missing or invalid credentials) |
-| `404` | Resource not found |
-| `409` | Conflict (ETag mismatch on optimistic lock, or draft merge failure) |
-| `422` | Unprocessable entity (validation error) |
-| `501` | Not implemented (optional subsystem disabled, for example drafts) |
-| `503` | Service unavailable (claims, vector search, Dataview executor, and similar optional services) |
-| `500` | Internal server error |
+| `400` | Missing or invalid parameter, malformed JSON, or a path outside the knowledge root |
+| `401` | Missing or invalid credentials |
+| `403` | Token scope does not allow this method or path, or an invalid `/raw` signature |
+| `404` | File, version, draft, view, or space not found |
+| `409` | ETag mismatch, workflow transition denied, append-only file, frontmatter field owned by another manager, rename target exists, or draft merge conflict |
+| `413` | Body too large (32 MB per file write, 110 MB per request) |
+| `415` | Uploaded asset type is not in the allowlist |
+| `422` | Write failed schema validation |
+| `429` | Rate limit exceeded. Includes `Retry-After: 60`. |
+| `501` | Optional feature is off (for example drafts) or unsupported by the versioning backend (blame, word diff) |
+| `503` | Optional service unavailable (Dataview executor, vector search, claims, SSE subscriber cap) |
+| `500` | Internal error |
 
-## Health endpoints
+## Pagination
 
-Use these endpoints for liveness and readiness probes in container orchestrators.
+There is no global pagination envelope. Endpoints that return long lists take their own parameters:
+
+| Style | Endpoints | Parameters |
+|---|---|---|
+| Offset | [`GET /search`](/api/search), [`GET /query`](/api/metadata), [`GET /views/:name/execute`](/api/views#execute-a-view), [`GET /timeline`](/api/utilities) | `limit`, `offset`; DQL results include `total` and `has_more` |
+| Cursor | [`GET /changes`](/api/versioning#change-feed) | `since` (a commit hash) and `limit`; pass the returned `last_seq` as the next `since` |
+
+## Rate limiting
+
+Rate limiting is off unless you set `requests_per_minute` above zero:
+
+```toml .kiwi/config.toml
+[server.rate_limit]
+requests_per_minute = 300
+burst_size = 50   # default 50
+```
+
+KiwiFS then applies a token bucket per bearer token (hashed) or per client IP for anonymous requests. `/health`, `/healthz`, `/readyz`, and `/metrics` are never limited. Over the limit, requests get `429` with `Retry-After: 60`.
+
+## Health and metrics
+
+Use these unauthenticated endpoints for container probes and monitoring.
 
 <CodeGroup>
-```bash Health
-curl http://localhost:3333/health
-```
-
 ```bash Liveness
 curl http://localhost:3333/healthz
 ```
@@ -110,80 +205,61 @@ curl http://localhost:3333/healthz
 ```bash Readiness
 curl http://localhost:3333/readyz
 ```
+
+```bash Prometheus
+curl http://localhost:3333/metrics
+```
 </CodeGroup>
 
-All three return JSON. **`/health`** and **`/healthz`** always respond with **`200`** when the process is up:
+**`GET /health`** always returns `{"status": "ok"}`. **`GET /healthz`** adds uptime and version:
 
 ```json
-{"status": "ok"}
+{"status": "ok", "uptime": "3h12m5s", "version": "0.19.78"}
 ```
 
-**`/readyz`** checks storage and optional protocol health (NFS, S3, WebDAV). When storage is unreachable or an enabled protocol is unhealthy, it returns **`503`**:
+**`GET /readyz`** checks storage and any enabled protocol servers (NFS, S3, WebDAV). It returns `200` with `status: "ready"`, or `503` with `status` set to `storage-unreachable` or `protocol-unhealthy`.
 
-```json
+```json 503 Service Unavailable
 {
-  "status": "ok",
+  "status": "protocol-unhealthy",
   "protocols": {
-    "nfs": { "enabled": true, "healthy": true, "port": 2049 },
-    "s3": { "enabled": false },
-    "webdav": { "enabled": true, "healthy": false, "error": "listen tcp :3335: bind: address already in use" }
+    "nfs": {"enabled": true, "healthy": true, "port": 2049, "endpoint": "0.0.0.0:2049"},
+    "webdav": {"enabled": true, "port": 3335, "endpoint": "0.0.0.0:3335", "error": "dial tcp 0.0.0.0:3335: connect: connection refused"}
   }
 }
 ```
 
-Use `/readyz` for Kubernetes readiness probes when optional protocols are enabled.
-
-## Prometheus metrics
-
-```bash
-curl http://localhost:3333/metrics
-```
-
-Exposes Prometheus-formatted metrics including request counts, latencies, and active connections. Use this to wire KiwiFS into your monitoring stack (Grafana, Datadog, etc.).
-
-## Rate limiting
-
-When `[server.rate_limit]` in `.kiwi/config.toml` sets `requests_per_minute` greater than zero, KiwiFS applies a token-bucket limiter keyed by **Bearer token hash** (or client IP when anonymous). Health, readiness, and metrics routes skip the limiter.
-
-If `requests_per_minute` is **not** configured, no built-in HTTP rate limit is applied — use a reverse proxy (nginx, Caddy, Envoy) for strict quotas or geographic rules.
+**`GET /metrics`** returns Prometheus text with `kiwi_build_info`, `kiwi_uptime_seconds`, `kiwi_sse_subscribers`, and `kiwi_janitor_issues` (after the first janitor scan). It does not export per-request counters; collect those at your proxy.
 
 ## Machine-readable references
 
-KiwiFS provides machine-readable documentation for agents and integrations:
-
-| Resource | URL |
+| Resource | Where |
 |---|---|
-| **llms.txt** | [docs.kiwifs.com/llms.txt](https://docs.kiwifs.com/llms.txt) |
-| **llms-full.txt** | [docs.kiwifs.com/llms-full.txt](https://docs.kiwifs.com/llms-full.txt) |
-| **OpenAPI spec** | `GET /api/openapi.json` on any KiwiFS instance |
-| **Swagger UI** | `GET /api/docs` on any KiwiFS instance |
-
-<Tip>
-Point your agent at `llms-full.txt` for a single-file reference of every REST endpoint, MCP tool, and CLI command. The OpenAPI spec at `/api/openapi.json` is machine-parseable for code generation.
-</Tip>
+| OpenAPI spec | `GET /api/openapi.json` on any KiwiFS server |
+| Swagger UI | `GET /api/docs` on any KiwiFS server |
+| Workspace `llms.txt` | `GET /llms.txt`: every page, grouped by folder, with links and summaries |
+| Workspace `llms-full.txt` | `GET /llms-full.txt`: every page's markdown concatenated, capped at 5 MiB with a truncation notice |
+| These docs | [docs.kiwifs.com/llms.txt](https://docs.kiwifs.com/llms.txt) and [llms-full.txt](https://docs.kiwifs.com/llms-full.txt) |
 
 ## Next steps
 
 <CardGroup cols={2}>
-  <Card title="File operations" icon="file" href="/api/files">
-    Read, write, and delete files.
+  <Card title="Files" icon="file" href="/api/files">
+    Read, write, rename, and upload.
   </Card>
   <Card title="Search" icon="magnifying-glass" href="/api/search">
-    Full-text and vector search.
+    Full-text, hybrid, and semantic search.
   </Card>
   <Card title="Versioning" icon="code-branch" href="/api/versioning">
-    Git history, diff, and blame.
+    History, diff, blame, and the change feed.
   </Card>
-  <Card title="Metadata" icon="tags" href="/api/metadata">
-    Structured queries and knowledge graph.
+  <Card title="Metadata and graph" icon="tags" href="/api/metadata">
+    DQL queries and the link graph.
   </Card>
-  <Card title="Drafts" icon="code-branch" href="/api/drafts">
+  <Card title="Drafts" icon="code-pull-request" href="/api/drafts">
     Staging branches for agents.
   </Card>
-  <Card title="Views" icon="table" href="/api/views">
-    Saved DQL bases.
-  </Card>
   <Card title="Utilities" icon="screwdriver-wrench" href="/api/utilities">
-    Lint, timeline, graph helpers, rules, audit.
+    Lint, timeline, rules, audit.
   </Card>
 </CardGroup>

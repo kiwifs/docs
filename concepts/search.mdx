@@ -1,50 +1,95 @@
 ---
 title: "Search"
-description: "Grep, SQLite FTS5, hybrid RRF fusion, vector embeddings, and token-budgeted context packs."
+description: "Three search tiers, hybrid rank fusion, and token-budgeted context packs over the same markdown files."
 icon: "magnifying-glass"
 ---
 
-KiwiFS provides three tiers of search, from zero-dependency grep to semantic vector similarity, plus a hybrid mode that fuses lexical and vector ranks. You can start simple and scale up without changing your data or workflow.
+KiwiFS searches your knowledge base in three tiers: grep, SQLite FTS5, and optional vector search. Hybrid mode fuses keyword and vector ranks. Every index is derived from the markdown files on disk, so you can switch tiers or rebuild with `kiwifs reindex` without touching your data.
 
-## Tier 1: grep
+| Tier | Engine | Needs | Best for |
+| --- | --- | --- | --- |
+| 1 | grep | Nothing | Tiny knowledge bases, minimal environments |
+| 2 | SQLite FTS5 (default) | Nothing extra; built in | Ranked keyword search, DQL, backlinks, analytics |
+| 3 | Vector | An embedder and a vector store | Paraphrases and "find pages like this" |
 
-Zero dependencies. Exact string matching. Works everywhere.
+## Choose an engine
 
-```bash
+Set the engine with a flag or in config. The flag wins when both are set.
+
+<CodeGroup>
+
+```bash Terminal
+kiwifs serve --search sqlite   # default
 kiwifs serve --search grep
 ```
 
-Best for small knowledge bases or environments where SQLite isn't available.
-
-## Tier 2: SQLite FTS5 (default)
-
-BM25-ranked full-text search powered by SQLite FTS5. Supports boolean operators, phrase matching, and path prefix filtering.
-
-```bash
-kiwifs serve --search sqlite
+```toml .kiwi/config.toml
+[search]
+engine = "sqlite"   # sqlite | grep
 ```
 
-This is the default. KiwiFS builds and maintains a FTS5 index automatically. Searches are fast even with thousands of pages.
+</CodeGroup>
+
+<Note>
+DQL, computed views, trust ranking, and stale-page detection read the SQLite index. With `--search grep`, those endpoints return `501`.
+</Note>
+
+## Tier 1: grep
+
+A pure-Go line scanner with no index. Matching is a case-insensitive substring match, line by line, over every `.md` file outside hidden directories. Each file contributes at most 20 matching lines.
+
+## Tier 2: SQLite FTS5
+
+BM25-ranked full-text search. KiwiFS keeps the index in `.kiwi/state/search.db` and updates it on every write.
 
 ### Query syntax
 
-| Syntax | Example | Behavior |
-|---|---|---|
-| Keywords | `payment timeout` | Match pages containing both terms |
-| Boolean AND | `payment AND timeout` | Explicit AND |
-| Boolean OR | `payment OR billing` | Match pages containing either term |
-| Boolean NOT | `payment NOT refund` | Exclude pages containing a term |
-| Phrase | `"payment timeout"` | Match the exact phrase |
+Plain words are matched as separate terms, and a page must contain all of them. KiwiFS passes your query to FTS5 unchanged as soon as it contains an uppercase operator or one of the characters `"`, `(`, `)`, `*`, `^`, or `:`.
 
-### Trust-ranked search
+| Syntax | Example | Matches |
+| --- | --- | --- |
+| Terms | `payment timeout` | Pages containing both words |
+| Phrase | `"payment timeout"` | The exact phrase |
+| `OR` | `payment OR billing` | Either term |
+| `NOT` | `payment NOT refund` | `payment` but not `refund` |
+| `AND` | `payment AND timeout` | Both terms (explicit) |
+| Prefix | `auth*` | `auth`, `authentication`, `authorize`, and so on |
+| `NEAR` | `NEAR(payment timeout, 5)` | Both terms within 5 tokens |
 
-KiwiFS also offers trust-ranked search at `/api/kiwi/search/verified`. Pages with `status: verified` or `source-of-truth: true` in their frontmatter are boosted in results.
+Lowercase `and`, `or`, and `not` are ordinary words. If a query is not valid FTS5, KiwiFS retries it as a list of quoted terms instead of failing.
 
-## Tier 3: Vector search
+When a search returns nothing, the response can include `suggestions`: page titles within a small edit distance of your query.
 
-Semantic similarity search using pluggable embedder providers and vector stores. Enable it in `.kiwi/config.toml`:
+### Trust ranking
 
-```toml
+The default search applies a soft trust boost from frontmatter. Pages with `status: verified`, `source-of-truth: true`, or a high `confidence` move up. Pages with `status: deprecated` or `status: outdated` move down. No result is removed. Pass `boost=none` to rank by BM25 alone.
+
+`GET /api/kiwi/search/verified` uses much stronger multipliers, so verified and source-of-truth pages dominate and deprecated pages sink to the bottom.
+
+### Filters
+
+| Parameter | Effect |
+| --- | --- |
+| `path_prefix` | Only pages under a folder, such as `runbooks/` |
+| `scope` | Only pages whose `scope` frontmatter matches exactly, such as `user:alice` |
+| `modifiedAfter` | Only pages modified after an RFC3339 timestamp |
+| `recency_weight` | Blend recency into the ranking, from `0.0` (relevance only) to `1.0` (recency only) |
+| `include_superseded` | Include pages with `memory_status: superseded`, which are hidden by default |
+
+## What the index leaves out
+
+Search stores what a reader would want to find, not every byte of the file.
+
+- **Quiz answer keys.** Each Kiwi Quiz callout is reduced to its question. Correct answers, accepted answers, and feedback never reach the index or a search snippet.
+- **Widget fence data.** Typed widget fences such as `array`, `matrix`, or `graph` are reduced to their captions, step notes, and a short sample of labels. Coordinates and styling keys stay out, so diagrams do not crowd out prose in BM25 ranking.
+
+The same rules apply to the text that vector search embeds. The grep tier has no index and reads raw files, so it can still match text inside a quiz callout.
+
+## Tier 3: vector search
+
+Semantic search embeds each page in chunks and finds the chunks nearest to your query. Turn it on in `.kiwi/config.toml`. Both an embedder and a store are required.
+
+```toml .kiwi/config.toml
 [search.vector]
 enabled = true
 
@@ -54,87 +99,117 @@ model = "text-embedding-3-small"
 api_key = "${OPENAI_API_KEY}"
 
 [search.vector.store]
-provider = "sqlite-vec"
+provider = "sqlite"
 ```
 
-### Supported embedders
+New writes are embedded in the background. To embed pages that already exist, run `kiwifs reindex`. Add `--vector` to make the command fail if the vector index cannot be built.
 
-| Provider | Notes |
-|----------|-------|
-| OpenAI | `text-embedding-3-small`, `text-embedding-3-large` |
-| Ollama | Local models, no API key needed |
-| Cohere | `embed-english-v3.0`, multilingual variants |
-| Vertex AI | Google Cloud embeddings |
-| Bedrock | AWS embeddings |
-| Custom HTTP | Any endpoint returning a vector array |
-| ONNX | Offline local model via `kiwifs model download` |
+### Embedders
 
-### Supported vector stores
+| `provider` | Default model | Notes |
+| --- | --- | --- |
+| `openai` | `text-embedding-3-small` | Also `azure-openai`. Set `base_url` for compatible APIs. |
+| `ollama` | `nomic-embed-text` | Local, no API key. See [Ollama vector search](/deploy/ollama-vector-search). |
+| `cohere` | `embed-v4.0` | |
+| `voyage` | `voyage-4` | |
+| `bedrock` | None | AWS. Set `region` and `model`. |
+| `vertex` | None | Google Cloud. Set `project`, `location`, and `model`. |
+| `http` | None | Any endpoint that returns a vector. Set `url` and optional `headers`. |
+| `onnx` | None | Offline and in-process. Fetch a model with `kiwifs model download`. |
 
-| Store | Notes |
-|-------|-------|
-| sqlite-vec | Embedded, zero config (default) |
-| Qdrant | Self-hosted or cloud |
-| pgvector | PostgreSQL extension |
-| Pinecone | Cloud-hosted |
-| Weaviate | Self-hosted or cloud |
-| Milvus | Self-hosted or cloud |
+### Vector stores
+
+| `provider` | Notes |
+| --- | --- |
+| `sqlite` (default) | Pure Go, stored in `.kiwi/state/`. Exact nearest-neighbor scan, comfortable up to about 50,000 chunks. |
+| `qdrant` | Set `url`, `api_key`, and `collection`. |
+| `pgvector` | Set `dsn` and `table`. |
+| `pinecone` | Set `url`, `api_key`, and optional `namespace`. |
+| `weaviate` | Set `url`, `api_key`, and `collection`. |
+| `milvus` | Set `url`, `api_key`, and `collection`. |
+
+Chunks default to 1,500 characters with 150 characters of overlap. See [Configuration](/configuration#vector-search) for chunk size, context templates, and every embedder field.
 
 ## Hybrid search
 
-When both FTS and a vector index exist, `mode=hybrid` fuses the two ranked lists with Reciprocal Rank Fusion. If embeddings are not configured, the same request degrades to lexical-only.
+Hybrid mode runs BM25 and vector search, then fuses the two ranked lists with Reciprocal Rank Fusion (RRF). Pages that both engines rank highly rise to the top.
 
-```bash
+```bash Terminal
 curl 'http://localhost:3333/api/kiwi/search?mode=hybrid&q=payment+timeout&limit=10'
 ```
 
-Results include `engines` (`fts`, `semantic`), per-engine ranks, and the fused RRF `score`. Tune fusion with `rrf_k` (default `60`) and `boost`.
+Each result carries `fts_rank`, `semantic_rank`, and the fused `score`. The response lists the `engines` that contributed. Without a vector index, hybrid still returns `200` and `engines` contains only `fts`. Tune fusion with `rrf_k` (default `60`); smaller values let one engine's top hit dominate.
 
 ## Context packs
 
-`POST /api/kiwi/brief` retrieves pages with hybrid search, extracts sections, and packs them into a token budget. It never summarizes — overflow is listed in a dropped manifest so you can see what was cut.
+`POST /api/kiwi/brief` turns a question into one token-budgeted pack. It runs hybrid retrieval and includes each page whole when it fits, or its best-matching sections when it does not. It never summarizes. Anything that did not fit is listed with its token cost, so you can raise the budget or ask for it by name.
 
-```bash
+```bash Terminal
 curl -X POST 'http://localhost:3333/api/kiwi/brief' \
-  -H "Content-Type: application/json" \
+  -H 'Content-Type: application/json' \
   -d '{"query": "how does auth work?", "budget_tokens": 4000, "max_pages": 20}'
 ```
 
-Use this as the first retrieval step for an agent instead of dumping whole files.
+Use a context pack as an agent's first retrieval step instead of a dozen search-then-read round trips.
 
-## Retrieval evaluation
+## Measure retrieval quality
 
-Score FTS, semantic, and hybrid engines against a golden set in `.kiwi/eval/`:
+`kiwifs eval` scores FTS, semantic, and hybrid retrieval against a golden set in `.kiwi/eval/`. A set is a pair of TREC files: `<name>.qrels` for relevance judgements and `<name>.topics` for the queries. Metrics are hit rate, MRR, precision, and nDCG at a rank cutoff.
 
-```bash
+```bash Terminal
 kiwifs eval --set leave-one-out --exclude-prefix drafts/ --min-hit-rate 0.6
 ```
 
-Or `POST /api/kiwi/eval` with `{ "set": "leave-one-out" }` or an inline `queries` array. Metrics include hit rate and nDCG.
+`--exclude-prefix` hides a subtree before ranking, which keeps held-out evaluation honest. A `--min-hit-rate`, `--min-mrr`, or `--min-ndcg` threshold makes the command exit non-zero when it is missed, so you can gate CI on it. Over HTTP, call `POST /api/kiwi/eval`.
 
-## API endpoints
+## Interfaces
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/kiwi/search` | GET | Full-text search (`mode=hybrid` for RRF) |
-| `/api/kiwi/search/verified` | GET | Trust-ranked search |
-| `/api/kiwi/search/semantic` | GET, POST | Vector similarity search |
-| `/api/kiwi/brief` | POST | Token-budgeted context pack |
-| `/api/kiwi/eval` | POST | Retrieval quality benchmark |
-| `/api/kiwi/similar` | GET | Frontmatter similarity profiles |
-| `/api/kiwi/meta` | GET | Frontmatter metadata query |
+<Tabs>
+  <Tab title="REST">
+    | Endpoint | Method | Purpose |
+    | --- | --- | --- |
+    | `/api/kiwi/search` | GET | Full-text search. `mode=hybrid` for RRF fusion. |
+    | `/api/kiwi/search/verified` | GET | Strong trust ranking |
+    | `/api/kiwi/search/semantic` | GET, POST | Vector search. Returns `503` when vectors are off. |
+    | `/api/kiwi/brief` | POST | Token-budgeted context pack |
+    | `/api/kiwi/eval` | POST | Retrieval benchmark |
+    | `/api/kiwi/meta` | GET | Filter pages by frontmatter |
+    | `/api/kiwi/similar` | GET | Nearest pages by frontmatter similarity profile |
+  </Tab>
+  <Tab title="MCP">
+    | Tool | Purpose |
+    | --- | --- |
+    | `kiwi_search` | Full-text search with `path_prefix`, `scope`, and `recency_weight` |
+    | `kiwi_search_hybrid` | RRF fusion of keyword and vector results |
+    | `kiwi_search_semantic` | Vector search |
+    | `kiwi_brief` | Token-budgeted context pack |
+    | `kiwi_eval` | Retrieval benchmark |
+    | `kiwi_query_meta` | Filter pages by frontmatter |
+    | `kiwi_similar` | Nearest pages by frontmatter similarity profile |
+  </Tab>
+  <Tab title="CLI">
+    ```bash Terminal
+    kiwifs reindex            # rebuild the FTS5 index, plus vectors if configured
+    kiwifs reindex --vector   # fail if the vector index cannot be rebuilt
+    kiwifs reindex --fts-only # skip vectors
+    kiwifs eval --list        # list golden sets
+    ```
+  </Tab>
+</Tabs>
 
-## MCP tools
+## Related
 
-| Tool | Description |
-|------|-------------|
-| `kiwi_search` | Full-text search with pagination |
-| `kiwi_search_hybrid` | RRF fusion of FTS and semantic |
-| `kiwi_search_semantic` | Vector similarity search |
-| `kiwi_brief` | Token-budgeted context pack |
-| `kiwi_similar` | Frontmatter similarity profiles |
-| `kiwi_eval` | Search quality benchmark |
-| `kiwi_query_meta` | Frontmatter metadata query |
-| `kiwi_query` | DQL queries over metadata |
-
-See the [Search API reference](/api/search) for detailed endpoint documentation.
+<CardGroup cols={2}>
+  <Card title="Search API" icon="code" href="/api/search">
+    Parameters and response fields for every search endpoint.
+  </Card>
+  <Card title="DQL" icon="database" href="/concepts/dql">
+    Query frontmatter instead of text.
+  </Card>
+  <Card title="Ollama vector search" icon="server" href="/deploy/ollama-vector-search">
+    Run semantic search fully locally.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration#search">
+    Every `[search]` key and default.
+  </Card>
+</CardGroup>

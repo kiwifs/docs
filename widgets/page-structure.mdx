@@ -1,0 +1,235 @@
+---
+title: "Page structure blocks"
+sidebarTitle: "Page structure"
+description: "Callouts, tabs, columns, figures, provenance claims, annotated diffs, color swatches, and reading order."
+icon: "table-columns"
+---
+
+These blocks shape how a page reads: callouts and tabs to organize prose, figures for media, claims to mark where an assertion comes from, and a manifest for reading order across pages. Callouts and claims also mean something to agents, since both live in the file as plain markdown.
+
+## Callouts
+
+GitHub- and Obsidian-style callouts. Put the type in uppercase in the first line of a blockquote:
+
+```markdown
+> [!WARNING]
+> Rotating the signing key logs every user out.
+```
+
+Text after the tag replaces the default title. Add `-` after the tag to make the callout foldable and collapsed, or `+` for foldable and expanded:
+
+```markdown
+> [!TIP] Faster local builds
+> Run `make go-build` when the UI hasn't changed.
+
+> [!EXAMPLE]- Full config
+> This content is hidden until the reader expands it.
+```
+
+Supported types, grouped by color:
+
+| Color | Types |
+| --- | --- |
+| Blue | `NOTE`, `INFO`, `TODO` |
+| Green | `TIP`, `HINT`, `SUCCESS`, `CHECK`, `DONE` |
+| Purple | `IMPORTANT`, `ABSTRACT`, `SUMMARY`, `TLDR`, `EXAMPLE` |
+| Yellow | `WARNING`, `ATTENTION`, `QUESTION`, `HELP`, `FAQ` |
+| Red | `CAUTION`, `DANGER`, `FAILURE`, `FAIL`, `ERROR`, `BUG`, `MISSING` |
+| Gray | `QUOTE`, `CITE` |
+
+A `[!quiz]` callout is a question, not a note. See [quiz callouts](/widgets/interactive#quiz-callouts).
+
+## Tabs
+
+Group alternatives in tabs with a `:::tabs` container and a `::tab[Label]` line before each panel:
+
+```markdown
+:::tabs
+::tab[REST]
+Use `PUT /api/kiwi/file` to create or update a page.
+
+::tab[MCP]
+Call `kiwi_write` with `path` and `content`.
+
+::tab[CLI]
+Write the file directly: `echo "# Title" > page.md`
+:::
+```
+
+## Columns
+
+Split content side by side with a `:::columns` container and a `::col` line before each column. Columns stack on narrow screens.
+
+```markdown
+:::columns{ratio="2:1"}
+::col
+### Request
+The client sends a `PUT` with an `If-Match` header.
+
+::col
+### Response
+`409` on a stale ETag.
+:::
+```
+
+| Attribute | Meaning |
+| --- | --- |
+| `ratio` | Relative widths, such as `"2:1"` or `"1:2:1"`. |
+| `cols` | Fixed column count, such as `cols=3`. |
+
+Without either, columns share the width equally.
+
+## Figures
+
+Wrap media in `:::figure` to change its width, pin it while the reader scrolls, or add a caption:
+
+```markdown
+:::figure{width=wide pin caption="Write path"}
+![[diagrams/write-path.excalidraw.md]]
+:::
+```
+
+| Attribute | Meaning |
+| --- | --- |
+| `width` | `inline` (default), `wide`, or `full`. |
+| `pin` | Keep the figure in view while the reader scrolls past it. |
+| `caption` | Caption under the figure. |
+
+A wiki embed takes the same options after the `|`, such as `![[diagram.excalidraw.md|wide pin]]`. See [drawing embeds](/widgets/diagrams#drawing-embeds).
+
+## Claims
+
+Mark an assertion with its evidence, confidence, and source, so a sourced claim reads differently from a guess. The web UI shows a badge, and flags a claim with no source and no or low confidence as **unsourced**.
+
+```markdown
+:::claim{evidence=stated confidence=0.9 source=sources/architecture.md}
+A non-linear level-2 stacker wins when the dominant feature is sparse.
+:::
+
+Inline: :claim[hill-climbing is worse here]{evidence=inferred confidence=0.6}
+```
+
+| Attribute | Meaning |
+| --- | --- |
+| `evidence` | How you know. `stated`, `derived`, `inferred`, and `assumed` get distinct badge colors. Any other value still shows. |
+| `confidence` | A number from `0` to `1`, shown as a percentage. A non-numeric value is ignored. |
+| `source` | Path or citation backing the claim. |
+
+Other attributes are kept and queryable. Every claim is indexed, so you can audit them with DQL:
+
+```sql DQL
+TABLE text, confidence, source
+FROM CLAIMS "inferred"
+WHERE confidence < 0.7
+```
+
+`FROM CLAIMS` takes an optional evidence value and an optional `IN "folder/"`. Each row has `text`, `scope` (`block` or `inline`), `evidence`, `confidence`, and `source`.
+
+<Note>
+Provenance claims are unrelated to [task claims](/concepts/claims), which are leases on a path.
+</Note>
+
+## kiwi-diff
+
+An annotated diff, side by side or unified. Write unified-diff lines (`- ` removed, `+ ` added, two spaces for context), with an optional YAML header above `---`:
+
+````markdown
+```kiwi-diff
+title: Raise the client timeout
+language: typescript
+splitView: true
+annotations:
+  - line: 1
+    side: right
+    severity: warning
+    text: Long-poll requests need more than 5s.
+---
+- const timeout = 5000;
++ const timeout = 30000;
+  const retries = 3;
+```
+````
+
+Or put the old and new code in two blocks separated by a `===` line. That form shows side by side.
+
+````markdown
+```kiwi-diff language=python
+def greet(name):
+    print("Hello " + name)
+===
+def greet(name: str) -> None:
+    print(f"Hello {name}")
+```
+````
+
+<Accordion title="kiwi-diff keys">
+
+| Key | Description |
+| --- | --- |
+| `title` | Heading above the diff. |
+| `language` | Syntax highlighting language. Also settable on the opening line as `language=`. |
+| `splitView` | `true` for side by side, `false` for unified. Also settable on the opening line. |
+| `leftTitle`, `rightTitle` | Labels over the old and new sides. |
+| `annotations` | `{line, side?, severity?, text}`. `side` is `left` or `right`; `severity` is `info` (default), `warning`, or `error`. |
+
+</Accordion>
+
+## kiwi-color
+
+Color swatches for a design system. Click a swatch to copy its value. Write one color per line:
+
+````markdown
+```kiwi-color
+#6cbe45 Primary
+#4a8a2a Primary dark
+#ef4444 Danger
+```
+````
+
+Or use YAML for a named palette with WCAG contrast ratios:
+
+````markdown
+```kiwi-color
+palette: Brand
+showContrast: true
+swatchSize: large
+colors:
+  - label: Primary
+    value: "#6cbe45"
+  - label: Danger
+    value: "#ef4444"
+```
+````
+
+Values can be hex, `rgb()`, `hsl()`, or named colors. `swatchSize` is `small`, `medium`, or `large`.
+
+## Reading order
+
+A `_book.yaml` file in a folder sets the order of its pages for the previous and next links at the bottom of each page, and for multi-file document export:
+
+```yaml _book.yaml
+title: System Design Primer
+parts:
+  - chapter-01/_index.md
+  - chapter-01/intro.md
+  - chapter-02/_index.md
+```
+
+Without a manifest, KiwiFS orders pages by frontmatter `order`, then by file name.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Widgets overview" icon="puzzle-piece" href="/concepts/widgets">
+    Every widget, grouped by category.
+  </Card>
+  <Card title="Wiki links" icon="link" href="/concepts/wiki-links">
+    Links and `![[embeds]]` between pages.
+  </Card>
+  <Card title="DQL" icon="database" href="/concepts/dql">
+    Query claims and records alongside frontmatter.
+  </Card>
+  <Card title="Web UI" icon="window" href="/guides/web-ui">
+    Where these blocks render.
+  </Card>
+</CardGroup>

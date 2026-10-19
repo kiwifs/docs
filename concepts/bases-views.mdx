@@ -1,26 +1,135 @@
 ---
 title: "Bases and saved views"
-description: "Named DQL queries with columns, filters, and layout — table, list, calendar, or kanban over your frontmatter."
+sidebarTitle: "Bases"
+description: "Saved DQL queries rendered as a table, cards, list, or map over your pages' frontmatter."
 icon: "table"
 ---
 
-**Bases** in the web UI are powered by **saved views**: JSON definitions stored under `.kiwi/views/<name>.json`. Each view stores a **DQL query** plus presentation metadata (columns, filters, sort, `group_by`, layout).
+A **base** is a database-style view over your knowledge base. Each base is a **saved view**: a named [DQL](/concepts/dql) query plus presentation settings, stored as JSON under `.kiwi/views/`. Open **Bases** in the web UI to browse the results, or run the same view from the API or MCP.
 
-## View definition
+Use a base when you want a reusable slice of your pages, such as all open incidents, every paper tagged `llm`, or vendors that have an office location.
+
+## How it works
+
+<Steps>
+  <Step title="Pages carry frontmatter">
+    Every field you want to query lives in YAML frontmatter, for example `status`, `owner`, or `due`.
+  </Step>
+  <Step title="A view stores a DQL query">
+    The view's `query` selects and shapes rows. Filtering and sorting belong in the query (`WHERE`, `SORT`).
+  </Step>
+  <Step title="Executing the view runs the query">
+    `GET /api/kiwi/views/{name}/execute` runs the query against the frontmatter index, then evaluates any computed `formula` columns.
+  </Step>
+  <Step title="The web UI renders the rows">
+    **Bases** shows the result in the view's default layout. You can switch layouts and quick-search the loaded rows without editing the view.
+  </Step>
+</Steps>
+
+<Note>
+Executing a view requires the default SQLite search engine. With `[search] engine = "grep"`, the execute endpoint returns `503`.
+</Note>
+
+## File format
+
+Each view is one JSON file named after the view.
+
+<Tree>
+  <Tree.Folder name=".kiwi" defaultOpen>
+    <Tree.Folder name="views" defaultOpen>
+      <Tree.File name="open-incidents.json" />
+      <Tree.File name="reading-list.json" />
+    </Tree.Folder>
+  </Tree.Folder>
+</Tree>
+
+```json .kiwi/views/open-incidents.json
+{
+  "name": "open-incidents",
+  "query": "TABLE title, severity, owner, minutes_down FROM \"incidents\" WHERE status != \"resolved\" SORT severity ASC",
+  "layout": "table",
+  "columns": [
+    { "property": "minutes_down", "label": "Downtime", "summary": "sum" },
+    { "property": "hours_down", "label": "Hours", "formula": "round(minutes_down / 60, 1)" }
+  ]
+}
+```
 
 | Field | Purpose |
-|-------|---------|
-| `name` | Stable identifier (matches the filename without `.json`). |
-| `query` | DQL string executed by the Dataview engine (same language as [DQL](/concepts/dql)). |
-| `layout` | One of `table`, `list`, `calendar`, `kanban`. |
-| `columns` | Optional column specs with `property`, `label`, optional `formula`, optional `summary`. |
-| `filters` | Structured filters (`field`, `operator`, `value`). |
-| `sort` | Sort keys (`field`, `order`: `asc` or `desc`). |
-| `group_by` | Optional grouping field for board-style layouts. |
+| --- | --- |
+| `name` | Identifier. It always matches the filename; on save, the name in the URL wins. |
+| `query` | DQL query run by the Dataview engine. It must start with a query type such as `TABLE` or `LIST`. |
+| `layout` | Default layout in the web UI: `table`, `cards`, `list`, or `map`. |
+| `columns` | Optional column specs: `property`, `label`, `formula` (computed value), and `summary` (`sum`, `avg`, `count`, `min`, `max`). |
+| `filters` | Optional structured filters (`field`, `operator`, `value`). Stored with the view but not applied by the execute endpoint, so put filtering in the query. |
+| `sort` | Optional sort keys (`field`, `order`). Stored only; use `SORT` in the query. |
+| `group_by` | Optional grouping field. Stored only. |
 
-Computed views in markdown (frontmatter `kiwi-view: true`) are separate from saved views; use `POST /api/kiwi/view/refresh` or the `kiwi_view_refresh` MCP tool for those.
+View names must start with a letter or digit and may contain letters, digits, spaces, hyphens, and underscores.
 
-## Related documentation
+### Computed columns
 
-- [Views REST API](/api/views)
-- [MCP](/concepts/mcp) — `kiwi_views_list`, `kiwi_views_get`, `kiwi_views_save`, `kiwi_views_delete`, `kiwi_views_execute`
+A column with a `formula` is evaluated for each row after the query runs, and the result is written into that column's `property`. Formulas support:
+
+- Field references, numbers, and quoted strings
+- Arithmetic with `+`, `-`, `*`, and `/`
+- `length(x)`, `round(x, digits)`, and `if(field, then, else)`, where the condition is true when the field is set and not empty
+
+## Layouts in the web UI
+
+| Layout | Best for | Notes |
+| --- | --- | --- |
+| Table | Comparing fields side by side | Shows column `summary` values in the footer. |
+| Cards | Visual collections | Uses a `cover` or `image` frontmatter field as the card image. |
+| List | Compact scanning | Title plus key fields. |
+| Map | Places | Plots rows that have `latitude` and `longitude`, `lat` and `lng`, or a `location` string such as `"52.37, 4.89"`. |
+
+Hide the **Bases** toolbar button with `bases = false` under `[ui.features]`.
+
+## Create and run a view
+
+<Tabs>
+  <Tab title="REST">
+    ```bash Terminal
+    curl -X PUT 'http://localhost:3333/api/kiwi/views/open-incidents' \
+      -H 'Content-Type: application/json' \
+      -d '{
+        "query": "TABLE title, severity, owner FROM \"incidents\" WHERE status != \"resolved\"",
+        "layout": "table"
+      }'
+
+    curl 'http://localhost:3333/api/kiwi/views/open-incidents/execute?limit=50'
+    ```
+  </Tab>
+  <Tab title="MCP">
+    Call `kiwi_views_save` to create or update the view, then `kiwi_views_execute` to run it. `kiwi_views_list`, `kiwi_views_get`, and `kiwi_views_delete` cover the rest.
+  </Tab>
+  <Tab title="Web UI">
+    Click **Bases** in the toolbar, then **New view**. Enter a name and a DQL query such as `TABLE title, status FROM "incidents"`, pick a default layout, and click **Save**.
+  </Tab>
+</Tabs>
+
+<Info>
+Saved views are configuration under `.kiwi/`, not pages. Saving one writes the JSON file directly; it does not create a git commit or appear in search.
+</Info>
+
+## Saved views versus computed views
+
+Saved views live in `.kiwi/views/` and render in the web UI. **Computed views** are markdown pages with `kiwi-view: true` and a `kiwi-query` in frontmatter. KiwiFS writes the query result into the page body between `<!-- kiwi:auto -->` and `<!-- /kiwi-view -->` markers, so any tool that reads the file sees the result. Regenerate one with `POST /api/kiwi/view/refresh` or the `kiwi_view_refresh` MCP tool. See [DQL](/concepts/dql) for details.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Views REST API" icon="table" href="/api/views">
+    List, save, delete, and execute views.
+  </Card>
+  <Card title="DQL" icon="code" href="/concepts/dql">
+    The query language behind every view.
+  </Card>
+  <Card title="Metadata API" icon="tags" href="/api/metadata">
+    Query frontmatter directly.
+  </Card>
+  <Card title="Web UI" icon="window" href="/guides/web-ui">
+    Toolbar views, including Bases.
+  </Card>
+</CardGroup>

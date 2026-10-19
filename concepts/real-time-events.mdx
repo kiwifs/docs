@@ -1,65 +1,107 @@
 ---
 title: "Real-time events"
-description: "Subscribe to write, delete, and bulk events over Server-Sent Events (SSE)."
+description: "Stream file writes, deletes, comments, and janitor results over Server-Sent Events."
 icon: "bolt"
 ---
 
-KiwiFS broadcasts knowledge-base changes over **Server-Sent Events (SSE)**. Use `GET /api/kiwi/events` for live updates in the web UI or external integrations.
+KiwiFS broadcasts every change in a space over **Server-Sent Events (SSE)** at `GET /api/kiwi/events`. The web UI uses this stream to refresh the file tree, open pages, canvases, and boards as soon as anyone edits them. You can subscribe the same way to keep a cache, dashboard, or agent in sync.
 
-<Info>
-There is no WebSocket endpoint. SSE is the only real-time transport.
-</Info>
+SSE is the only real-time transport; there is no WebSocket endpoint. To push changes to a service that cannot hold a connection open, use [webhooks](/concepts/webhooks).
 
-## Event stream
+## Subscribe
 
-```bash
-curl -N 'http://localhost:3333/api/kiwi/events'
+```bash Terminal
+curl -N 'http://localhost:3333/api/kiwi/events' \
+  -H 'Authorization: Bearer kiwi_sk_...'
 ```
 
-```text SSE output
+```text Stream
 event: write
-data: {"path":"concepts/auth.md","actor":"agent:docs-writer","timestamp":"2026-04-25T14:30:00Z"}
+data: {"op":"write","path":"concepts/auth.md","actor":"agent:docs-writer","etag":"5d41402abc4b2a76"}
 
 event: delete
-data: {"path":"concepts/old-page.md","actor":"agent:cleanup","timestamp":"2026-04-25T14:31:00Z"}
+data: {"op":"delete","path":"drafts/old.md","actor":"alice"}
 
 event: bulk
-data: {"paths":["a.md","b.md"],"actor":"agent:importer","timestamp":"2026-04-25T14:32:00Z"}
+data: {"op":"bulk","paths":["notes/a.md","notes/b.md"],"actor":"agent:importer"}
 
-event: import
-data: {"imported":42,"source":"postgres","timestamp":"2026-04-25T14:33:00Z"}
+:keep-alive
+
+event: comment.add
+data: {"op":"comment.add","path":"concepts/auth.md","actor":"bob"}
 ```
+
+Each message has an `event:` line naming the event type and a `data:` line of JSON. A `:keep-alive` comment arrives every 15 seconds so proxies do not close an idle stream.
+
+<CodeGroup>
+```javascript Browser
+const events = new EventSource("/api/kiwi/events");
+
+events.addEventListener("write", (e) => {
+  const { path, etag, actor } = JSON.parse(e.data);
+  console.log(`${actor} wrote ${path} (${etag})`);
+});
+
+events.addEventListener("delete", (e) => {
+  console.log("deleted", JSON.parse(e.data).path);
+});
+```
+
+```python Python
+import json, requests
+
+with requests.get("http://localhost:3333/api/kiwi/events",
+                  headers={"Authorization": "Bearer kiwi_sk_..."}, stream=True) as r:
+    event = None
+    for line in r.iter_lines(decode_unicode=True):
+        if line.startswith("event: "):
+            event = line[7:]
+        elif line.startswith("data: "):
+            print(event, json.loads(line[6:]))
+```
+</CodeGroup>
 
 ## Event types
 
-| Event | When it fires |
-| --- | --- |
-| `write` | A file was created or updated |
-| `delete` | A file was deleted |
-| `bulk` | A bulk write completed |
-| `import` | An import job finished |
+| Event | Fires when | Payload fields |
+| --- | --- | --- |
+| `write` | A file is created or updated, including renames (new path), canvas saves, frontmatter patches, and edits made directly on disk | `path`, `actor`, `etag` |
+| `delete` | A file is deleted, or renamed away from its old path | `path`, `actor` |
+| `bulk` | A bulk write (`POST /api/kiwi/bulk`) commits. Imports write file by file and send `write` events. | `paths`, `actor` |
+| `rollback` | A bulk write fails to commit and its files are restored | `paths`, `actor` |
+| `comment.add`, `comment.delete`, `comment.resolve` | A comment on a page changes | `path`, `actor` |
+| `janitor` | A scheduled janitor scan finishes | `actor` (`scheduler`) and `extra` with `status`, `scanned`, `issues`, `errors`, `warnings`, and `duration_ms` |
+
+Every payload also repeats the event type as `op`. Events carry no file content. Compare `etag` with what you hold, and re-read the file with `GET /api/kiwi/file` when it differs.
+
+## When events fire
+
+File events are sent after the full write pipeline: storage, git commit, index update, then broadcast. When you receive `write`, the new content is already readable and searchable.
+
+The pipeline is shared by every protocol, so writes over REST, MCP, NFS, S3, WebDAV, and FUSE, as well as edits made in an editor on the server's disk, all produce the same events.
 
 ## Client guidance
 
-<Note>
-The SSE connection stays open indefinitely. Implement reconnection logic with backoff. Send the `Last-Event-ID` header to resume where you left off.
-</Note>
+- **Reconnect.** The stream stays open until either side closes it. Reconnect with backoff when it drops. Browsers' `EventSource` does this for you.
+- **Resync after a gap.** Events have no IDs, and KiwiFS ignores `Last-Event-ID`. After reconnecting, catch up with `GET /api/kiwi/changes` or by re-reading the files you care about.
+- **Keep up.** Each subscriber has a small buffer. A client that reads too slowly misses events instead of slowing the server.
+- **Authenticate** like any other `/api/kiwi` route. The browser `EventSource` API cannot send an `Authorization` header, so when auth is on, browser clients need a same-origin proxy that adds it.
+- **Limits.** A space accepts up to 256 concurrent subscribers. Beyond that, the endpoint returns `503`.
+- **Spaces.** Each space has its own stream. Subscribe to `/api/kiwi/{space}/events`, or send `X-Kiwi-Space`. See [Multi-space](/concepts/multi-space).
 
-- Use `curl -N` (no buffer) or a native SSE client library.
-- Authenticate the same way as other `/api/kiwi` routes when auth is enabled.
-- Events fire after the full pipeline: storage → git → index → broadcast.
-
-## Pipeline parity
-
-Writes through **any** protocol (NFS, S3, WebDAV, FUSE, REST, MCP) emit the same event types.
-
-## Related documentation
+## Related
 
 <CardGroup cols={2}>
-  <Card title="Agent interface" icon="robot" href="/concepts/agent-interface">
-    Protocol overview.
+  <Card title="Events API" icon="bolt" href="/api/utilities#real-time-events">
+    Endpoint reference.
   </Card>
   <Card title="Webhooks" icon="webhook" href="/concepts/webhooks">
-    Outbound HTTP notifications (complementary to SSE).
+    Signed HTTP POSTs for the same changes.
+  </Card>
+  <Card title="Agent interface" icon="robot" href="/concepts/agent-interface">
+    Every protocol that feeds the pipeline.
+  </Card>
+  <Card title="Versioning" icon="code-branch" href="/concepts/versioning">
+    The commit behind each write event.
   </Card>
 </CardGroup>

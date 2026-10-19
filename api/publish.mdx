@@ -1,171 +1,477 @@
 ---
-title: "Publish"
-description: "Publish and unpublish pages via frontmatter and read them at /p/{path}."
+title: "Publishing and sharing"
+sidebarTitle: "Publish"
+description: "Publish pages to public URLs, share private pages by token, and set space visibility."
 icon: "globe"
 ---
 
-Publishing marks a page with `published: true` and `published_at` in frontmatter. Published pages are readable at `/p/{path}` without API authentication.
+KiwiFS has three ways to let people read pages without an API key:
+
+| Mechanism | Scope | Set by | Read at |
+| --- | --- | --- | --- |
+| Publishing | One page | `published: true` frontmatter | `/p/{path}` |
+| Public visibility | One page | `visibility: public` frontmatter | `/p/{path}` and `/api/kiwi/public/...` |
+| Share link | One page, optional password and expiry | `POST /api/kiwi/share` | `/api/kiwi/public/{token}` |
+
+Space visibility is separate: it opens read endpoints for the whole space. See [Publishing](/concepts/publishing) for when to use each.
 
 ## Publish a page
 
+Set `published: true` in the page's frontmatter, and `published_at` if the page has never been published.
+
 ```http
 POST /api/kiwi/publish
-Content-Type: application/json
 ```
 
+<ParamField header="X-Actor" type="string">
+  Git commit author attribution.
+</ParamField>
 <ParamField body="path" type="string" required>
-  File path to publish.
+  Page path.
 </ParamField>
 
 ```bash
 curl -X POST 'http://localhost:3333/api/kiwi/publish' \
-  -H 'Content-Type: application/json' \
-  -H 'X-Actor: agent:publisher' \
-  -d '{"path":"concepts/auth.md"}'
+  -H "Content-Type: application/json" \
+  -H "X-Actor: agent:publisher" \
+  -d '{"path": "concepts/auth.md"}'
 ```
 
-```json Response
+Returns `404` if the page does not exist and `409` if it changed during the request.
+
+<ResponseField name="path" type="string">Page path.</ResponseField>
+<ResponseField name="published" type="boolean">Always `true`.</ResponseField>
+<ResponseField name="published_at" type="string">First publish time (RFC 3339). Republishing keeps the original value.</ResponseField>
+<ResponseField name="public_url" type="string">Relative URL of the published page.</ResponseField>
+
+```json
 {
   "path": "concepts/auth.md",
   "published": true,
-  "published_at": "2026-05-02T14:30:00Z",
+  "published_at": "2026-10-02T14:30:00Z",
   "public_url": "/p/concepts/auth.md"
 }
 ```
 
-<Info>
-`published_at` is set only on first publish. Later republish calls preserve the original timestamp.
-</Info>
+## Unpublish a page
 
-## Bulk publish
+Set `published: false`. The `published_at` field stays for history.
 
-Publish multiple pages in a single request.
+```http
+POST /api/kiwi/unpublish
+```
+
+<ParamField header="X-Actor" type="string">
+  Git commit author attribution.
+</ParamField>
+<ParamField body="path" type="string" required>
+  Page path.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/unpublish' \
+  -H "Content-Type: application/json" \
+  -d '{"path": "concepts/auth.md"}'
+```
+
+Returns `404` if the page does not exist and `409` if it changed during the request.
+
+```json
+{ "path": "concepts/auth.md", "published": false }
+```
+
+## Bulk publish or unpublish
+
+Publish or unpublish many pages in a single git commit. Both endpoints take the same body and return the same shape.
 
 ```http
 POST /api/kiwi/publish/bulk
-Content-Type: application/json
+POST /api/kiwi/unpublish/bulk
 ```
 
+<ParamField header="X-Actor" type="string">
+  Git commit author attribution.
+</ParamField>
 <ParamField body="paths" type="string[]" required>
-  Array of file paths to publish.
+  Page paths. Duplicates are ignored, and a leading `/` is stripped.
 </ParamField>
 
 ```bash
 curl -X POST 'http://localhost:3333/api/kiwi/publish/bulk' \
-  -H 'Content-Type: application/json' \
-  -H 'X-Actor: agent:publisher' \
-  -d '{"paths":["concepts/auth.md","concepts/billing.md","concepts/users.md"]}'
+  -H "Content-Type: application/json" \
+  -H "X-Actor: agent:publisher" \
+  -d '{"paths": ["concepts/auth.md", "concepts/billing.md", "concepts/missing.md"]}'
 ```
 
-```json Response
+Returns `400` if `paths` is empty or contains an empty string. Pages that are missing or fail to update are reported in `errors` rather than failing the whole request.
+
+<ResponseField name="published" type="boolean">`true` for publish, `false` for unpublish.</ResponseField>
+<ResponseField name="requested" type="integer">Number of paths in the request.</ResponseField>
+<ResponseField name="changed" type="integer">Pages whose frontmatter changed.</ResponseField>
+<ResponseField name="skipped" type="integer">Unique paths that needed no change or failed.</ResponseField>
+<ResponseField name="paths" type="object[]">
+  One entry per page that is now in the requested state, with `path`, `published`, `published_at`, and `public_url` as in [Publish a page](#publish-a-page).
+</ResponseField>
+<ResponseField name="errors" type="object[]">
+  Pages that could not be updated, each with `path` and `error`. Omitted when empty.
+</ResponseField>
+
+```json
 {
-  "published": 3,
-  "results": [
-    {"path": "concepts/auth.md", "published": true},
-    {"path": "concepts/billing.md", "published": true},
-    {"path": "concepts/users.md", "published": true}
+  "published": true,
+  "requested": 3,
+  "changed": 1,
+  "skipped": 2,
+  "paths": [
+    { "path": "concepts/auth.md", "published": true, "published_at": "2026-10-02T14:30:00Z", "public_url": "/p/concepts/auth.md" },
+    { "path": "concepts/billing.md", "published": true, "published_at": "2026-10-19T09:00:00Z", "public_url": "/p/concepts/billing.md" }
+  ],
+  "errors": [
+    { "path": "concepts/missing.md", "error": "code=404, message=file not found" }
   ]
 }
 ```
 
-## Unpublish
+## Get publish status
+
+Return whether one page is published.
 
 ```http
-POST /api/kiwi/unpublish
-Content-Type: application/json
-```
-
-<ParamField body="path" type="string" required>
-  File path to unpublish.
-</ParamField>
-
-Sets `published: false` but keeps `published_at` for history.
-
-## Bulk unpublish
-
-```http
-POST /api/kiwi/unpublish/bulk
-Content-Type: application/json
-```
-
-<ParamField body="paths" type="string[]" required>
-  Array of file paths to unpublish.
-</ParamField>
-
-## List published pages
-
-```http
-GET /api/kiwi/publish/list
-```
-
-Returns all currently published pages.
-
-```json Response
-{
-  "pages": [
-    {"path": "concepts/auth.md", "published_at": "2026-05-02T14:30:00Z", "public_url": "/p/concepts/auth.md"},
-    {"path": "guides/quickstart.md", "published_at": "2026-05-01T10:00:00Z", "public_url": "/p/guides/quickstart.md"}
-  ]
-}
-```
-
-## Publish status
-
-```http
-GET /api/kiwi/publish/status?path=concepts/auth.md
+GET /api/kiwi/publish/status
 ```
 
 <ParamField query="path" type="string" required>
-  File path to check.
+  Page path.
 </ParamField>
 
-```json Response
+```bash
+curl 'http://localhost:3333/api/kiwi/publish/status?path=concepts/auth.md'
+```
+
+Returns `404` if the page does not exist.
+
+<ResponseField name="path" type="string">Page path.</ResponseField>
+<ResponseField name="published" type="boolean">Whether the page is published.</ResponseField>
+<ResponseField name="published_at" type="string">First publish time, if the page was ever published.</ResponseField>
+<ResponseField name="public_url" type="string">Relative public URL. Only present while published.</ResponseField>
+<ResponseField name="view_count" type="integer">Views of the published page since the server started counting. `0` when view tracking is off.</ResponseField>
+
+```json
 {
   "path": "concepts/auth.md",
   "published": true,
-  "published_at": "2026-05-02T14:30:00Z",
+  "published_at": "2026-10-02T14:30:00Z",
   "public_url": "/p/concepts/auth.md",
   "view_count": 42
 }
 ```
 
-<ResponseField name="view_count" type="integer">
-  Included when publish metrics tracking is enabled on the server.
-</ResponseField>
+## List published pages
 
-## Read published pages
+Return every published markdown page, newest first.
 
-No API key required:
+```http
+GET /api/kiwi/publish/list
+```
 
 ```bash
-curl 'http://localhost:3333/p/concepts/auth.md'
+curl 'http://localhost:3333/api/kiwi/publish/list'
 ```
 
-## Public visibility (alternative model)
+<ResponseField name="count" type="integer">Number of published pages.</ResponseField>
+<ResponseField name="pages" type="object[]">
+  Published pages, sorted by `published_at` descending.
+  <Expandable title="properties">
+    <ResponseField name="path" type="string">Page path.</ResponseField>
+    <ResponseField name="published_at" type="string">First publish time, if set.</ResponseField>
+    <ResponseField name="public_url" type="string">Relative public URL.</ResponseField>
+  </Expandable>
+</ResponseField>
 
-Separate from per-page publish flags, mark pages with `visibility: public` in frontmatter:
+```json
+{
+  "count": 2,
+  "pages": [
+    { "path": "concepts/billing.md", "published_at": "2026-10-19T09:00:00Z", "public_url": "/p/concepts/billing.md" },
+    { "path": "concepts/auth.md", "published_at": "2026-10-02T14:30:00Z", "public_url": "/p/concepts/auth.md" }
+  ]
+}
+```
+
+## Read a published page
+
+Render a published or `visibility: public` page. This route sits outside `/api/kiwi` and never requires authentication.
+
+```http
+GET /p/{path}
+```
+
+<ParamField path="path" type="string" required>
+  Page path. `.md` is appended if the path has no extension.
+</ParamField>
+<ParamField header="Accept" type="string" default="text/html">
+  `text/html` for a themed reader page, `text/markdown` for the raw file, or `application/json` for frontmatter plus rendered HTML.
+</ParamField>
 
 <CodeGroup>
-```bash Read public file
-curl 'http://localhost:3333/api/kiwi/public/file?path=concepts/open.md'
+```bash HTML
+curl 'http://localhost:3333/p/concepts/auth'
 ```
 
-```bash Browse public tree
-curl 'http://localhost:3333/api/kiwi/public/tree?path='
+```bash JSON
+curl 'http://localhost:3333/p/concepts/auth.md' -H "Accept: application/json"
+```
+
+```bash Markdown
+curl 'http://localhost:3333/p/concepts/auth.md' -H "Accept: text/markdown"
 ```
 </CodeGroup>
 
-<Note>
-Non-public pages return `404` to avoid leaking existence.
-</Note>
+Returns `404` for pages that aren't published or public, so private pages don't leak their existence, and `406` for an `Accept` header with no supported type. Images and other non-markdown files are served when a markdown page in the same folder or a parent folder is published or public. Responses carry `Cache-Control: public, max-age=60`.
 
-## Related documentation
+With `Accept: application/json`:
+
+<ResponseField name="frontmatter" type="object">Page frontmatter.</ResponseField>
+<ResponseField name="html" type="string">Rendered body HTML, with heading IDs.</ResponseField>
+<ResponseField name="markdown" type="string">Page body without frontmatter.</ResponseField>
+
+```json
+{
+  "frontmatter": { "title": "Authentication", "published": true, "published_at": "2026-10-02T14:30:00Z" },
+  "html": "<h2 id=\"overview\">Overview</h2>\n<p>OAuth2 and JWT...</p>\n",
+  "markdown": "## Overview\n\nOAuth2 and JWT...\n"
+}
+```
+
+## Read public files
+
+Fetch one public or published file without authentication. Use this when you want raw bytes instead of the rendered reader page.
+
+```http
+GET /api/kiwi/public/file
+```
+
+<ParamField query="path" type="string" required>
+  File path.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/public/file?path=concepts/open.md'
+```
+
+Returns the raw file with a content type based on its extension. Returns `400` for a missing or escaping path and `404` for files that aren't public. Non-markdown files follow the same folder rule as `/p/`.
+
+## Browse the public tree
+
+Return the directory tree, filtered to public and published pages.
+
+```http
+GET /api/kiwi/public/tree
+```
+
+<ParamField query="path" type="string" default="/">
+  Folder to start from.
+</ParamField>
+<ParamField query="filter" type="string">
+  Set to `published` to include only published pages and skip `visibility: public` pages.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/public/tree?filter=published'
+```
+
+Folders with no visible pages are omitted. Returns `404` if `path` does not exist.
+
+```json
+{
+  "path": "",
+  "name": "/",
+  "isDir": true,
+  "children": [
+    {
+      "path": "concepts",
+      "name": "concepts",
+      "isDir": true,
+      "children": [
+        { "path": "concepts/auth.md", "name": "auth.md", "isDir": false, "size": 1420 }
+      ]
+    }
+  ]
+}
+```
+
+## Create a share link
+
+Create a token that grants read access to one file, with an optional expiry and password. The page does not need to be published.
+
+```http
+POST /api/kiwi/share
+```
+
+<ParamField header="X-Actor" type="string">
+  Recorded as `createdBy`.
+</ParamField>
+<ParamField body="path" type="string" required>
+  File path. Returns `404` if it does not exist.
+</ParamField>
+<ParamField body="expiresIn" type="string">
+  Go duration such as `168h`. Omit for a link that never expires.
+</ParamField>
+<ParamField body="password" type="string">
+  Password readers must supply. Stored as a bcrypt hash and never returned.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/share' \
+  -H "Content-Type: application/json" \
+  -H "X-Actor: agent:sharer" \
+  -d '{"path": "concepts/auth.md", "expiresIn": "168h", "password": "s3cret"}'
+```
+
+Returns `400` for an invalid `expiresIn` and `501` if share links are disabled on this server.
+
+<ResponseField name="id" type="string">Link ID, used to revoke it.</ResponseField>
+<ResponseField name="path" type="string">Shared file path.</ResponseField>
+<ResponseField name="token" type="string">Secret token for the public URL.</ResponseField>
+<ResponseField name="expiresAt" type="string">Expiry time (RFC 3339). A zero time (`0001-01-01T00:00:00Z`) means no expiry.</ResponseField>
+<ResponseField name="createdBy" type="string">Actor that created the link.</ResponseField>
+<ResponseField name="createdAt" type="string">Creation time.</ResponseField>
+<ResponseField name="viewCount" type="integer">Times the link has been opened.</ResponseField>
+
+```json
+{
+  "id": "9f8e7d6c5b4a3921",
+  "path": "concepts/auth.md",
+  "token": "3c1f0a9e8d7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a",
+  "expiresAt": "2026-10-26T14:30:00Z",
+  "createdBy": "agent:sharer",
+  "createdAt": "2026-10-19T14:30:00Z",
+  "viewCount": 0
+}
+```
+
+## List share links
+
+Return the share links for one file.
+
+```http
+GET /api/kiwi/share
+```
+
+<ParamField query="path" type="string" required>
+  File path.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/share?path=concepts/auth.md'
+```
+
+Returns a JSON array of share links with the fields shown in [Create a share link](#create-a-share-link). Returns `501` if share links are disabled.
+
+## Revoke a share link
+
+Delete a share link by its `id` (not its token).
+
+```http
+DELETE /api/kiwi/share/:id
+```
+
+<ParamField path="id" type="string" required>
+  Link ID.
+</ParamField>
+
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/share/9f8e7d6c5b4a3921'
+```
+
+Returns `404` if the link does not exist.
+
+```json
+{ "revoked": "9f8e7d6c5b4a3921" }
+```
+
+## Open a share link
+
+Return the raw shared file. This route needs no API key.
+
+```http
+GET /api/kiwi/public/:token
+```
+
+<ParamField path="token" type="string" required>
+  Share token.
+</ParamField>
+<ParamField query="password" type="string">
+  Password for a protected link.
+</ParamField>
+<ParamField header="X-Share-Password" type="string">
+  Alternative to the `password` query parameter.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/public/3c1f0a9e8d7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a' \
+  -H "X-Share-Password: s3cret"
+```
+
+Returns `401` with a `WWW-Authenticate` header when the password is missing or wrong, and `404` when the token is unknown or expired.
+
+## Get space visibility
+
+Return the current space's visibility and root directory.
+
+```http
+GET /api/kiwi/space/info
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/space/info'
+```
+
+<ResponseField name="visibility" type="string">`private`, `unlisted`, or `public`. Defaults to `private`.</ResponseField>
+<ResponseField name="root" type="string">Absolute path of the knowledge root on the server.</ResponseField>
+
+```json
+{ "visibility": "private", "root": "/data/knowledge" }
+```
+
+## Set space visibility
+
+Change who can read the space without an API key. The value is saved to `[space] visibility` in `.kiwi/config.toml` and applies immediately.
+
+```http
+PUT /api/kiwi/space/visibility
+```
+
+<ParamField body="visibility" type="string" required>
+  - `private`: every request needs auth (when auth is configured).
+  - `unlisted`: `GET` requests to `/file`, `/peek`, and `/section` with a `path` are open; listing, tree, and search still need auth.
+  - `public`: every `GET` and `HEAD` request under `/api/kiwi` is open.
+</ParamField>
+
+```bash
+curl -X PUT 'http://localhost:3333/api/kiwi/space/visibility' \
+  -H "Authorization: Bearer $KIWI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"visibility": "unlisted"}'
+```
+
+Returns `400` for any other value.
+
+```json
+{ "visibility": "unlisted" }
+```
+
+<Warning>
+Space visibility only relaxes reads. Writes always need auth when auth is configured.
+</Warning>
+
+## Related
 
 <CardGroup cols={2}>
-  <Card title="Web UI" icon="window" href="/guides/web-ui#publishing">
-    Publish toggle in the page header.
+  <Card title="Publishing concepts" icon="globe" href="/concepts/publishing">
+    When to publish, share, or open a space.
   </Card>
-  <Card title="Utilities API" icon="screwdriver-wrench" href="/api/utilities">
-    Share links and public routes.
+  <Card title="Web UI" icon="window" href="/guides/web-ui#publishing-and-pdf-export">
+    The publish toggle in the page header.
   </Card>
 </CardGroup>

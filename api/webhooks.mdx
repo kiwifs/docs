@@ -1,42 +1,71 @@
 ---
 title: "Webhooks"
-description: "Register, list, and delete webhooks for real-time change notifications."
+description: "Register, list, and delete webhooks that POST to your endpoint when pages change."
 icon: "webhook"
 ---
 
-<Note>
-Webhooks must be enabled in configuration. See [Webhooks concept](/concepts/webhooks) for setup and signature verification.
-</Note>
+A webhook sends a signed JSON `POST` to your URL whenever a file matching its path pattern changes. Use webhooks to trigger CI, sync to another system, or notify a chat channel. For in-process consumers, the [SSE event stream](/api/utilities) is simpler.
+
+Webhooks are off by default. Turn them on in config:
+
+```toml .kiwi/config.toml
+[webhooks]
+enabled = true
+max_workers = 4   # concurrent deliveries
+max_retries = 5   # default 5
+```
+
+When webhooks are off, every endpoint on this page returns `503` with `webhooks not enabled`. See [Webhooks](/concepts/webhooks) for delivery details.
 
 ## Register a webhook
+
+Create a webhook and return its signing secret. The secret is only returned here, so store it.
 
 ```http
 POST /api/kiwi/webhooks
 ```
 
 <ParamField body="url" type="string" required>
-  HTTPS endpoint to receive POST notifications.
+  Endpoint that receives `POST` requests.
 </ParamField>
-<ParamField body="path_glob" type="string" default="**">
-  Glob pattern to filter which file changes trigger this webhook. Defaults to all files.
+<ParamField body="path_glob" type="string" required>
+  Which paths trigger the webhook. `**` matches everything, `concepts/**` matches everything under `concepts/`, and other patterns use shell glob rules against the path without a leading slash (for example `runbooks/*.md`).
+</ParamField>
+<ParamField body="event_types" type="string[]">
+  Only fire for these event types. Omit to receive all. See [Event payload](#event-payload).
 </ParamField>
 
 ```bash
 curl -X POST 'http://localhost:3333/api/kiwi/webhooks' \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com/hook", "path_glob": "concepts/**"}'
+  -d '{"url": "https://example.com/hook", "path_glob": "concepts/**", "event_types": ["write", "delete"]}'
 ```
 
-<ResponseField name="id" type="string">Unique webhook identifier.</ResponseField>
-<ResponseField name="url" type="string">Registered endpoint URL.</ResponseField>
-<ResponseField name="path_glob" type="string">Path filter pattern.</ResponseField>
-<ResponseField name="secret" type="string">HMAC signing secret (only returned at creation).</ResponseField>
-<ResponseField name="created_at" type="string">ISO 8601 creation timestamp.</ResponseField>
-<ResponseField name="enabled" type="boolean">Whether the webhook is active.</ResponseField>
+Returns `201` on success and `400` if `url` or `path_glob` is missing.
 
-Returns `503` if webhooks are not enabled in configuration.
+<ResponseField name="id" type="string">Webhook ID, prefixed `wh_`.</ResponseField>
+<ResponseField name="url" type="string">Registered endpoint.</ResponseField>
+<ResponseField name="path_glob" type="string">Path pattern.</ResponseField>
+<ResponseField name="secret" type="string">Signing secret, prefixed `whsec_`. Only returned at creation.</ResponseField>
+<ResponseField name="created_at" type="string">Creation time (RFC 3339).</ResponseField>
+<ResponseField name="enabled" type="boolean">Whether the webhook fires.</ResponseField>
+<ResponseField name="event_types" type="string[]">Event filter. Omitted when the webhook receives every type.</ResponseField>
+
+```json
+{
+  "id": "wh_3f9a1c7e2b4d6a80",
+  "url": "https://example.com/hook",
+  "path_glob": "concepts/**",
+  "secret": "whsec_8c1e0f4b9a7d2e6c3b5a1f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c",
+  "created_at": "2026-10-19T14:30:00Z",
+  "enabled": true,
+  "event_types": ["write", "delete"]
+}
+```
 
 ## List webhooks
+
+Return every registered webhook, without secrets.
 
 ```http
 GET /api/kiwi/webhooks
@@ -46,16 +75,87 @@ GET /api/kiwi/webhooks
 curl 'http://localhost:3333/api/kiwi/webhooks'
 ```
 
-Returns an array of webhooks. The `secret` field is omitted from list responses.
+Returns a JSON array with the fields from [Register a webhook](#register-a-webhook), minus `secret`.
+
+```json
+[
+  {
+    "id": "wh_3f9a1c7e2b4d6a80",
+    "url": "https://example.com/hook",
+    "path_glob": "concepts/**",
+    "created_at": "2026-10-19T14:30:00Z",
+    "enabled": true,
+    "event_types": ["write", "delete"]
+  }
+]
+```
 
 ## Delete a webhook
+
+Remove a webhook by ID.
 
 ```http
 DELETE /api/kiwi/webhooks/:id
 ```
 
+<ParamField path="id" type="string" required>
+  Webhook ID.
+</ParamField>
+
 ```bash
-curl -X DELETE 'http://localhost:3333/api/kiwi/webhooks/wh_abc123'
+curl -X DELETE 'http://localhost:3333/api/kiwi/webhooks/wh_3f9a1c7e2b4d6a80'
 ```
 
-Returns `204 No Content` on success.
+Returns `204 No Content` on success and `404` if the ID does not exist.
+
+## Event payload
+
+Each delivery is a `POST` with a JSON body. A change that touches several files sends one delivery per file.
+
+<ResponseField name="type" type="string">
+  `write`, `delete`, `bulk`, `rollback`, or `transition` (a workflow state change).
+</ResponseField>
+<ResponseField name="path" type="string">Changed file.</ResponseField>
+<ResponseField name="actor" type="string">Who made the change.</ResponseField>
+<ResponseField name="timestamp" type="string">Event time (RFC 3339).</ResponseField>
+<ResponseField name="field" type="string">For `transition`: the frontmatter field that changed.</ResponseField>
+<ResponseField name="from_state" type="string">For `transition`: previous value.</ResponseField>
+<ResponseField name="to_state" type="string">For `transition`: new value.</ResponseField>
+
+```json
+{
+  "type": "write",
+  "path": "concepts/auth.md",
+  "actor": "agent:docs-writer",
+  "timestamp": "2026-10-19T14:31:02Z"
+}
+```
+
+Failed deliveries (network errors or non-2xx responses) are retried after 5 seconds, 30 seconds, 2 minutes, 15 minutes, and 1 hour, up to `max_retries`.
+
+### Verify signatures
+
+Every delivery carries [Standard Webhooks](https://www.standardwebhooks.com) headers (`webhook-id`, `webhook-timestamp`, `webhook-signature`) and a simpler `X-Kiwi-Signature-256` header. For the simple header, compute an HMAC-SHA256 of the raw request body with the full secret string as the key, and compare:
+
+```
+X-Kiwi-Signature-256: sha256=<hex digest>
+```
+
+```python verify.py
+import hmac, hashlib
+
+def verify(secret: str, body: bytes, header: str) -> bool:
+    expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, header)
+```
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Webhooks concepts" icon="webhook" href="/concepts/webhooks">
+    Delivery model and use cases.
+  </Card>
+  <Card title="Workflows" icon="bars-progress" href="/api/workflows">
+    State changes that send `transition` events.
+  </Card>
+</CardGroup>

@@ -1,106 +1,171 @@
 ---
 title: "Quickstart"
-description: "Install and run KiwiFS in 60 seconds."
+description: "Install KiwiFS, start a server, write a page, and confirm it was searched and versioned."
 icon: "rocket"
 ---
 
+This takes about five minutes. You need macOS or Linux (amd64 or arm64), or Docker.
+
 <Steps>
-  <Step title="Install">
+  <Step title="Install KiwiFS">
     <Tabs>
-      <Tab title="Shell">
-        ```bash
-        curl -fsSL https://raw.githubusercontent.com/kiwifs/kiwifs/main/install.sh | sh
-        ```
-      </Tab>
-      <Tab title="Homebrew">
-        ```bash
-        brew install kiwifs/tap/kiwifs
-        ```
-      </Tab>
-      <Tab title="Go">
-        ```bash
-        go install github.com/kiwifs/kiwifs@latest
-        ```
-      </Tab>
-      <Tab title="Docker">
-        ```bash
-        docker run -p 3333:3333 -v ./knowledge:/data ameliaanhlam/kiwifs
+      <Tab title="Release binary">
+        Download the latest release for your platform and put it on your `PATH`:
+
+        ```bash Terminal
+        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+        ARCH=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
+        curl -fsSL "https://github.com/kiwifs/kiwifs/releases/latest/download/kiwifs-$OS-$ARCH.tar.gz" | tar -xz
+        sudo mv "kiwifs-$OS-$ARCH" /usr/local/bin/kiwifs
+        kiwifs --version
         ```
 
-        <Note>
-        The Docker image runs `kiwifs serve` with default settings. Skip to step 4 — init and serve are handled automatically.
-        </Note>
+        All builds are on the [releases page](https://github.com/kiwifs/kiwifs/releases), each with a `.sha256` checksum.
+      </Tab>
+      <Tab title="Docker">
+        ```bash Terminal
+        docker run -d --name kiwifs -p 3333:3333 -v kiwifs-data:/data ameliaanhlam/kiwifs
+        ```
+
+        The container runs `kiwifs serve --root /data` and creates a knowledge base from the `kb` template on first start. Skip to step 4.
+
+        To keep the files in a host folder instead of a named volume, see [Docker](/deploy/docker).
+      </Tab>
+      <Tab title="From source">
+        Requires Go 1.27+, Node 20+, and `make`. The build compiles the web UI and embeds it in the binary.
+
+        ```bash Terminal
+        git clone https://github.com/kiwifs/kiwifs.git
+        cd kiwifs
+        make build
+        ./kiwifs --version
+        ```
+
+        <Warning>
+        `go install github.com/kiwifs/kiwifs@latest` does not work: the module does not include the built web UI, so the embed step fails. Use `make build`.
+        </Warning>
       </Tab>
     </Tabs>
   </Step>
 
-  <Step title="Initialize a knowledge base">
-    ```bash
-    kiwifs init --template kb --root ./knowledge
+  <Step title="Create a knowledge base">
+    ```bash Terminal
+    kiwifs init --root ./knowledge
     ```
 
-    This creates a directory with starter files, a schema, and an agent playbook.
+    This scaffolds the default `kb` template: sample pages, page schemas, a workflow, and a `.kiwi/` folder with configuration and an agent playbook.
 
-    <Tip>
-    Templates: `kb`, `wiki`, `memory`, `tasks`, `data`, `cms`, `runbook`, `adr`, `prompt`, `research`, `log`, and `blank`. See [Init templates](/guides/templates).
-    </Tip>
+    <Tree>
+      <Tree.Folder name="knowledge" defaultOpen>
+        <Tree.Folder name=".kiwi" defaultOpen>
+          <Tree.File name="config.toml" />
+          <Tree.File name="playbook.md" />
+          <Tree.File name="rules.md" />
+          <Tree.Folder name="schemas" />
+          <Tree.Folder name="templates" />
+          <Tree.Folder name="workflows" />
+        </Tree.Folder>
+        <Tree.Folder name="getting-started" />
+        <Tree.Folder name="guides" />
+        <Tree.Folder name="reference" />
+        <Tree.File name="index.md" />
+        <Tree.File name="SCHEMA.md" />
+      </Tree.Folder>
+    </Tree>
+
+    Pass `--template` to start from something else, such as `wiki`, `memory`, `tasks`, `adr`, or `blank`. See [Init templates](/guides/templates) for all twelve.
   </Step>
 
   <Step title="Start the server">
-    ```bash
+    ```bash Terminal
     kiwifs serve --root ./knowledge
     ```
 
-    KiwiFS is now running at `http://localhost:3333`. Open it in your browser to see the web UI.
+    Open [http://localhost:3333](http://localhost:3333) to see the web UI. The same port serves the REST API under `/api/kiwi/` and MCP over HTTP at `/mcp`.
+
+    <Tip>
+    You can skip `init`. If the root has no `.kiwi/config.toml`, `serve` initializes it with the `kb` template first.
+    </Tip>
   </Step>
 
-  <Step title="Write from your agent">
+  <Step title="Write a page">
+    Write through the API or straight to disk. Both go through the same pipeline.
+
     <CodeGroup>
-    ```bash Via REST
-    curl -X PUT 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
-      -H "X-Actor: my-agent" \
-      -d "# Authentication
-
-    OAuth2 + JWT based authentication system."
+    ```bash REST
+    curl -X PUT 'http://localhost:3333/api/kiwi/file?path=notes/auth.md' \
+      -H 'X-Actor: my-agent' \
+      --data-binary $'# Authentication\n\nOAuth2 with JWT access tokens.\n'
     ```
 
-    ```bash Via filesystem
-    echo "# Authentication" > ./knowledge/concepts/auth.md
-    ```
-
-    ```bash Via MCP
-    kiwifs mcp --root ./knowledge
+    ```bash Filesystem
+    mkdir -p knowledge/notes
+    printf '# Authentication\n\nOAuth2 with JWT access tokens.\n' > knowledge/notes/auth.md
     ```
     </CodeGroup>
+
+    The REST call returns the new ETag, which you pass as `If-Match` on later writes to detect conflicts:
+
+    ```json
+    {"etag":"934818f7f7cc3f1a23edc793a08bc8720fc05085","path":"notes/auth.md"}
+    ```
   </Step>
 
-  <Step title="Search">
-    ```bash
-    curl 'http://localhost:3333/api/kiwi/search?q=authentication'
+  <Step title="Verify it was indexed and versioned">
+    ```bash Terminal
+    curl 'http://localhost:3333/api/kiwi/search?q=jwt'
+    curl 'http://localhost:3333/api/kiwi/versions?path=notes/auth.md'
     ```
 
+    The search returns `notes/auth.md` with the match highlighted. The versions list shows one commit whose author is `my-agent`, or `fswatch` if you wrote to disk.
+
     <Check>
-    You now have a searchable, versioned knowledge base. Every write is a git commit.
+    Your knowledge base is running. Every write is now searchable within a moment and recorded as a git commit.
     </Check>
   </Step>
 </Steps>
 
-## Connect an AI agent
+## Connect an agent
 
-Add KiwiFS as an MCP server in Claude Desktop or Cursor:
+Point an MCP client at the running server. Your agent gets 78 tools for reading, writing, searching, querying, refactoring, and coordinating through drafts and claims.
 
-```json
-{
-  "mcpServers": {
-    "kiwifs": {
-      "command": "kiwifs",
-      "args": ["mcp", "--root", "/path/to/knowledge"]
+<Tabs>
+  <Tab title="Claude Code">
+    ```bash Terminal
+    claude mcp add --transport http kiwifs http://localhost:3333/mcp
+    ```
+  </Tab>
+  <Tab title="Claude Desktop and Cursor">
+    ```json MCP config
+    {
+      "mcpServers": {
+        "kiwifs": {
+          "command": "kiwifs",
+          "args": ["mcp", "--remote", "http://localhost:3333"]
+        }
+      }
     }
-  }
-}
-```
+    ```
+  </Tab>
+  <Tab title="No server">
+    Without a running server, `kiwifs mcp` can open the folder directly:
 
-Your agent now has access to **71 MCP tools** for reading, writing, searching, querying, drafts, and more. See [MCP](/concepts/mcp) for the full tool reference.
+    ```json MCP config
+    {
+      "mcpServers": {
+        "kiwifs": {
+          "command": "kiwifs",
+          "args": ["mcp", "--root", "/absolute/path/to/knowledge"]
+        }
+      }
+    }
+    ```
+
+    Use `--remote` instead whenever `kiwifs serve` is running on the same folder, so that one process owns the writes.
+  </Tab>
+</Tabs>
+
+See [MCP](/concepts/mcp) for the tool reference and remote auth.
 
 ## Next steps
 
@@ -108,19 +173,13 @@ Your agent now has access to **71 MCP tools** for reading, writing, searching, q
   <Card title="Configuration" icon="gear" href="/configuration">
     Auth, search, versioning, vector embeddings, and more.
   </Card>
-  <Card title="Agent Interface" icon="robot" href="/concepts/agent-interface">
+  <Card title="Agent interface" icon="robot" href="/concepts/agent-interface">
     Filesystem, REST, and MCP access patterns.
-  </Card>
-  <Card title="Search" icon="magnifying-glass" href="/concepts/search">
-    Grep, FTS5, hybrid, and vector search.
-  </Card>
-  <Card title="DQL" icon="database" href="/concepts/dql">
-    Query frontmatter metadata with a SQL-like language.
-  </Card>
-  <Card title="Deploy with Docker" icon="docker" href="/deploy/docker">
-    Production deployment with Docker Compose.
   </Card>
   <Card title="Web UI" icon="window" href="/guides/web-ui">
     Tree, editor, graph, Bases, and search.
+  </Card>
+  <Card title="Deploy with Docker" icon="docker" href="/deploy/docker">
+    Run KiwiFS in production with Docker Compose.
   </Card>
 </CardGroup>

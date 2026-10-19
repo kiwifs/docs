@@ -1,45 +1,79 @@
 ---
 title: "Croissant"
-description: "Import MLCommons Croissant dataset metadata as a queryable markdown page."
-icon: "database"
+description: "Import MLCommons Croissant dataset metadata as one queryable markdown page."
+icon: "table-list"
 ---
 
-[MLCommons Croissant](https://mlcommons.org/croissant/) describes a dataset — not rows. KiwiFS imports one Croissant document as one page: the dataset description lands in frontmatter, and the column schema lands in `kiwi-data` blocks so you can query it with DQL.
+[MLCommons Croissant](https://mlcommons.org/croissant/) describes a dataset, not its rows. KiwiFS imports one Croissant document as one page: dataset metadata goes into frontmatter, and the file list and column schema go into `kiwi-data` blocks you can query with DQL. Use it to build a searchable catalog of the datasets your team uses.
 
 ## Import
 
 <Tabs>
   <Tab title="URL">
-    ```bash
-    kiwifs import --from croissant --url https://www.kaggle.com/datasets/OWNER/NAME/croissant/download --root ./knowledge
+    ```bash Terminal
+    kiwifs import --from croissant \
+      --url https://www.kaggle.com/datasets/OWNER/NAME/croissant/download \
+      --root ./knowledge
     ```
   </Tab>
   <Tab title="File">
-    ```bash
+    ```bash Terminal
     kiwifs import --from croissant --file croissant.json --root ./knowledge
+    ```
+  </Tab>
+  <Tab title="REST">
+    ```bash Terminal
+    curl -X POST http://localhost:3333/api/kiwi/import \
+      -H "Content-Type: application/json" \
+      -d '{"from": "croissant", "url": "https://huggingface.co/api/datasets/OWNER/NAME/croissant"}'
     ```
   </Tab>
 </Tabs>
 
+The page is written to `<dataset-slug>/data.md`, where the slug comes from the dataset name. Pass `--prefix` to choose another folder. Fetched documents are limited to 32 MB and 60 seconds.
+
+## What the page contains
+
+| Part | Content |
+| --- | --- |
+| Frontmatter | `title`, `kind: dataset`, `description`, `url`, `license`, `version`, `keywords`, `creator`, `cite-as`, `date-published`, `record-sets`, `fields`, `croissant-origin` |
+| `## Files` | A `kiwi-data` block of kind `dataset-file`, one record per file or file set |
+| `## Record set: <name>` | A `kiwi-data` block of kind `dataset-schema`, one record per column |
+
+Each `dataset-schema` record has these fields:
+
+| Field | Description |
+| --- | --- |
+| `record-set` | The record set the column belongs to |
+| `name` | Column name |
+| `dtype` | Short type such as `integer`, `float`, `text`, `boolean`, `date`, `url`, or `image`. Null when the type isn't recognized. |
+| `description` | Column description |
+| `column`, `source-file` | Where the value comes from in the source files |
+| `references` | The field this column references, if any |
+| `field-id` | The Croissant field ID |
+
 ## Query the schema
 
-```sql
-TABLE name, dtype, column, source-file
+Use `FROM RECORDS` to query the column records across every imported dataset. The page's frontmatter, such as `title`, is available alongside each record's fields.
+
+```sql DQL
+TABLE title, name, dtype, column, source-file
 FROM RECORDS "dataset-schema"
 WHERE dtype = "float"
+SORT title ASC
 ```
 
 <Note>
-Croissant is JSON-LD. The importer expands the document to absolute IRIs before reading it, so two emitters can use different property names for the same dataset. Contexts resolve offline: an inline `@context` (what Kaggle and Hugging Face emit) and the well-known MLCommons context URL both work with no network. Any other remote context is refused rather than fetched.
+Croissant is JSON-LD. KiwiFS expands the document to absolute IRIs before reading it, so emitters that use different property names for the same thing still import correctly. Contexts resolve offline: an inline `@context`, which Kaggle and Hugging Face emit, and the well-known MLCommons context URL both work without network access. KiwiFS refuses any other remote context rather than fetching it.
 </Note>
 
 ## Related
 
 <CardGroup cols={2}>
-  <Card title="Import overview" icon="download" href="/import/overview">
-    All supported sources.
-  </Card>
   <Card title="Widgets" icon="puzzle-piece" href="/concepts/widgets">
-    `kiwi-data` blocks and `FROM RECORDS`.
+    How `kiwi-data` blocks render and store records.
+  </Card>
+  <Card title="DQL" icon="magnifying-glass" href="/concepts/dql">
+    Query syntax, including `FROM RECORDS`.
   </Card>
 </CardGroup>

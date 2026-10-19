@@ -1,51 +1,56 @@
 ---
 title: "Examples"
-description: "Practical workflows for agents, DQL, import/export, and deployment."
+description: "Copy-paste recipes for agent memory, writes with provenance, DQL, restructuring, import, export, and deployment."
 icon: "lightbulb"
 ---
 
-## LLM wiki pattern
+Short, working recipes for common KiwiFS tasks. Each one links to the page with the full reference.
 
-```bash
-kiwifs init --template kb --root ./knowledge
+## Agent memory knowledge base
+
+Start from the `memory` template and let agents read the playbook on connect:
+
+```bash Terminal
+kiwifs init --template memory --root ./knowledge
+kiwifs serve --root ./knowledge
 ```
 
-```text Directory structure
-knowledge/
-├── SCHEMA.md
-├── index.md
-├── log.md
-├── pages/
-├── episodes/
-└── .kiwi/playbook.md
-```
+<Tree>
+  <Tree.Folder name="knowledge" defaultOpen>
+    <Tree.File name="SCHEMA.md" />
+    <Tree.File name="playbook.md" />
+    <Tree.File name="index.md" />
+    <Tree.File name="log.md" />
+    <Tree.Folder name="pages" />
+    <Tree.Folder name="episodes" />
+    <Tree.Folder name=".kiwi" />
+  </Tree.Folder>
+</Tree>
 
-Call **`kiwi_context`** on connect, then follow playbook operations.
-
-See [Agent playbook](/concepts/agent-playbook).
+An agent calls `kiwi_context` first, then follows the operations in the playbook. See [Agent playbook](/concepts/agent-playbook) and [Init templates](/guides/templates).
 
 ## Agent writes
 
 <AccordionGroup>
-  <Accordion title="REST — single file">
-    ```bash
+  <Accordion title="REST: write one file with provenance">
+    ```bash Terminal
     curl -X PUT 'http://localhost:3333/api/kiwi/file?path=pages/auth.md' \
       -H 'X-Actor: my-agent' \
       -H 'X-Provenance: run:run-249' \
-      -d '# Authentication
-
-    OAuth2 + JWT.'
+      --data-binary $'# Authentication\n\nOAuth2 + JWT.'
     ```
+
+    `X-Provenance` adds a `derived-from` entry to the page's frontmatter.
   </Accordion>
 
-  <Accordion title="REST — bulk write (one commit)">
-    ```bash
+  <Accordion title="REST: write several files in one commit">
+    ```bash Terminal
     curl -X POST 'http://localhost:3333/api/kiwi/bulk' \
       -H 'Content-Type: application/json' \
       -d '{
         "files": [
           {"path": "pages/auth.md", "content": "# Auth\n\nUpdated."},
-          {"path": "log.md", "content": "- 2026-05-21: updated auth"}
+          {"path": "pages/sessions.md", "content": "# Sessions\n\nNew."}
         ],
         "actor": "agent:exec_abc",
         "message": "run 249"
@@ -53,14 +58,24 @@ See [Agent playbook](/concepts/agent-playbook).
     ```
   </Accordion>
 
-  <Accordion title="Filesystem mount">
-    ```bash
-    echo "# Finding" > /mnt/kiwi/pages/finding-042.md
+  <Accordion title="REST: append to a log">
+    ```bash Terminal
+    curl -X POST 'http://localhost:3333/api/kiwi/file/append?path=log.md' \
+      -H 'X-Actor: my-agent' \
+      --data-binary $'\n- 2026-10-19: updated auth'
     ```
   </Accordion>
 
-  <Accordion title="Query provenance">
-    ```bash
+  <Accordion title="Filesystem mount">
+    ```bash Terminal
+    echo "# Finding" > /mnt/kiwi/pages/finding-042.md
+    ```
+
+    See [Alternate protocols](/guides/alternate-protocols).
+  </Accordion>
+
+  <Accordion title="Find everything one run produced">
+    ```bash Terminal
     curl 'http://localhost:3333/api/kiwi/meta?where=$.derived-from[*].id=run-249'
     ```
   </Accordion>
@@ -70,13 +85,13 @@ See [Agent playbook](/concepts/agent-playbook).
 
 <AccordionGroup>
   <Accordion title="First connection">
-    ```
+    ```text
     kiwi_context
     ```
   </Accordion>
 
   <Accordion title="Ingest a source">
-    ```
+    ```text
     kiwi_search("authentication")
     kiwi_write("pages/auth.md", content)
     kiwi_read("index.md")
@@ -86,30 +101,46 @@ See [Agent playbook](/concepts/agent-playbook).
   </Accordion>
 
   <Accordion title="Answer a question">
-    ```
+    ```text
     kiwi_search("payment timeout")
     kiwi_read("pages/payments.md")
     ```
   </Accordion>
 
-  <Accordion title="Remember (episodic)">
-    ```
-    kiwi_append("episodes/2026-05-21.md", observation)
-    ```
-  </Accordion>
-
-  <Accordion title="Consolidate episodes">
-    ```
-    kiwi_memory_report
-    kiwi_read("episodes/2026-05-21.md")
+  <Accordion title="Remember and consolidate">
+    ```text
+    kiwi_remember(observation)            # writes episodes/{date}/{id}.md
+    kiwi_memory_report                    # episodes not yet merged
     kiwi_write("pages/topic.md", merged_content_with_merged_from)
+    kiwi_forget("episodes/2026-10-19/abc.md")
     ```
 
     See [Episodic memory](/concepts/episodic-memory).
   </Accordion>
 
-  <Accordion title="Health check">
+  <Accordion title="Write a widget or quiz">
+    ```text
+    kiwi_widget_reference("tree")         # syntax for a widget fence
+    kiwi_quiz(...)                        # format a Kiwi Quiz callout
+    kiwi_write("lessons/heaps.md", content)
+    kiwi_lint("lessons/heaps.md")
     ```
+
+    See [Widgets](/concepts/widgets).
+  </Accordion>
+
+  <Accordion title="Restructure safely">
+    ```text
+    kiwi_refactor_plan(manifest)          # preview, nothing written
+    kiwi_refactor_apply(manifest, digest) # one commit
+    kiwi_refactor_revert(commit)          # undo if needed
+    ```
+
+    Some plans need a person to approve them in the web UI first. See [Refactor](/concepts/refactor).
+  </Accordion>
+
+  <Accordion title="Health check">
+    ```text
     kiwi_analytics
     kiwi_health_check("pages/auth.md")
     kiwi_lint
@@ -117,10 +148,10 @@ See [Agent playbook](/concepts/agent-playbook).
   </Accordion>
 </AccordionGroup>
 
-## DQL
+## Query with DQL
 
 <CodeGroup>
-```bash Table query
+```bash Table
 kiwifs query 'TABLE title, status FROM "pages" WHERE status = "draft" SORT priority DESC'
 ```
 
@@ -128,32 +159,64 @@ kiwifs query 'TABLE title, status FROM "pages" WHERE status = "draft" SORT prior
 kiwifs query 'COUNT FROM "pages" GROUP BY status'
 ```
 
+```bash Aggregate
+kiwifs aggregate --group status --calc count,avg:priority
+```
+
 ```bash REST
-curl 'http://localhost:3333/api/kiwi/query?q=TABLE%20title%20FROM%20%22pages%22'
+curl -G 'http://localhost:3333/api/kiwi/query' \
+  --data-urlencode 'q=TABLE title FROM "pages"'
 ```
 </CodeGroup>
 
-## Aggregation
+See [DQL](/concepts/dql).
 
-```bash
-kiwifs aggregate --group status --calc count,avg:priority
+## Move pages without breaking links
+
+Write a manifest, preview it, then apply it as one commit:
+
+```yaml restructure.yaml
+moves:
+  - from: notes/*-meeting.md
+    to: meetings/
+merges:
+  - from: faq/duplicate.md
+    into: faq/canonical.md
+rename_tags:
+  - {from: ml, to: machine-learning}
+delete_empty_dirs: true
 ```
+
+```bash Terminal
+kiwifs refactor plan restructure.yaml --root ./knowledge
+kiwifs refactor apply restructure.yaml --root ./knowledge
+kiwifs refactor revert <commit> --root ./knowledge   # undo
+```
+
+Every link to a moved page is rewritten in the style it was written in. See [Refactor](/concepts/refactor).
 
 ## Import
 
 <CodeGroup>
-```bash From PostgreSQL
-kiwifs import --from postgres --dsn "postgres://..." --table users --root ./knowledge
+```bash PostgreSQL
+kiwifs import --from postgres --dsn "postgres://user:pass@host/db" --table users --root ./knowledge
 ```
 
-```bash From Obsidian
+```bash Obsidian
 kiwifs import --from obsidian --path ~/vault --root ./knowledge
 ```
 
-```bash Dry run
-kiwifs import --from csv --path data.csv --root ./knowledge --dry-run
+```bash Notion
+export NOTION_API_KEY=secret_...
+kiwifs import --from notion --database-id abc123 --root ./knowledge
+```
+
+```bash CSV dry run
+kiwifs import --from csv --file data.csv --root ./knowledge --dry-run
 ```
 </CodeGroup>
+
+See [Import overview](/import/overview).
 
 ## Export
 
@@ -166,7 +229,7 @@ kiwifs export --format jsonl --include-content -o knowledge.jsonl
 kiwifs export --format jsonl --include-embeddings -o vectors.jsonl
 ```
 
-```bash Document render (PDF)
+```bash PDF (server-side)
 curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
   -H 'Content-Type: application/json' \
   -d '{"format":"pdf","path":"pages/report.md"}' -o report.pdf
@@ -181,8 +244,9 @@ See [Document export](/export/documents).
 [server]
 public_url = "https://wiki.example.com"
 
-[search]
-engine = "sqlite"
+[auth]
+type = "apikey"
+api_key = "${KIWI_API_KEY}"
 
 [search.vector]
 enabled = true
@@ -191,30 +255,48 @@ enabled = true
 provider = "ollama"
 model = "nomic-embed-text"
 
-[versioning]
-strategy = "git"
+[search.vector.store]
+provider = "sqlite"
 
 [backup]
 remote = "git@github.com:org/knowledge.git"
 interval = "5m"
 ```
 
+See [Configuration](/configuration) and [Authentication](/guides/auth-tokens).
+
 ## Docker
 
-```bash
+```bash Terminal
 docker run -d --restart always \
   -v /data/knowledge:/data \
   -p 3333:3333 \
-  ameliaanhlam/kiwifs serve --root /data
+  ameliaanhlam/kiwifs
 ```
+
+The image runs `kiwifs serve --root /data` by default. See [Docker](/deploy/docker).
 
 ## Go embed
 
-```go
+```go main.go
 import "github.com/kiwifs/kiwifs/pkg/kiwi"
 
 srv, err := kiwi.New("/data/knowledge", kiwi.WithSearch("sqlite"))
+if err != nil {
+    log.Fatal(err)
+}
 mux.Handle("/wiki/", http.StripPrefix("/wiki", srv.Handler()))
 ```
 
-See [Go embed](/deploy/go-embed) and [Alternate protocols](/guides/alternate-protocols).
+See [Go embed](/deploy/go-embed).
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="FAQ" icon="circle-question" href="/guides/faq">
+    Common questions.
+  </Card>
+  <Card title="MCP" icon="plug" href="/concepts/mcp">
+    Every MCP tool.
+  </Card>
+</CardGroup>

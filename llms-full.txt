@@ -2,611 +2,971 @@
 
 > Markdown filesystem for agents and teams. Searchable. Structured. Versioned.
 
-KiwiFS is a single Go binary that turns markdown files on disk into a searchable, queryable, versioned store accessible via REST, MCP, NFS, S3, WebDAV, and FUSE. Every write is a git commit. Search is built-in (BM25 via SQLite FTS5 + optional vector embeddings). Frontmatter metadata is queryable with DQL, a SQL-like language. A web UI with wiki links, knowledge graph, Bases, canvas, Kanban, and comments is included.
+KiwiFS is a single Go binary that turns a folder of markdown files into a knowledge server. Agents and people read and write the same files over REST, MCP, NFS, S3, WebDAV, or a FUSE mount. Files on disk are the source of truth; search indexes, link graphs, and query caches are derived and rebuildable (`kiwifs reindex`). Every write is a git commit authored by the writer. Search is BM25 over SQLite FTS5 by default, with optional vector and hybrid search. Frontmatter is queryable with DQL. The web UI (embedded in the binary) has wiki links, a graph, Bases, canvas, whiteboards, Kanban, comments, widgets, and a Restructure view.
 
 Documentation: https://docs.kiwifs.com
 GitHub: https://github.com/kiwifs/kiwifs
-OpenAPI spec (self-hosted): GET /api/openapi.json
+License: BSL 1.1 (each release converts to Apache 2.0 after four years)
+OpenAPI (any server): GET /api/openapi.json   Swagger UI: GET /api/docs
 
 ---
 
 ## Installation
 
-    # Shell one-liner
-    curl -fsSL https://raw.githubusercontent.com/kiwifs/kiwifs/main/install.sh | sh
+Platforms: macOS or Linux (amd64, arm64), or Docker.
 
-    # Go
-    go install github.com/kiwifs/kiwifs@latest
+    # Release binary (each build has a .sha256 checksum on the releases page)
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+    ARCH=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
+    curl -fsSL "https://github.com/kiwifs/kiwifs/releases/latest/download/kiwifs-$OS-$ARCH.tar.gz" | tar -xz
+    sudo mv "kiwifs-$OS-$ARCH" /usr/local/bin/kiwifs
+    kiwifs --version
 
-    # Docker
-    docker run -p 3333:3333 -v ./knowledge:/data ameliaanhlam/kiwifs
+    # Docker (image ameliaanhlam/kiwifs, linux/amd64 + linux/arm64, tags = versions + latest)
+    docker run -d --name kiwifs -p 3333:3333 -v kiwifs-data:/data ameliaanhlam/kiwifs
+    # Container runs `kiwifs serve --root /data`; an empty /data is initialized with the kb template.
+
+    # From source (Go 1.27+, Node 20+, make; builds and embeds the web UI)
+    git clone https://github.com/kiwifs/kiwifs.git && cd kiwifs && make build && ./kiwifs --version
+
+`go install github.com/kiwifs/kiwifs@latest` does not work (the module lacks the built web UI). Use `make build`.
+`kiwifs update` replaces the binary with the latest GitHub release.
+
+Build tags (source builds): `-tags nod2` removes D2 rendering (`/render/d2` then returns 501); `CGO_ENABLED=1 -tags onnx` adds the local ONNX embedder. Release binaries and Docker use the default build. `kiwifs mount` (FUSE) is unavailable on Windows.
+
+Go embedding: `go get github.com/kiwifs/kiwifs/pkg/kiwi`, then `kiwi.New(root, kiwi.WithSearch("sqlite"), kiwi.WithVersioning("git"), kiwi.WithAuth("apikey", key))`.
 
 ## Init and Serve
 
-    kiwifs init --template kb --root ./knowledge
-    kiwifs serve --root ./knowledge
+    kiwifs init --root ./knowledge              # default template: kb
+    kiwifs serve --root ./knowledge             # http://localhost:3333
 
-Server starts at http://localhost:3333 with the web UI, REST API, and optional NFS/S3/WebDAV.
+- One port (3333) serves the web UI, the REST API under /api/kiwi/, and Streamable HTTP MCP at /mcp.
+- `serve` on a folder without `.kiwi/config.toml` initializes it with the `kb` template first.
+- `init` never overwrites existing files.
+- NFS, S3, and WebDAV stay off until `--nfs`, `--s3`, `--webdav`.
+- A file watcher sends direct on-disk edits through the same pipeline (commit author `fswatch`); `--no-watch` disables it.
+
+First write and check:
+
+    curl -X PUT 'http://localhost:3333/api/kiwi/file?path=notes/auth.md' \
+      -H 'X-Actor: my-agent' --data-binary $'# Authentication\n\nOAuth2 with JWT access tokens.\n'
+    # -> {"etag":"934818f7...","path":"notes/auth.md"}
+    curl 'http://localhost:3333/api/kiwi/search?q=jwt'
+    curl 'http://localhost:3333/api/kiwi/versions?path=notes/auth.md'
 
 ## Init Templates
 
     kiwifs init --template <name> --root <dir>
 
-| Template   | Description                                             |
-|------------|---------------------------------------------------------|
-| knowledge  | LLM-maintained knowledge base with schema, episodes, playbook |
-| wiki       | Team wiki                                                |
-| runbook    | Ops/incidents runbook                                    |
-| research   | Research notes                                           |
-| tasks      | Task tracking with workflow schema                       |
-| blank      | Config only, no starter files                            |
+| Template | Best for | What you get |
+|----------|----------|--------------|
+| kb (default) | Curated knowledge bases | Article types, verification workflow (draft → review → verified → stale → archived), freshness checks (stale_days = 90) |
+| wiki | Team wikis | Onboarding, decisions, processes, reference docs |
+| memory | Agent memory | episodes/, pages/, log.md, consolidation playbook |
+| tasks | Task tracking | Task schema, workflow backlog → todo → in_progress → review → done (+ cancelled), WIP limits 5/3, claim fields |
+| data | Structured records | collections/, dashboards/ with kiwi-query and kiwi-chart, imports/ |
+| cms | Headless CMS | blog/docs/pages/authors, editorial workflow (draft → review → scheduled → published → archived), feeds, public reader at /p/* |
+| runbook | Ops and incidents | Severity P1–P4, services typed links, execution staleness (last_executed, last_outcome) |
+| adr | Architecture decisions | MADR format, workflow proposed → accepted → deprecated → superseded, auto-numbering (adr_number) |
+| prompt | Prompt registry | system-prompts/, task-prompts/, evaluation/ rubrics |
+| research | Literature and papers | papers/notes/reviews, reading workflow (unread → reading → annotated → summarized → incorporated), typed citation links |
+| log | Append-only event logs | Daily files with `append_only: true`; add entries with POST /file/append or kiwi_append |
+| blank | From scratch | Config, rules, and page templates only (no SCHEMA.md, no playbook) |
 
-The `knowledge` template creates:
-- SCHEMA.md — directory layout, frontmatter field tables, naming conventions
-- .kiwi/playbook.md — MCP tool sequences for each operation
-- .kiwi/rules.md — agent behavior per harness (Cursor, Claude, etc.)
-- index.md — auto-maintained table of contents
-- log.md — append-only change log
-- episodes/ — episodic memory directory
-- pages/ — durable knowledge pages
+Old names `knowledge` and `prompt-library` are now `memory` and `prompt`; using an old name returns an error naming the new one.
+
+Every template creates: `.kiwi/config.toml`, `.kiwi/rules.md`, `.kiwi/templates/` (decision, meeting notes, onboarding, product spec, SOP, task), `.gitignore` (ignores `.kiwi/state/`), `README.md`.
+Every template except `blank` also creates `SCHEMA.md` (layout, frontmatter fields, naming) and `playbook.md` (written to the root and to `.kiwi/playbook.md`; agents get it via kiwi_context).
+List templates over HTTP: `GET /api/init-templates` → `{"templates":[{"id","label","description"}]}`, sorted by label, `blank` last.
 
 ---
 
 ## Configuration
 
-Config file: .kiwi/config.toml (supports ${ENV_VAR} expansion)
+File: `.kiwi/config.toml` in the knowledge root. Every key is optional. Precedence (last wins): defaults → config.toml → environment variables → explicit `kiwifs serve` flags. Changes apply on restart; `SIGHUP` reloads `[auth]` in place. Any string can use `${ENV_VAR}` (unset expands to empty).
 
-Key sections:
+Starter file written by init:
 
     [server]
-    host = "0.0.0.0"
     port = 3333
-
+    host = "0.0.0.0"
+    [storage]
+    root = "."            # informational; --root wins
     [search]
-    engine = "sqlite"           # sqlite (FTS5) or grep
-    [search.vector]
-    embedder = "ollama"         # ollama, openai, cohere, voyage, http, bedrock, vertex
-    store = "sqlite-vec"
-
+    engine = "sqlite"
     [versioning]
-    strategy = "git"            # git, cow, or none
-
+    strategy = "git"
     [auth]
-    type = "none"               # none, apikey, perspace, oidc
-    api_key = "kiwi_sk_..."
+    type = "none"
 
-    [backup]
-    remote = "git@github.com:org/knowledge.git"
+Sections and keys (default in parentheses):
 
-    [webhooks]
-    [schema]
-    enforce = true
-    [drafts]
-    enabled = true
-    [audit]
-    enabled = true
+- [server]: host ("0.0.0.0"), port (3333), public_url (unset; base for permalinks, X-Permalink, share links; env KIWI_PUBLIC_URL), cors_origins ([]).
+- [server.cors]: allowed_origins ([]; "*" = any), allowed_methods (GET PUT POST DELETE OPTIONS), allow_credentials (false), max_age (3600). localhost/127.0.0.1/[::1] always allowed. Auth off → no other origins. Auth on + both lists empty → any origin.
+- [server.rate_limit]: requests_per_minute (0 = off), burst_size (50). Per hashed bearer token or IP. /health, /healthz, /readyz, /metrics never limited. Over limit → 429 with Retry-After: 60.
+- [search]: engine ("sqlite" | "grep"; DQL, Bases, analytics, most health checks need sqlite), async_index (true), index_window_ms (200), index_batch_max (100).
+- [search.vector]: enabled (false), worker_count (5).
+  - [search.vector.embedder] provider (openai): openai (api_key, model, base_url; alias azure-openai), ollama (model, base_url, timeout), cohere, voyage (api_key, model, base_url), http (url, headers), bedrock (model, region; AWS chain), vertex (project, location, model, credentials_file), onnx (model_path, tokenizer_path; needs -tags onnx build; fetch with `kiwifs model download`; also runtime_path, max_tokens, pooling mean|cls, normalize, query_prefix, passage_prefix, tensor-name overrides). `dimensions` where supported.
+  - [search.vector.store] provider (sqlite; alias sqlite-vec, stored in .kiwi/state/): qdrant (url, api_key, collection), pgvector (dsn, table), pinecone (url, api_key, namespace), weaviate (url, api_key, collection), milvus (url, api_key, collection).
+  - [search.vector.chunk]: size (1500 chars), overlap (0), context_template ("{{ .Headings }}"; fields .Title .Path .Headings .HeadingPath .Frontmatter), context_hook_url (POST per chunk → {"context": "..."}). Changing chunking affects new chunks only; run `kiwifs reindex`.
+- [versioning]: strategy ("git" | "cow" snapshots under .versions/ | "none"), async_commit (true; writes are journaled and recovered on restart), batch_window_ms (200), batch_max_size (50), max_versions (100, cow only). No git binary → warning and `none`.
+- [auth]: type ("none" | "apikey" | "perspace" | "oidc"), api_key. Flags --auth, --api-key, --oidc-issuer, --oidc-client-id override.
+  - [[auth.api_keys]] (perspace): key (required), space (required), actor, scope ("admin" default | read | write), prefix.
+  - [auth.oidc]: issuer, client_id.
+- [space]: name ("default"), visibility ("private" | "unlisted" | "public"; only matters with auth on; relaxes GET/HEAD). Change at runtime: PUT /api/kiwi/space/visibility.
+- [[spaces]]: name, root (relative to --root), visibility. Or `kiwifs serve --space name=path`.
+- [lint]: auto_format (true; table alignment, trailing whitespace, unclosed fences), reject_errors (true).
+- [schema]: enforce (false), discriminator ("type"), enforce_level ("reject" | "warn"). Schemas in .kiwi/schemas/{value}.json.
+- [links]: typed_fields (default ["contradicts", "supersedes", "superseded_by"]); frontmatter fields indexed as typed wiki links.
+- [[validate_write]]: name, match = {frontmatter = "status", value|values = [...]}, reject ("overwrite" | "body_change"), message. Applies to existing files only.
+- [sequences] directories: writes there get `<!-- seq:N -->` markers. [format_hooks.auto_sequence] directory, field: next number for new files.
+- [workflow]: enforce_transitions (false), [workflow.transitions] map status → allowed next statuses.
+- [refactor]: approval_files (50), approval_links (200) (agent plans above need human approval; -1 disables), protect ([] globs), scope (only folder plans may touch), folder_map (page listing allowed folders; unlisted folder = warning).
+- [drafts]: enabled (false; needs git), max_active (10).
+- [webhooks]: enabled (false), max_workers (4), max_retries (5; backoff 5s → 1h). [[webhook_entries]]: url, events (write, delete, transition, bulk, rollback), secret (generated if absent), path_glob ("**"); registered at startup, duplicate URLs skipped.
+- [audit]: enabled (false). Log at GET /api/kiwi/audit.
+- [janitor]: interval ("24h"; "0s" = off), stale_days (90), startup_scan (false). [janitor.execution_staleness]: directory, date_field (last_executed), max_age_days (= stale_days), [....flag_values] e.g. last_outcome = "failure".
+- [backup]: remote (unset = off), interval ("5m"), branch (current), rebase_before_push (true). Env KIWI_BACKUP_REMOTE, KIWI_BACKUP_INTERVAL, KIWI_BACKUP_REBASE_BEFORE_PUSH.
+- [dataview]: max_scan_rows (10000), query_timeout ("5s"), max_auto_indexes (20), [dataview.custom_fields] name = "DQL expression".
+- [[similarity.profiles]]: name, match = {field = value}, path_prefix, numeric [...], categorical [...], weights {field = n}. Used by GET /similar and kiwi_similar.
+- [memory]: episodes_path_prefix ("episodes/").
+- [ui]: theme_locked (false), start_page ("welcome" | "recent" | "dashboard" | page path), custom_css (".kiwi/custom.css"), keybindings_file (".kiwi/keybindings.json"), typed_fences (true), typed_fence_tags (all).
+  - [ui.features] (all true): edit, history, publish, graph, kanban, canvas, whiteboard, timeline, bases, data_sources. [ui.toolbar] views = subset of graph, bases, canvas, whiteboard, timeline, kanban, data.
+  - [ui.sidebar] pinned, hidden, [[ui.sidebar.sections]] label, paths. [ui.tags] banner (["tags"]), hide, [ui.tags.colors]. [ui.branding] name, logo_url, favicon_url, welcome_title, welcome_message. [ui.keybindings] action = "mod+j". [[ui.editor.slash_commands]] id, label, icon, description, template.
+- [assets]: max_file_size ("100MB"), allowed_types (images, video, audio, PDF).
+- [import]: airbyte_api_key, airbyte_workspace_id, docker_host ($DOCKER_HOST), prefer_airbyte (true), image_prefix ("airbyte/"), pull_policy ("if-not-present" | always | never).
+- [tracing]: enabled (true), output ("stderr" | "file"), file. JSON record per REST/MCP request.
+
+Environment variables: KIWI_PUBLIC_URL, KIWI_BACKUP_* (serve); KIWI_API_KEY (connect, rules, refactor); KIWIFS_API_KEY, KIWIFS_BEARER, KIWIFS_BASIC_PASS (mount); DOCKER_HOST, NOTION_API_KEY, AIRTABLE_API_KEY, CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN (import).
+
+Optional features and their "off" status: drafts 501, audit 501, webhooks 503, vector search 503, claims on by default (503 only if the store fails), DQL/Bases/analytics 501 with grep, graph analytics 503 without the link index, Airbyte 503 without Docker or Cloud key, S3/WebDAV/NFS port not open.
 
 ---
 
 ## REST API Reference
 
-Base URL: http://localhost:3333/api/kiwi
-Auth: Bearer token in Authorization header
-Common headers: X-Actor (git author), X-Provenance (lineage), If-Match (ETag), X-Kiwi-Space (multi-space)
+Base URL: http://localhost:3333/api/kiwi (paths below are relative to it unless they start with /api/spaces, /raw, /p, /llms, /mcp, or a probe).
+Space selection: `/api/kiwi/{space}/...` or header `X-Kiwi-Space: {space}` (header wins; unknown name → 404). Neither → primary space.
+
+Auth: every mode except `none` needs `Authorization: Bearer <token>` on /api/kiwi/*.
+- `read` keys can only GET/HEAD. Keys with `space` or `prefix` get 403 outside scope. A perspace key's `actor` replaces X-Actor; OIDC uses the `email` (or `sub`) claim.
+- visibility public: anonymous GETs allowed. unlisted: GET /file, /peek, /section with ?path= open; tree/search/listing still need a token.
+- Always anonymous: /api/kiwi/public/*, /p/*, /health, /healthz, /readyz, /metrics, /api/docs, /api/openapi.json.
+- /llms.txt and /llms-full.txt need no token but list only published or `visibility: public` pages unless the space is public.
+- /api/spaces and /api/init-templates are NOT checked by KiwiFS; protect them at the proxy.
+- /mcp checks credentials only in `apikey` mode (same key). With perspace/oidc, protect /mcp at the proxy.
+
+Request headers:
+- Authorization: Bearer token.
+- X-Actor: commit author (default `anonymous`; ignored when perspace/oidc sets the actor).
+- X-Provenance: `type:id` (e.g. `run:run-249`) appended to frontmatter `derived-from` on PUT /file and POST /bulk.
+- If-Match: ETag precondition on PUT /file, PATCH /file, PATCH /file/frontmatter (409 on mismatch; quotes optional). /bulk uses per-file `if_match`.
+- If-None-Match / If-Modified-Since: conditional GET /file → 304.
+- X-Field-Manager: owner of frontmatter keys set by a frontmatter patch.
+- X-Kiwi-Space: target space. X-Kiwi-Source: page-view source label for analytics.
+- X-Kiwi-Client: refactor caller label; values starting with `mcp` are treated as agents.
+
+ETag = quoted git blob hash of the content. Writes return it in the ETag header and JSON `etag`.
+
+Errors: JSON `{"error": "message"}` (5xx messages are generic). 400 bad param/JSON/path outside root; 401 bad credentials; 403 scope or bad /raw signature; 404 not found; 409 ETag mismatch, denied workflow transition, append-only file, field owned by another manager, rename target exists, draft merge conflict; 413 body too large (32 MB per file write, 110 MB per request); 415 asset type not allowed; 422 schema validation failed; 428 refactor needs approval; 429 rate limited; 501 feature off or unsupported by versioning backend; 503 optional service unavailable (Dataview, vector search, claims, SSE cap); 500 internal.
+
+Pagination: no global envelope. Offset style (`limit`, `offset`) on /search, /query, /views/:name/execute, /timeline; DQL results carry `total` and `has_more`. Cursor style on /changes (`since` = commit hash, pass back `last_seq`).
 
 ### Files
 
-    GET    /tree                              List all files
-    GET    /file?path=concepts/auth.md        Read file (returns content + frontmatter + ETag)
-    PUT    /file?path=concepts/auth.md        Create or update (body = markdown, set X-Actor)
-    DELETE /file?path=concepts/auth.md        Delete file
-    POST   /rename                            Move/rename: {"from": "old.md", "to": "new.md"}
-    POST   /rename-dir                        Rename directory
-    POST   /bulk                              Atomic multi-file write: {"files": [...]}
-    POST   /file/append                       Append to file: {"path": "log.md", "content": "..."}
-    POST   /assets                            Upload binary asset
-    POST   /resolve-links                     Resolve wiki-link targets
-    GET    /readlink?path=link.md             Read symlink target
-    GET    /changes?since=<checkpoint>         Incremental change list
+    GET    /tree                    Nested tree up to 20 levels (path). Nodes: path, name, isDir, size, permalink, children
+    GET    /file                    Raw file bytes + ETag, Last-Modified, X-Permalink, X-File-Type: symlink
+                                    (path*, metadata_only → frontmatter JSON, resolve_links, source; If-None-Match/If-Modified-Since → 304)
+    PUT    /file                    Create/replace; body = full content, ≤32 MB (path*; If-Match, X-Actor, X-Provenance;
+                                    Content-Type: application/x-symlink creates a symlink). → {"path","etag"}
+                                    409 ETag/transition/write hook/append-only, 413 too big, 422 schema
+    PATCH  /file/frontmatter        Merge frontmatter, body untouched; body {"fields":{...}} (path*, force; If-Match, X-Field-Manager)
+    PATCH  /file?merge=frontmatter  Same, body is the field map itself. null removes a key.
+                                    409 {"error","conflicts":[{"key","manager"}]} when another manager owns a key
+    POST   /file/append             Append without read-modify-write; creates file (path*, separator default "\n") → {"path","etag"}
+    DELETE /file                    Delete as a commit (path*) → {"deleted": path}
+    POST   /bulk                    Atomic multi-file commit {"files":[{path,content,if_match}],"actor","message"}
+                                    → {"count","files":[{path,etag}]}; one if_match mismatch fails all with 409
+    POST   /rename                  Move one file and rewrite every link to it {"from","to"} (update_links=true, overwrite=false)
+                                    → {"from","to","etag","updated_links"}; 409 if destination exists
+    POST   /rename-dir              Move a folder, relink in and out {"from","to"} (update_links) → {"from","to","renamed","updated_links"}
+    POST   /assets                  Multipart upload, field `file` (path = folder) → {"path","markdown","contentType","size","etag"}
+                                    413 over [assets] max_file_size, 415 type not allowed
+    GET    /raw/{path}              File bytes for <img>/<video>; also /api/kiwi/raw/{path} and /api/kiwi/{space}/raw/{path}
+                                    With auth: bearer, valid exp+sig, or an already-public target. SVG gets restrictive CSP.
+    GET    /raw-sign                Signed /raw URL valid 30–60 min, per space, lost on restart (path*) → {"path","url","expires"}
+    GET    /toc                     Headings (path*) → {"path","headings":[{level,text,slug}]}
+    POST   /resolve-links           Rewrite [[links]] to absolute URLs {"content"} → {"content"} (unchanged without public_url)
+    GET    /templates               Page templates in .kiwi/templates/ → {"templates":[{name,path}]}
+    GET    /template                One template (name*) → {"name","content"}
+    GET    /readlink                Symlink target as plain text (path*)
+
+Paths escaping the root or into hidden dirs → 400.
+
+### Refactor (restructuring)
+
+    POST   /refactor/plan           Body = manifest (YAML or JSON, ≤1 MB). Nothing written. (diffs=true, format=workspace-edit;
+                                    X-Actor, X-Kiwi-Client). → plan: digest, moves, merges, edits[{path,from,links[{line,old,new}]}],
+                                    content_edits, comments, state, removed_dirs, splits, errors, rejected, conflicts, plan_only,
+                                    warnings, approval{required,reason}, integrity{unresolved,orphaned,complete}, now, base, stats
+    POST   /refactor/apply          {"manifest","digest","approved"} → {"applied":{written,deleted,side_files,removed_dirs,commit},"plan"}
+                                    409 digest stale (fresh plan in body), 422 plan has errors, 428 agent plan needs approval
+    POST   /refactor/revert         {"commit","dry_run","digest"} Undo any commit as a new commit; 422 if files changed since; 501 without git
+    POST   /refactor/approve        {"manifest","digest"} → {"approved","expires_in":"1h"}; agent may apply that digest once
+    GET    /refactor/pending        Plans awaiting approval → {"pending":[{digest,manifest,actor,client,reason,at}]}
+    POST   /refactor/script         {"script"} Starlark → {"manifest","output","plan"}; read-only, 256 MB, 30 s
+    POST   /refactor/from-workspace-edit   LSP WorkspaceEdit renames → {"manifest","plan","ignored"}
+    GET    /refactor/raw-moves      Moves that left references behind → {"moves":[{from,to,actor,at,via}],"manifest":{"relinks":[...]}}
+    GET    /links/broken            → {"broken":[{source,target,match}],"count"}
+    GET    /links/orphans           → {"orphans":[{path}],"count"}
+    POST   /refactor/fix-broken     Rewrite broken links to best fuzzy match, one commit per page {"dry_run"} → {"fixes","count","dry_run"}
 
 ### Search
 
-    GET    /search?q=authentication            BM25 full-text search
-    GET    /search/verified?q=auth              Trust-ranked results
-    POST   /search/semantic                    Vector similarity: {"query": "...", "limit": 5}
-    GET    /search/semantic?q=auth             GET form of semantic search
+    GET    /search                  BM25 (q*, limit 50 max 200, offset, path_prefix, mode=fts|hybrid, boost=none|off, scope,
+                                    include_superseded, recency_weight 0–1, modifiedAfter RFC3339, suggest_threshold 3)
+                                    → {"query","limit","offset","results":[{path,matches[{line,text}],score,snippet,permalink}],"suggestions"}
+    GET    /search?mode=hybrid      BM25 + vector fused by RRF (rrf_k 60) → adds "mode","engines","rrf_k", per-result fts_rank, semantic_rank.
+                                    Without a vector index engines = ["fts"], still 200.
+    GET    /search/verified         Hard trust re-rank: verified ×2, source-of-truth ×3, outdated ×0.3, deprecated ×0.1 (q*, limit, offset)
+    GET|POST /search/semantic       Vector search (query* or q on GET, topK 10, offset, scope, modifiedAfter body only)
+                                    → {"query","topK","offset","results":[{path,chunkIdx,score,snippet}]}; 503 if off
+    POST   /brief                   Token-budgeted context pack, verbatim, never summarized (query*, budget_tokens 4000, max_pages 20,
+                                    path_prefix, encoding cl100k_base) → {query,budget_tokens,used_tokens,tokenizer,candidates,
+                                    items[{path,title,heading,content,tokens,score,fts_rank,semantic_rank,partial}],dropped[{path,heading,tokens,score,reason}]}
+    GET    /meta                    Frontmatter filter (where=$.field<op>value repeatable, or, scope, sort=$.field, order, limit, offset)
+                                    ops = != <> < <= > >= LIKE NOT LIKE → {"count","limit","offset","results":[{path,frontmatter,permalink}]}
+    GET    /similar                 Gower-distance neighbors via a similarity profile (path or vector JSON, profile, k 5)
+                                    → {profile,query_path,query_vector,fields,candidate_count,truncated,neighbors[{path,score,distance,...}]}
+
+Default soft trust boost: `status: verified`, `source-of-truth: true`, `confidence` (0–1) up; `status: deprecated|outdated` down. Requests with scope, include_superseded, or recency_weight skip it. Query syntax: plain words = AND; quotes, parentheses, `*`, `^`, `:`, or uppercase AND/OR/NOT are passed to FTS5 as-is. `memory_status: superseded` pages are excluded unless include_superseded=true. /search/verified, /meta, and scope need SQLite (else 501).
 
 ### Versioning
 
-    GET    /versions?path=concepts/auth.md     Git history for a file
-    GET    /version?path=auth.md&version=abc   Read file at specific revision
-    GET    /diff?path=auth.md&from=abc&to=def  Diff between two revisions
-    GET    /blame?path=concepts/auth.md        Git blame
+    GET    /versions                Commits touching a file, newest first (path*) → {"path","versions":[{hash,date,author,message}]}
+    GET    /version                 File at a commit, text/markdown (path*, version* full or short hash)
+    GET    /diff                    Unified diff as text (path*, from*, to*, granularity=line|word); word → 501 if unsupported
+    GET    /blame                   (path*) → {"path","lines":[{line,text,hash,author,date}]}; git only, else 501
+    GET    /changes                 Workspace change feed (since, limit 50 max 500, feed=longpoll, timeout 30s max 120s)
+                                    → {"changes":[{seq,path,action write|delete|rename,actor,timestamp}],"last_seq"}; 400 unknown sequence
 
-### Metadata and DQL
+### Metadata, DQL, and Graph
 
-    GET    /query?q=TABLE title,status FROM 'concepts' WHERE status='draft'
-    GET    /query/aggregate?group=status&calc=count
-    GET    /meta?path=concepts/auth.md         Raw frontmatter metadata
-    GET    /backlinks?path=concepts/auth.md    Incoming wiki links
-    GET    /graph                              Full wiki-link graph (nodes + edges)
+    GET    /query                   DQL (q*, limit 50 max 200, offset, format=json|table|list|count|distinct)
+                                    → {"columns","rows","total","has_more","groups"}; total = rows returned, -1 when has_more
+    GET    /query/aggregate         (group_by*, calc "count,avg:priority" with avg|sum|min|max, path_prefix)
+                                    → {"groups":{"draft":{"count":12,"avg:priority":2.3},"(none)":{...}}}
+    POST   /view/refresh            Regenerate a computed view page {"path"} → {"path","status":"regenerated"|"unchanged"}
+    GET    /backlinks               (path*) → {"path","backlinks":[{path,count,relation}]}; empty with grep engine
+    GET    /graph                   All pages and links → {"nodes":[{path,tags}],"edges":[{source,target,relation}]};
+                                    edge targets are raw link text, not resolved paths
 
-### Graph Analytics
+DQL, aggregate, and view refresh need SQLite (else 501).
 
-    GET    /graph/analytics?limit=20           PageRank, component analysis, orphans
-    GET    /graph/centrality?limit=50          PageRank and betweenness per page
-    GET    /graph/communities                  Louvain community detection
-    GET    /graph/path?from=a.md&to=b.md       Shortest path between pages
-    GET    /graph/walk?path=a.md               One-hop neighbors and backlinks
+### Drafts (needs [drafts] enabled = true and git; otherwise 501)
 
-### Drafts (staging branches)
-
-    POST   /drafts                             Create: {"name": "feature-x"}
-    GET    /drafts                             List active drafts
-    GET    /drafts/:id                         Draft details
-    GET    /drafts/:id/diff                    Diff vs main
-    POST   /drafts/:id/merge                   Merge into main
-    DELETE /drafts/:id                         Discard draft
-    GET    /drafts/:id/file?path=...           Read file in draft
-    PUT    /drafts/:id/file?path=...           Write file in draft
-    DELETE /drafts/:id/file?path=...           Delete file in draft
-    GET    /drafts/:id/tree                    List files in draft
+    POST   /drafts                  Branch from HEAD {"actor"} → 201 {"id" (8 hex),"branch":"draft/{id}","actor","created_at"}; 409 at max_active
+    GET    /drafts                  Array of draft objects
+    GET    /drafts/:id              One draft
+    GET    /drafts/:id/file         File in draft, text/markdown + ETag (path*)
+    PUT    /drafts/:id/file         Write in draft, no If-Match check (path*; X-Actor default draft-api) → {"path","etag"}
+    DELETE /drafts/:id/file         Delete in draft (path*) → 204
+    GET    /drafts/:id/tree         Tree, same shape as /tree (path)
+    GET    /drafts/:id/diff         → {"diff": "<unified diff vs main>"}
+    POST   /drafts/:id/merge        Fast-forward main → {"status":"merged"}; 409 if main moved
+    DELETE /drafts/:id              Discard branch and worktree → 204
 
 ### Views (Bases)
 
-    GET    /views                              List saved views
-    GET    /views/:name                        Get view definition
-    PUT    /views/:name                        Save view (DQL + layout)
-    DELETE /views/:name                        Delete view
-    GET    /views/:name/execute                Run view query, get rows
+View = JSON at .kiwi/views/{name}.json: name, query (DQL), layout (table|list|calendar|kanban), columns [{property,label,formula,summary sum|avg|count|min|max}], filters [{field,operator = != > < contains in,value}], sort [{field,order}], group_by. Saving/deleting writes directly (no git commit).
 
-### Canvas
+    GET    /views                   → {"views":[...]}
+    GET    /views/:name             One view
+    PUT    /views/:name             Save (query* + optional fields) → {"status":"saved","view"}
+    DELETE /views/:name             → {"status":"deleted"} (succeeds if missing)
+    GET    /views/:name/execute     Run query + formula columns (limit 50, offset) → {"columns","rows","total","has_more","groups"}
+                                    UI filters/sort/group are not applied server-side
 
-    GET    /canvases                           List canvas files
-    GET    /canvas?path=overview.canvas.json    Read canvas
-    PUT    /canvas?path=...                    Write canvas
-    DELETE /canvas?path=...                    Delete canvas
-    PATCH  /canvas?path=...                    Patch canvas nodes/edges
-    GET    /canvas/query?path=...              Query canvas elements
-    POST   /canvas/auto-layout                 Reposition existing canvas nodes
-    POST   /canvas/generate                    Generate canvas from graph
+### Canvas (JSON Canvas 1.0, files *.canvas.json; other paths → 400)
+
+    GET    /canvases                → {"canvases":[{path,name}]}
+    GET    /canvas                  Raw canvas JSON {nodes,edges} (path*)
+    PUT    /canvas                  Replace; body {"nodes":[],"edges":[]} (path*; X-Actor default system) → {"path","etag"}
+    PATCH  /canvas                  Atomic ops {"operations":[{op add_node|update_node|remove_node|add_edge|update_edge|remove_edge,id,node,edge}]}
+                                    → {"path","etag","applied":{nodes_added,...,edges_removed}}; 422 invalid op
+    DELETE /canvas                  (path*) → {"deleted"}
+    GET    /canvas/query            Filter (path*, q, type text|file|link|group, connected=nodeId, nodes_only, edges_only) → {nodes,edges}
+    POST   /canvas/auto-layout      Re-position nodes with Graphviz (path*; body layout dot|neato|fdp|circo) → {path,etag,node_count,edge_count}
+    POST   /canvas/generate         Build from link graph {"path","layout" hierarchical|radial|force|circular,"folder","colorize"}
+                                    → {path,etag,node_count,edge_count}; replaces existing file
 
 ### Workflows (Kanban)
 
-    GET    /workflows                          List workflow definitions
-    GET    /workflows/:name                    Get workflow definition
-    PUT    /workflows/:name                    Save workflow definition
-    DELETE /workflows/:name                    Delete workflow
-    POST   /workflow/assign                    Assign file to workflow
-    POST   /workflow/advance                   Advance file state
-    POST   /workflow/reorder                   Reorder items on board
-    GET    /workflow/board/:workflow            Kanban board view
+Definition in .kiwi/workflows/<name>.json: {"name","states":[{name,color,terminal,wip_limit}],"transitions":[{from,to,required_role}]}. Pages join via frontmatter `workflow` and `state`.
 
-### Claims (cooperative leases)
+    GET    /workflows               → {"workflows":[...],"errors":[...]}
+    GET    /workflows/:name         One definition
+    PUT    /workflows/:name         Save after validation {"states","transitions"} → {"status":"saved","workflow"}
+    DELETE /workflows/:name         → {"status":"deleted","name"}
+    POST   /workflow/assign         Set workflow + state, no transition check {"path","workflow","state","ordinal","actor"}
+                                    → {"path","workflow","state","etag","noop"}
+    POST   /workflow/advance        Checked move {"path","target_state","workflow","actor"} → {"path","from_state","to_state","etag","noop"}
+                                    409: unknown target, terminal state, no transition, WIP limit, blocked (blocked_by / blocked: true), concurrent edit
+    POST   /workflow/reorder        {"path","ordinal","actor"} → {"path","ordinal","etag","noop"}
+    GET    /workflow/board/:workflow  → {"workflow","board":{state:[{path,state,title,priority,tags,due,ordinal,blocked,...}],"__unmatched__":[...]}}
 
-    POST   /claim                              Acquire lease: {"path": "...", "actor": "...", "ttl": "5m"}
-    DELETE /claim                              Release lease
-    GET    /claims                             List active claims
+### Claims (cooperative leases; on by default)
 
-### Publishing
+    POST   /claim                   {"path","lease_duration" (30m, min 1m, max 24h)} + X-Actor* → {path,claimed_by,claimed_at,expires_at}
+                                    409 {"error":"already claimed","active_claim":{...}}
+    DELETE /claim                   {"path"} + X-Actor* (must hold it) → {"status":"released"}; 403 otherwise
+    GET    /claims                  → {"claims":[...]}
 
-    POST   /publish                            Publish a page
-    POST   /publish/bulk                       Bulk publish
-    POST   /unpublish                          Unpublish a page
-    POST   /unpublish/bulk                     Bulk unpublish
-    GET    /publish/status?path=...            Check publish status
-    GET    /publish/list                       List published pages
-    GET    /p/*                                Public permalink (no auth)
+### Publishing and Sharing
 
-### Webhooks
+    POST   /publish                 {"path"} → {"path","published":true,"published_at","public_url":"/p/<path>"}
+    POST   /unpublish               {"path"} → {"path","published":false}
+    POST   /publish/bulk            {"paths":[...]} one commit → {published,requested,changed,skipped,paths,errors}
+    POST   /unpublish/bulk          Same body and shape
+    GET    /publish/status          (path*) → {path,published,published_at,public_url,view_count}
+    GET    /publish/list            → {"count","pages":[{path,published_at,public_url}]}
+    GET    /p/{path}                Public reader, no auth; Accept text/html | text/markdown | application/json ({frontmatter,html,markdown})
+    GET    /public/file             Raw public/published file, no auth (path*)
+    GET    /public/tree             Tree of public/published pages (path, filter=published)
+    POST   /share                   Share link {"path","expiresIn" (Go duration),"password"} → {id,path,token,expiresAt,createdBy,createdAt,viewCount}
+    GET    /share                   Links for a file (path*) → array
+    DELETE /share/:id               → {"revoked": id}
+    GET    /public/:token           Open share link, no auth (password or X-Share-Password); 401 wrong password
+    GET    /space/info              → {"visibility","root"}
+    PUT    /space/visibility        {"visibility":"private"|"unlisted"|"public"} (saved to config, immediate)
 
-    POST   /webhooks                           Register webhook: {"url": "...", "events": ["write","delete"]}
-    GET    /webhooks                           List webhooks
-    DELETE /webhooks/:id                       Remove webhook
-
-### Schemas (JSON Schema validation)
-
-    GET    /schemas                            List schema definitions
-    GET    /schemas/:type                      Get schema for a type
-    PUT    /schemas/:type                      Save schema definition
+A page is public with `published: true` or `visibility: public` frontmatter. Non-markdown files are served when a markdown page in the same or a parent folder is public.
 
 ### Import and Export
 
-    POST   /import                             Import from source: {"from": "postgres", "dsn": "...", ...}
-    POST   /import/upload                      Upload file for import
-    POST   /import/browse                      Browse tables/collections
-    POST   /import/preview                     Preview records
-    GET    /import/connections                  List saved connections
-    POST   /import/connections                  Save connection
-    DELETE /import/connections/:id              Delete connection
-    POST   /import/connections/:id/run          Re-run import
-    GET    /import/sources                      List supported sources
-    POST   /ingest                             Convert binary doc to markdown
-    POST   /clip                               Web clip: {"url": "https://...", "folder": "clips/"}
-    GET    /export?format=jsonl&path=concepts/  Export as JSONL, CSV, or Parquet
-    POST   /export/document                    Render to PDF/HTML/slides/site
+    POST   /import                  One page per record (from*, plus source fields: path, file, url, dsn, uri, db, table, query, database,
+                                    collection, project, credentials, database_id, base_id, table_id, api_key; prefix, id_column, columns,
+                                    field_mappings [{source,target,type string|number|boolean|date,skip}], dry_run, limit, via builtin|airbyte|airbyte-cloud,
+                                    airbyte_config, airbyte_image, streams; X-Actor default api-import) → {"imported","skipped","archived","errors"}
+    POST   /import/upload           Multipart (file* ≤256 MB, from* csv|json|jsonl|bibtex|sqlite, mode import|preview|infer-fields, prefix,
+                                    id_column, field_mappings JSON string, table, query)
+    GET    /import/sources          → {"builtin":[...],"airbyte":[...]|null,"docker_available","cloud_key_present"}
+    POST   /import/browse           Tables/collections for postgres|mysql|mongodb|firestore → {"tables":[{name,estimated_count}]}
+    POST   /import/preview          Same body as /import, limit 1–20 (default 5) → {"records":[{path,frontmatter,body_preview}]}
+    POST   /import/infer-fields     Sample ≤100 records → {"fields":[{source,target,type}]}
+    GET    /import/connections      Saved connections (array; [] when store unavailable)
+    POST   /import/connections      Create/update a connection object (from*; id to update)
+    DELETE /import/connections/:id  → 204
+    POST   /import/connections/:id/run   Re-run ({"credentials","api_key"} for this run only)
+    POST   /import/connections/:id/sync  {"enabled","interval" Go duration, default 1h}
+    GET    /import/sync/status      Connections with auto-sync enabled
+    POST   /import/airbyte/spec | /import/airbyte/check | /import/airbyte/discover    Local Docker connectors
+    POST   /import/airbyte-cloud/check | /import/airbyte-cloud/discover | /import/airbyte-cloud/sync; GET /import/airbyte-cloud/connections
+    POST   /ingest                  Convert a server-side document via markitdown (file*, split_mode single|sections, prefix, extract_keywords,
+                                    max_keywords 10, convert_crossrefs, actor kiwi-ingest) → {source_file,format,total_sections,output_files,top_keywords}
+    GET    /export                  Stream pages (format jsonl|csv|parquet, path prefix, columns, include_content, include_links,
+                                    include_embeddings (not parquet), limit). JSONL line: {path,frontmatter,word_count,content,links_out,links_in,embeddings}
+    POST   /export/document         Render {"format":"pdf"|"html"|"slides"|"site","path", theme, self_contained, bibliography, csl_style,
+                                    crossref, pdf_engine, slide_format, site_name, site_url, repo_url, metadata} → file attachment (5 min timeout)
 
-### Analytics and Health
+Notes: `path`, `file`, `db` are server-side paths. A successful import saves a connection (no secrets; dsn/uri saved as sent) in .kiwi/state/imports.json and enables hourly auto-sync for syncable sources (postgres, mysql, mongodb, firestore, notion, airtable, firebase-rtdb); a full sync archives pages whose rows disappeared (`_archived_at`). REST supports postgres, mysql, sqlite, mongodb, firestore, csv, json, jsonl, notion, airtable, markdown, obsidian, bibtex, croissant, and Airbyte connectors; yaml, excel, gsheets, confluence, dynamodb, redis, elasticsearch are CLI-only.
 
-    GET    /analytics                          Knowledge base health dashboard
-    GET    /analytics/overview                 Compact dashboard
-    GET    /analytics/views                    Page view stats
-    GET    /analytics/views/v2?path=auth.md    Per-page engagement
-    GET    /analytics/searches                 Search query log
-    GET    /analytics/failed-searches          Failed searches (content gaps)
-    GET    /analytics/trends                   Activity trends
-    GET    /analytics/content-gaps             Content gap suggestions
-    POST   /analytics/content-gaps/dismiss     Dismiss a suggestion
-    GET    /analytics/sources                  Pages by import source
-    GET    /health-check?path=auth.md          Per-page health
-    GET    /stale                              Overdue review pages
-    GET    /contradictions                     Conflicting claims across pages
-    GET    /suggestions?path=auth.md           Semantically similar pages
-    GET    /embeddings?path=auth.md            Raw embedding vectors
-    POST   /eval                               Search quality benchmark
-    GET    /janitor                            Full health scan
-    GET    /memory/report                      Episodic memory coverage
-    GET    /velocity?period=14d                Change velocity analysis
+### Analytics and Health (need SQLite engine; else 501)
+
+    GET    /analytics               Dashboard (scope, stale_threshold 30) → {total_pages,total_words,health{stale,orphans,broken_links,empty,no_frontmatter},
+                                    coverage,top_updated,engagement{total_views,top_viewed,failed_searches}}
+    GET    /analytics/overview      Period vs previous (period 7d) → views, searches, success rate, unique pages + deltas
+    GET    /analytics/views         Top pages (top 20 max 200, path, since) → {"results":[{path,count,first_seen,last_seen}]}
+    GET    /analytics/views/v2      Time series (period 30d, path) → {"time_series","top_pages"}
+    GET    /analytics/searches      (period 30d) → {"search_success_rate","time_series","top_failed"}
+    GET    /analytics/failed-searches  (top, since) → {"results":[{query,search_type,count,first_seen,last_seen}]}
+    GET    /analytics/trends        (period 7d) → {"trending","declining"}
+    GET    /analytics/content-gaps  (limit 20) → {"results"}
+    POST   /analytics/content-gaps/dismiss  {"query","search_type"} → {"dismissed"}
+    GET    /analytics/sources       Views by X-Kiwi-Source (period 7d) → {"sources":{...}}
+    GET    /health-check            One page (path*) → {word_count,link_count,backlink_count,days_since_update,quality_score,issues}
+    GET    /stale                   next-review passed or reviewed older than days (days 30) → {"staleDays","count","results"}
+    GET    /contradictions          Shared tags/topics with different status, or both source-of-truth (path*) → {"contradictions":[...]}
+    GET    /janitor                 Cached scan (staleDays 90, fresh=true to rescan) → {"issues":[{kind,path,message,related,suggestion,severity}],
+                                    "scanned","healthy","timestamp"}; header X-Kiwi-Janitor-LastScan
+    GET    /memory/report           Episodic coverage (episodes_prefix, limit, offset); see Episodic Memory
+
+Janitor kinds: stale, orphan, duplicate, contradiction, missing-owner, missing-status, empty-page, broken-link, no-review-date, decision-found, expired-memory, execution-stale.
+
+### Velocity, Graph, and Similarity
+
+    GET    /velocity                Git churn (period 30d, limit 20, path_prefix) → {total_changes,hot_spots,cold_spots,bursts,single_author_pages}
+    GET    /graph/analytics         (limit 20) → {total_nodes,total_edges,components,largest_component_size,orphans,top_pages[{path,pagerank,in_degree,out_degree}]}
+    GET    /graph/centrality        (limit) → {"pages":[{path,pagerank,betweenness,in_degree,out_degree}]}
+    GET    /graph/communities       Louvain → {"communities":[{id,pages}]}
+    GET    /graph/path              (from*, to*) → {"path":[...]}; 404 if no path
+    GET    /graph/walk              (path*, include_siblings true) → {links_out,links_in,siblings,hub_score,in_degree,out_degree}
+    GET    /suggestions             Similar but unlinked pages (path*, limit 10) → {"suggestions":[{target,similarity,snippet}]}; needs vectors
+    GET    /similar                 See Search
+    GET    /embeddings              (path*) → {"path","dimensions","chunks":[{chunk_idx,text,vector}]}; needs vectors
+    POST   /eval                    Retrieval quality {"set" | "queries":[{question,expected_paths,grades}],"exclude_prefix","top_k" 5}
+                                    → {top_k,fts,semantic,hybrid ({hit_rate,mrr,precision_at_k,ndcg,queries}),per_query,skipped,errors}
 
 ### Utilities
 
-    GET    /context                            Agent playbook + schema + index
-    GET    /rules                              Get .kiwi/rules.md
-    GET    /rules?format=cursor                Get rules formatted for Cursor
-    PUT    /rules                              Update rules.md
-    POST   /lint                               Lint markdown
-    GET    /peek?path=auth.md                  Lightweight page summary
-    GET    /section?path=auth.md&heading=OAuth  Extract one heading section
-    GET    /toc?path=auth.md                   Table of contents
-    GET    /timeline?limit=50                  Activity timeline
-    GET    /feed.xml                           Atom feed
-    GET    /feed.json                          JSON feed
-    GET    /templates                          List page templates
-    GET    /template?name=meeting-notes        Get a page template body
-    GET    /backup/status                      Backup status
-    GET    /audit?since=2026-05-01T00:00:00Z   Audit log entries
-    GET    /space/info                         Space visibility and root
-    PUT    /space/visibility                   Set public/unlisted/private
+    POST   /lint                    {"path"} or {"content"} → {"issues":[{rule,line,column,message,severity}]}
+    GET    /peek                    (path*) → {path,title,frontmatter,snippet,links_out,links_in,word_count,headings}
+    GET    /section                 (path*, heading "Parent > Child" | index 0-based) → {path,heading,level,content,line_start,line_end}
+    POST   /clip                    {"url","title","tags","folder" clips/} → {"path","title","excerpt"}
+    GET    /context                 → {"playbook","schema","index","rules"} (empty strings for missing files)
+    GET    /rules                   .kiwi/rules.md as text (format=cursor|claude|agents|openclaw|skill)
+    PUT    /rules                   Raw markdown ≤256 KB → {"status":"ok","path":".kiwi/rules.md"}
+    GET    /timeline                (limit 50 max 500, offset, actor, type write|delete, path_prefix) → {"events":[{type,path,actor,timestamp,message}],"total"}
+    GET    /feed.xml, /feed.json    Atom / JSON Feed of 50 latest changes (filter=published)
+    GET    /recent-pages            (limit 10 max 50) → {"pages":[{path,title,actor,timestamp}]}
+    GET    /render/d2               D2 → SVG (source, theme light|dark); POST /render/d2 {"source" ≤64 KB,"theme"}; 422 syntax, 501 nod2, 503 >10 s
+    GET    /widgets/reference       Widget fence catalog (name) → {version,reserved_top_level_keys,reserved_step_keys,fences[{lang,aliases,...}]}
+    GET    /backup/status           (alias /sync/status) → {"enabled","status":{last_push_at,success,error}}
+    GET    /audit                   Needs [audit] (since default 24 h ago, limit 100 max 10000) → [{ts,method,path,space,actor,token_hash,ip,status,duration_ms}]
+
+### Comments (stored in .kiwi/comments/<path>.json, committed, broadcast)
+
+    GET    /comments                (path*) → {"path","comments":[{id,path,anchor{quote,prefix,suffix,offset},body,author,createdAt,resolved}]}
+    POST   /comments                (path*) {"anchor":{"quote"*,...},"body"*,"author"} → new comment
+    PATCH  /comments/:id            (path*) {"resolved": true|false} → updated comment
+    DELETE /comments/:id            (path*) → {"deleted","path"}
+
+### Web UI Settings
+
+    GET    /ui-config               [ui] settings: themeLocked, startPage, sidebar, branding, features, toolbarViews, tags, typedFences, typedFenceTags
+    GET    /theme                   .kiwi/theme.json (or {})
+    PUT    /theme                   Any JSON ≤64 KB, committed; 403 when theme_locked
+    GET    /custom.css              Workspace stylesheet, <script> stripped
+    GET    /keybindings             → {"bindings","defaults","conflicts"}
+    GET    /editor/slash-commands   → {"commands":[{id,label,icon,description,template}]}
+    GET|PUT /preferences            Per-user prefs (theme, sidebar_collapsed, default_view editor|source, font_size sm|base|lg,
+                                    editor_line_numbers, vim_mode); 401 for anonymous
+    GET|PUT /me/state               Per-user JSON blob (name*), ≤512 KB, not committed
+    GET    /me/note                 User's private note for a page (path*)
 
 ### Real-time Events (SSE)
 
-    GET    /events                             Server-Sent Events stream
+    GET    /events                  Server-Sent Events; `event:` type + `data:` JSON; :keep-alive every 15 s; 503 at 256 clients; no replay
 
-Event types: write, delete, bulk, import
+Event types: write (incl. new path of a rename, canvas saves, frontmatter patches, on-disk edits; carries etag), delete (incl. old path of a rename), bulk (paths), rollback (paths), comment.add, comment.resolve, comment.delete, janitor (extra: status, scanned, issues, errors, warnings, duration_ms). Payload: op, path or paths, actor, etag, extra. No file content; re-read when etag differs. No WebSocket endpoint.
 
-### Comments
+### Webhooks (needs [webhooks] enabled = true; otherwise 503)
 
-    GET    /comments?path=auth.md              List comments
-    POST   /comments?path=auth.md              Add comment: {"line": 15, "body": "..."}
-    PATCH  /comments/:id                       Resolve: {"resolved": true}
-    DELETE /comments/:id                       Delete comment
+    POST   /webhooks                {"url"*,"path_glob"* ("**", "concepts/**", "runbooks/*.md"),"event_types":[...]}
+                                    → 201 {id "wh_...",url,path_glob,secret "whsec_..." (only shown here),created_at,enabled,event_types}
+    GET    /webhooks                Array without secrets
+    DELETE /webhooks/:id            → 204
 
-### Sharing
+Payload: {"type": write|delete|bulk|rollback|transition, "path", "actor", "timestamp", "field", "from_state", "to_state"}; one delivery per file. Headers: Standard Webhooks (webhook-id, webhook-timestamp, webhook-signature) and `X-Kiwi-Signature-256: sha256=<hex HMAC-SHA256 of raw body keyed by the full secret>`. Retries after 5 s, 30 s, 2 m, 15 m, 1 h up to max_retries. In-memory queue of 256; retries do not survive restart.
 
-    POST   /share                              Create share link
-    GET    /share?path=auth.md                 List share links for page
-    DELETE /share/:id                          Revoke share link
+### Schemas (JSON Schema per type in .kiwi/schemas/<type>.json)
 
-### Theme
+    GET    /schemas                 Array of type names
+    GET    /schemas/:type           Schema document
+    PUT    /schemas/:type           Save; validator reloads immediately → {"status":"ok","type"}; no git commit
 
-    GET    /theme                              Get UI theme
-    PUT    /theme                              Set theme: {"primary": "#6cbe45", "mode": "light"}
+### Spaces Administration (outside /api/kiwi; not protected by KiwiFS auth)
 
-### Multi-space Administration
+    GET    /api/spaces              → {"spaces":[{name,root,fileCount,sizeBytes,lastModified}]}
+    GET    /api/spaces/:name        One space
+    POST   /api/spaces              {"name","root" (default .spaces/{name}),"template" (blank)} → 201 space; saved in .kiwi/spaces.json
+    DELETE /api/spaces/:name        Soft delete: root renamed to {root}.deleted-{timestamp} → {"deleted": name}
+    GET    /api/init-templates      → {"templates":[{id,label,description}]}
 
-    GET    /api/spaces                         List spaces (outside /api/kiwi)
-    POST   /api/spaces                         Create space: {"name": "team", "root": "./team"}
-    DELETE /api/spaces/:name                   Delete space
-    GET    /api/init-templates                 List init templates
+### Infrastructure (server root, anonymous)
 
-### Infrastructure
-
-    GET    /health                             Basic health check
-    GET    /healthz                            Liveness probe (uptime, version)
-    GET    /readyz                             Readiness probe
-    GET    /metrics                            Prometheus metrics
-    GET    /api/openapi.json                   OpenAPI 3.0 spec
-    GET    /api/docs                           Swagger UI
-
-### Error Format
-
-All errors return JSON: {"error": "message"}
-Status codes: 400 (bad request), 401 (unauthorized), 404 (not found), 409 (conflict/ETag mismatch), 422 (validation), 501 (feature disabled), 503 (optional service unavailable), 500 (internal error)
+    GET    /health                  {"status":"ok"}
+    GET    /healthz                 {"status":"ok","uptime","version"}
+    GET    /readyz                  200 "ready", or 503 "storage-unreachable" | "protocol-unhealthy" with per-protocol detail
+    GET    /metrics                 Prometheus: kiwi_build_info, kiwi_uptime_seconds, kiwi_sse_subscribers, kiwi_janitor_issues
+    GET    /api/openapi.json        OpenAPI spec
+    GET    /api/docs                Swagger UI
+    GET    /llms.txt                Page index grouped by folder with descriptions
+    GET    /llms-full.txt           All pages' markdown concatenated, frontmatter stripped, capped at 5 MiB
+    *      /mcp                     Streamable HTTP MCP
 
 ---
 
 ## MCP Server
 
-KiwiFS ships a built-in MCP server. Transports: stdio (default), Streamable HTTP (--http).
+78 tools. Every write goes through the pipeline (git commit, index, events). Write tools accept optional `actor` (default `mcp-agent`).
 
-### Setup
+### Modes
 
-    # In-process (local)
-    kiwifs mcp --root ~/knowledge
+| | stdio (default) | Streamable HTTP |
+|---|---|---|
+| In-process (--root) | kiwifs mcp --root ~/knowledge | kiwifs mcp --root ~/knowledge --http |
+| Proxy (--remote) | kiwifs mcp --remote http://localhost:3333 | kiwifs mcp --remote http://localhost:3333 --http |
+| Built into the server | — | kiwifs serve exposes /mcp on its port |
 
-    # Proxy to remote server
-    kiwifs mcp --remote https://kiwi.example.com --api-key kiwi_sk_...
+- `--root` and `--remote` are mutually exclusive; exactly one is required. `--space` only with `--remote`. `--port` (default 8181) requires `--http` (endpoint /mcp, health /health).
+- Use proxy mode (or the server's /mcp) whenever `kiwifs serve` runs on the same folder, so one process owns the writes.
+- Proxy mode sends `--api-key` as `Authorization: Bearer`. HTTP transport requires the bearer key only when `[auth] type = "apikey"`; otherwise it is open. Put remote MCP behind TLS.
+- `kiwi_import` works only in local mode (`--root`).
 
-    # HTTP transport
-    kiwifs mcp --root ~/knowledge --http --port 8181
+### Client config
 
-### Claude Desktop / Cursor config
+    # Claude Code
+    claude mcp add kiwifs -- kiwifs mcp --root /path/to/knowledge
+    claude mcp add --transport http kiwifs http://localhost:3333/mcp --header "Authorization: Bearer $KIWI_API_KEY"
 
-    {
-      "mcpServers": {
-        "kiwifs": {
-          "command": "kiwifs",
-          "args": ["mcp", "--root", "/path/to/knowledge"]
-        }
-      }
-    }
+    # Claude Desktop / Cursor / Windsurf (stdio)
+    {"mcpServers": {"kiwifs": {"command": "kiwifs", "args": ["mcp", "--remote", "http://localhost:3333", "--api-key", "kiwi_sk_..."]}}}
+
+    # Any HTTP client
+    {"mcpServers": {"kiwifs": {"url": "http://localhost:3333/mcp", "headers": {"Authorization": "Bearer kiwi_sk_..."}}}}
+
+Config paths: Claude Desktop `claude_desktop_config.json` (macOS ~/Library/Application Support/Claude/, Windows %APPDATA%\Claude\); Cursor `.cursor/mcp.json` or `~/.cursor/mcp.json`; Windsurf `~/.codeium/windsurf/mcp_config.json`; Claude Code project `.mcp.json`.
+
+### First calls
+
+1. `kiwi_context` (schema, playbook, index, rules).
+2. Find with `kiwi_brief` (token-budgeted pack) or `kiwi_search_hybrid`.
+3. Skim with `kiwi_peek` before `kiwi_read`.
+4. Write with `kiwi_write` passing `if_match` (ETag from kiwi_read).
+5. Verify with `kiwi_lint`.
 
 ### MCP Resources
 
-    kiwi://schema            SCHEMA.md for the knowledge root
-    kiwi://file/{path}       Read file by path
-    kiwi://tree/{path}       Directory listing
+    kiwi://schema                     SCHEMA.md (or a generated schema)
+    kiwi://file/{path}                Markdown content
+    kiwi://tree/{path}                Directory listing
+    kiwi://refactor/plans/{digest}    Full restructuring plan built in this session
+    kiwi://refactor/raw-moves         Moves made outside KiwiFS and the relinks manifest that repairs them
 
-### Tool Reference (71)
+### Tool Reference (78)
 
-#### Core Files and Search
+Parameters marked * are required.
 
-| Tool                  | Description                                                       |
-|-----------------------|-------------------------------------------------------------------|
-| kiwi_read             | Read file with optional wiki-link resolution, metadata-only, ETag |
-| kiwi_write            | Create/update page with optional actor and provenance             |
-| kiwi_delete           | Delete a path (history preserved with git versioning)             |
-| kiwi_rename           | Move/rename with optional wiki-link rewrites                      |
-| kiwi_bulk_write       | Atomic multi-file commit                                          |
-| kiwi_append           | Append without read-modify-write races                            |
-| kiwi_tree             | Directory listing with depth and optional permalinks              |
-| kiwi_search           | BM25 full-text search with pagination and path_prefix             |
-| kiwi_search_semantic  | Vector similarity search (requires embeddings)                    |
-| kiwi_changes          | Incremental change list since a checkpoint                        |
-| kiwi_versions         | Git history entries for a path                                    |
-| kiwi_view_refresh     | Regenerate a computed kiwi-view markdown file                     |
+#### Files: read, write, and history (13)
 
-#### Metadata, DQL, and Analytics
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| kiwi_read | Read a page, optionally resolving wiki links | path*, resolve_links, metadata_only, if_not_etag |
+| kiwi_write | Create or overwrite a page as one commit | path*, content*, if_match, provenance, actor |
+| kiwi_append | Append atomically, no read-modify-write race | path*, content*, separator |
+| kiwi_bulk_write | Several pages in one atomic commit; a stale if_match fails all | files* (path, content, if_match), provenance |
+| kiwi_patch_frontmatter | Set/remove frontmatter keys without the body; null removes; you own keys you set | path*, fields*, if_match, force |
+| kiwi_delete | Delete a page (history stays in git) | path* |
+| kiwi_rename | Move one page and respell every link; destination must not exist | from*, to*, update_links (true) |
+| kiwi_tree | Files and folders with sizes | path, depth, include_permalinks |
+| kiwi_peek | Title, frontmatter, first paragraph, links, backlinks, outline (~200 tokens) | path* |
+| kiwi_section | One heading section by fuzzy name or 0-based index | path*, heading, index |
+| kiwi_versions | Git history for a page | path* |
+| kiwi_changes | Changes since a checkpoint; store last_seq, pass as since | since, limit |
+| kiwi_view_refresh | Regenerate a computed view page (kiwi-view: true) | path* |
 
-| Tool                  | Description                                                       |
-|-----------------------|-------------------------------------------------------------------|
-| kiwi_query_meta       | Frontmatter filters with AND/OR groups, sort, pagination          |
-| kiwi_query            | DQL queries (TABLE, LIST, COUNT, DISTINCT)                        |
-| kiwi_aggregate        | GROUP BY aggregates over metadata                                 |
-| kiwi_import           | Pull from databases, CSV/JSON, Notion, Airtable, etc.            |
-| kiwi_ingest           | Convert binary documents to markdown                              |
-| kiwi_export           | Export JSONL/CSV with optional embeddings                         |
-| kiwi_export_document  | Render to PDF, HTML, slides, or static site                       |
-| kiwi_analytics        | Knowledge base health metrics                                     |
-| kiwi_health_check     | Single-page diagnostics                                           |
-| kiwi_memory_report    | Episodic memory coverage and merge hints                          |
-| kiwi_velocity         | Change hotspots, cold pages, bursts                               |
-| kiwi_eval             | Search quality benchmark harness                                  |
-| kiwi_context          | Schema, playbook, index, rules in one call (good first tool)      |
-| kiwi_backlinks        | Incoming wiki links for a page                                    |
-| kiwi_suggestions      | Semantically similar pages excluding existing links               |
-| kiwi_embeddings       | Raw chunk embeddings for a page                                   |
-| kiwi_graph_analytics  | PageRank-based graph summary                                     |
-| kiwi_graph_centrality | PageRank and betweenness rankings per page                        |
-| kiwi_graph_communities| Louvain community detection over wiki links                       |
-| kiwi_graph_path       | Shortest path between two pages                                   |
-| kiwi_graph_walk       | Local neighborhood and siblings around a page                     |
-| kiwi_eligible         | Ranked todo-style tasks inferred from metadata                    |
+#### Search and retrieval (6)
 
-#### Draft Spaces
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| kiwi_search | BM25 full-text with snippets | query*, limit, offset, path_prefix, scope, recency_weight |
+| kiwi_search_semantic | Vector similarity (needs vector index) | query*, limit, threshold, scope |
+| kiwi_search_hybrid | BM25 + vector via RRF; keyword-only without vectors | query*, limit, path_prefix |
+| kiwi_brief | Token-budgeted pack; never summarizes; lists what did not fit | query*, budget_tokens, max_pages, path_prefix |
+| kiwi_similar | Structurally similar pages via a similarity profile | path or vector, profile, k |
+| kiwi_eval | Hit Rate, MRR, Precision@K, nDCG@K for FTS and semantic | set or queries, exclude_prefix, top_k |
 
-| Tool                  | Description                                                       |
-|-----------------------|-------------------------------------------------------------------|
-| kiwi_draft_create     | Open a new git-backed draft branch                                |
-| kiwi_draft_list       | List active drafts                                                |
-| kiwi_draft_read       | Read file inside a draft                                          |
-| kiwi_draft_write      | Write file inside a draft                                         |
-| kiwi_draft_diff       | Unified diff vs main                                              |
-| kiwi_draft_merge      | Merge draft into live knowledge                                   |
-| kiwi_draft_discard    | Drop the draft branch                                             |
+#### Context and structured queries (4)
 
-#### Bases (Saved Views)
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| kiwi_context | Schema, playbook, index, rules in one call; call first | — |
+| kiwi_query | DQL (TABLE, LIST, COUNT, DISTINCT) | query*, format (table, list, json), limit |
+| kiwi_query_meta | Frontmatter filters `$.field=value` | filters, or, paths, sort, order, limit, offset |
+| kiwi_aggregate | Group by a field; count, avg, sum, min, max | group_by*, calculate, where, path_prefix |
 
-| Tool                  | Description                                                       |
-|-----------------------|-------------------------------------------------------------------|
-| kiwi_views_list       | List .kiwi/views/*.json definitions                               |
-| kiwi_views_get        | Fetch a single view definition                                    |
-| kiwi_views_save       | Persist columns, filters, sort, layout, query                     |
-| kiwi_views_delete     | Remove a saved view                                               |
-| kiwi_views_execute    | Run the DQL backing a view and return rows                        |
+#### Links and graph (8)
 
-#### Canvas
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| kiwi_backlinks | Pages linking to a page | path* |
+| kiwi_suggestions | Semantically similar, not yet linked pages | path*, limit |
+| kiwi_embeddings | Chunk texts and vectors for a page | path* |
+| kiwi_graph_analytics | PageRank, components, orphans, hubs, clusters, bridges | limit (20) |
+| kiwi_graph_centrality | PageRank and betweenness per page, with degrees | limit |
+| kiwi_graph_communities | Louvain communities | — |
+| kiwi_graph_path | Shortest wiki-link path | from*, to* |
+| kiwi_graph_walk | One-hop neighborhood: links, backlinks, siblings, hub score | path*, include_siblings |
 
-| Tool                  | Description                                                       |
-|-----------------------|-------------------------------------------------------------------|
-| kiwi_canvas_list      | Discover *.canvas.json files                                      |
-| kiwi_canvas_read      | Read canvas JSON                                                  |
-| kiwi_canvas_write     | Write canvas JSON                                                 |
+#### Restructuring (4)
 
-#### Workflows and Coordination
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| kiwi_refactor_plan | Preview a manifest; returns digest, errors, counts, a page of moves and link edits | manifest*, detail (summary, full, diff), offset, limit (25, max 200) |
+| kiwi_refactor_apply | Apply a reviewed plan as one commit; if anything changed, nothing is written and the fresh plan returns | manifest*, digest*, now |
+| kiwi_refactor_script | Compute a manifest with read-only Starlark, then plan it | script* |
+| kiwi_refactor_revert | Undo a commit as a new commit; previews without digest | commit*, digest |
 
-| Tool                  | Description                                                       |
-|-----------------------|-------------------------------------------------------------------|
-| kiwi_workflow_list    | List workflow definitions                                         |
-| kiwi_workflow_get     | Get a workflow definition                                         |
-| kiwi_workflow_save    | Save a workflow definition                                        |
-| kiwi_workflow_advance | Validate and apply a state transition                             |
-| kiwi_workflow_board   | Kanban board grouped by state                                     |
-| kiwi_claim            | Acquire cooperative lease on a path                               |
-| kiwi_release          | Release a lease                                                   |
-| kiwi_claims_list      | List active claims                                                |
+#### Analytics, health, and activity (5)
 
-#### Content Helpers and Feeds
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| kiwi_analytics | Totals, health, link coverage, recent updates | scope, stale_threshold |
+| kiwi_health_check | Diagnostics and quality score for one page | path* |
+| kiwi_velocity | Hot spots, cold spots, bursts, authorship from git | period (30d), limit, path_prefix |
+| kiwi_timeline | Recent activity across files | limit (50, max 500), offset, actor, type, path_prefix |
+| kiwi_feed | JSON feed of recently updated pages | limit (20) |
 
-| Tool                  | Description                                                       |
-|-----------------------|-------------------------------------------------------------------|
-| kiwi_peek             | Lightweight summary (title, snippet, links, headings)             |
-| kiwi_section          | Extract a single heading section by name or index                 |
-| kiwi_timeline         | Recent activity with pagination                                   |
-| kiwi_feed             | Activity feed (JSON or Atom)                                      |
-| kiwi_clip             | Fetch URL and save as clipped markdown                            |
-| kiwi_lint             | Structural markdown lint                                          |
+#### Authoring helpers (3)
+
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| kiwi_lint | Structural issues: tables, fences, frontmatter, headings, Mermaid, widget schemas | path or content |
+| kiwi_widget_reference | List widget fences or describe one; call before writing a fence | name, examples |
+| kiwi_quiz | Format or check Kiwi Quiz callouts (single, multi, boolean, order, match, short) | kind, prompt, options, answer, items, pairs, content, path |
+
+#### Import, capture, and export (6)
+
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| kiwi_import | Import records from a database, file, Notion, or Airtable | from*, dsn, file, table, query, prefix, limit, dry_run |
+| kiwi_ingest | PDF/DOCX/PPTX/Excel/HTML/EPUB → markdown via MarkItDown | file*, split_mode, prefix, extract_keywords, convert_crossrefs |
+| kiwi_clip | Clip a web page as markdown | url*, title, tags, folder |
+| kiwi_cite | Literature note at papers/{bibtex_key}.md from a DOI or arXiv ID | identifier, doi, arxiv_id |
+| kiwi_export | Export to JSONL, CSV, or Parquet | format*, path, columns, include_content, include_embeddings, limit |
+| kiwi_export_document | Render to PDF, HTML, slides, or static site | format*, path*, theme, bibliography, csl_style, slide_format |
+
+#### Tasks and claims (6)
+
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| kiwi_eligible | Unclaimed, unblocked todo tasks ranked by priority (MCP-only) | limit (10), path_prefix |
+| kiwi_task_create | Task page (workflow: tasks, state: backlog), optionally claimed | title*, description, assignee, priority, blocked_by, labels, claim |
+| kiwi_task_progress | Append a timestamped note under ## Progress | path*, message* |
+| kiwi_claim | Claim a page; fails if another agent holds it | path*, actor*, lease_duration (30m) |
+| kiwi_release | Release a claim | path*, actor* |
+| kiwi_claims_list | Active claims and expiry | — |
+
+#### Workflows (5)
+
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| kiwi_workflow_list | List workflow definitions | — |
+| kiwi_workflow_get | One workflow's states and transitions | name* |
+| kiwi_workflow_save | Create or update after validation | name*, states*, transitions* |
+| kiwi_workflow_advance | Move a page if the transition is allowed | path*, target_state* |
+| kiwi_workflow_board | Kanban board grouped by state | name* |
+
+#### Draft spaces (7)
+
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| kiwi_draft_create | Open an isolated draft; returns draft_id | actor |
+| kiwi_draft_list | List active drafts | — |
+| kiwi_draft_write | Write a file in a draft | draft_id*, path*, content* |
+| kiwi_draft_read | Read a file from a draft | draft_id*, path* |
+| kiwi_draft_diff | Unified diff against main | draft_id* |
+| kiwi_draft_merge | Fast-forward merge into main | draft_id* |
+| kiwi_draft_discard | Delete a draft and its changes | draft_id* |
+
+#### Saved views (5)
+
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| kiwi_views_list | List saved views | — |
+| kiwi_views_get | One view definition | name* |
+| kiwi_views_save | Create or update query, layout, columns, filters, sort, grouping | name*, query*, layout, columns, group_by |
+| kiwi_views_delete | Delete a view | name* |
+| kiwi_views_execute | Run a view's query and return rows | name*, limit, offset |
+
+#### Canvas (3)
+
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| kiwi_canvas_list | List *.canvas.json files | — |
+| kiwi_canvas_read | Read nodes and edges | path* |
+| kiwi_canvas_write | Write a canvas JSON object | path*, content* |
+
+Canvas generate, patch, query, and auto-layout are REST-only.
+
+#### Memory (3)
+
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| kiwi_remember | Save an episode to episodes/{YYYY-MM-DD}/{episode_id}.md | content*, scope, episode_id, tags |
+| kiwi_forget | Mark a memory superseded without deleting it | path*, reason |
+| kiwi_memory_report | Episodes and whether any page cites them under merged-from | episodes_prefix, limit, offset |
+
+REST-only (no MCP tool): workflow assign/reorder/delete, canvas patch/query/auto-layout/generate, refactor approve/pending/raw-moves/from-workspace-edit, link-health endpoints, publishing, comments, webhooks, schemas.
 
 ---
 
 ## CLI Reference
 
-    kiwifs serve         Start the HTTP server
-    kiwifs init          Initialize a knowledge directory with a template
-    kiwifs mcp           Start MCP server (stdio or HTTP)
-    kiwifs mount         FUSE mount a remote KiwiFS
-    kiwifs import        Import from databases, files, or SaaS
-    kiwifs export        Export as JSONL, CSV, PDF, HTML, slides, or site
-    kiwifs query         Run a DQL query
-    kiwifs aggregate     SQL-style aggregation over frontmatter
-    kiwifs analytics     Knowledge health dashboard
-    kiwifs lint          Validate markdown
-    kiwifs janitor       Full health scan
-    kiwifs reindex       Rebuild search indexes
-    kiwifs view          Manage computed views
-    kiwifs clip          Save a web page as markdown
-    kiwifs memory report Episodic memory coverage report
-    kiwifs backup        Push to git remote
-    kiwifs restore       Clone from git remote
-    kiwifs rules         View/export .kiwi/rules.md
-    kiwifs rules export  Export rules for a specific harness (--format cursor|claude|agents|openclaw)
-    kiwifs rules sync    Export and write to file (e.g., .cursor/rules/kiwi.md)
-    kiwifs token create  Create scoped API key (read/write/admin)
-    kiwifs token list    List API keys
-    kiwifs token revoke  Revoke an API key
-    kiwifs login         Authenticate with KiwiFS Cloud (OAuth device flow)
-    kiwifs logout        Remove stored Cloud credentials
-    kiwifs whoami        Show current Cloud identity
-    kiwifs connect       Generate MCP config for a KiwiFS Cloud workspace
-    kiwifs bench         Performance benchmark
-    kiwifs update        Self-update to latest release
+Most commands take `--root`/`-r` (default `./knowledge`). `kiwifs --help`, `kiwifs <cmd> --help`, `kiwifs --version`.
+
+Server and agents:
+
+    kiwifs serve          REST + web UI + /mcp. Flags: --root, --port/-p 3333, --host 0.0.0.0, --search sqlite|grep,
+                          --versioning git|cow|none, --auth none|apikey|perspace|oidc, --api-key, --oidc-issuer, --oidc-client-id,
+                          --async-commit true, --batch-window 200, --batch-max-size 50, --no-watch, --space name=path (repeatable),
+                          --nfs, --nfs-port 2049, --nfs-allow CIDRs (localhost only), --s3, --s3-port 3334, --webdav, --webdav-port 3335
+    kiwifs init           Scaffold from a template (--template kb|wiki|data|cms|memory|runbook|adr|prompt|research|log|tasks|blank)
+    kiwifs mcp            MCP server (--root | --remote, --api-key, --space default, --http, --port 8181)
+    kiwifs mount DIR      FUSE-mount a remote server (--remote*, --api-key → X-API-Key, --bearer, --basic-user, --basic-pass, --space)
+    kiwifs lsp            Markdown language server; answers workspace/willRenameFiles with link edits (--root = editor workspace)
+
+Restructuring:
+
+    kiwifs refactor plan MANIFEST      Preview; exits 1 on errors (--json, --verbose/-v, --diff)
+    kiwifs refactor apply MANIFEST     Show plan, confirm, apply as one commit (--yes/-y, --server, --api-key $KIWI_API_KEY, --actor cli:refactor)
+    kiwifs refactor revert COMMIT      Preview, confirm, revert as a new commit (git only)
+                                       apply/revert send the change to a running server on --root if there is one
+
+Data:
+
+    kiwifs import         --from postgres|mysql|sqlite|mongodb|firestore|dynamodb|redis|elasticsearch|markdown|csv|json|jsonl|yaml|
+                          excel|bibtex|croissant|notion|airtable|gsheets|obsidian|confluence
+                          Common: --prefix, --columns, --id-column, --limit, --dry-run, --infer-schema, --save-schema
+                          Source: --dsn, --uri, --db, --file, --path, --table, --query, --collection, --database, --project,
+                          --database-id, --base-id, --table-id, --sheet, --spreadsheet-id, --credentials, --region, --addr,
+                          --password, --redis-db, --pattern, --url, --index, --api, --space
+    kiwifs export         --format jsonl|csv|parquet|mkdocs|pdf|html|slides|site, -o, --path, --columns, --include-content,
+                          --include-links, --include-embeddings, --limit, --webhook, --webhook-secret, --theme paper|modern|minimal|dark|presentation,
+                          --self-contained, --bibliography, --csl, --crossref, --pdf-engine typst|xelatex, --slide-format html|pdf|pptx,
+                          --site-name, --site-url, --repo-url
+    kiwifs query DQL      --format table|list|json|count, --limit, --sort, --order (run reindex first if the index is empty)
+    kiwifs aggregate      --group*, --calc count,avg:f,sum:f,min:f,max:f, --path, --where
+    kiwifs view list | refresh <path> | create (--query*, --name, --path)
+
+Quality and maintenance:
+
+    kiwifs check          Janitor + sequence-gap scan for CI; exit 0 clean, 1 issues, 2 failure (--stale-days 90, --json, --fail-on-warn)
+    kiwifs lint           Validate against SCHEMA.md; exit 1 on issues (--json)
+    kiwifs janitor        Hygiene scan; exit 1 on errors (--stale-days 90, --json)
+    kiwifs analytics      Health and engagement (--scope, --stale-threshold 30, --format text|json)
+    kiwifs eval           Retrieval metrics vs .kiwi/eval/<name>.qrels + .topics (--set, --list, -x/--exclude-prefix, --top-k 5,
+                          --format, --min-hit-rate, --min-mrr, --min-ndcg; non-zero exit below threshold)
+    kiwifs reindex        Rebuild FTS (and vectors if configured) (--vector, --fts-only)
+    kiwifs widgets list [fence] | suggest [path]   (--json, --root)
+
+Agent setup:
+
+    kiwifs rules [edit | export | sync]   (--remote, --api-key, --format cursor|claude|agents|openclaw|skill, -o/--output;
+                                          sync --format skill defaults to .cursor/skills/team-wiki/SKILL.md)
+    kiwifs token create | list | revoke <first 12 chars>   (--space, --scope read|write|admin (read), --prefix, --actor)
+    kiwifs memory report  (--json/-j, --episodes-prefix)
+    kiwifs clip URL       (--title/-t, --tags, --folder/-f clips/, --actor clipper)
+    kiwifs model download [all-minilm-l6-v2 | multilingual-e5-small]   (--dir ~/.kiwi/models/<model>)
+
+Backup and tooling:
+
+    kiwifs backup         Push to git remote (--remote, --branch, --rebase-before-push true)
+    kiwifs restore        Clone (--from*, --to*, --branch)
+    kiwifs bench          Benchmark (--files 50, --bulk 100, --search-files 1000, --search-queries 50)
+    kiwifs update         Self-update from GitHub releases (background version check at most once per 24 h)
+
+KiwiFS Cloud:
+
+    kiwifs login          OAuth device flow; session in ~/.kiwifs/credentials.json (--host https://app.kiwifs.com, --client-id)
+    kiwifs logout         Remove stored credentials
+    kiwifs whoami         Show signed-in user
+    kiwifs connect SLUG   Print or write MCP config (--key $KIWI_API_KEY, --write cursor|claude-code|windsurf|claude-desktop|auto,
+                          --host https://api.kiwifs.com, --project)
+
+Token keys start with kiwi_ro_, kiwi_rw_, or kiwi_adm_ by scope. `token create` switches `[auth] type` to perspace if unset/none. New and revoked tokens take effect after SIGHUP or restart.
 
 ---
 
 ## KiwiFS Cloud
 
-Hosted KiwiFS at https://app.kiwifs.com. The cloud control plane manages workspaces, API keys, billing, and auth.
+Hosted KiwiFS at https://app.kiwifs.com: runs the server, backups, TLS, and sign-in. Each workspace is a KiwiFS knowledge base with the same MCP tools as self-hosted. NFS, S3, and WebDAV are not available on Cloud.
 
-### Authentication
+MCP endpoint per workspace:
 
-Two methods:
-1. API key: Pass `kiwi_sk_*` as Bearer token
-2. MCP OAuth 2.1: Browser-based login via WorkOS (PKCE)
+    https://api.kiwifs.com/api/workspaces/{slug}/mcp
 
-### Cloud API
+Authenticate with the workspace API key (workspace settings at app.kiwifs.com) or browser sign-in.
 
-Base URL: https://api.kiwifs.com/api/workspaces/{slug}
+    # CLI (recommended)
+    export KIWI_API_KEY=kiwi_sk_...
+    kiwifs connect my-workspace                  # print config (reads key from KIWI_API_KEY; safe to commit)
+    kiwifs connect my-workspace --write cursor   # write to Cursor (embeds the key)
+    kiwifs connect my-workspace --write auto     # every detected client
 
-All KiwiFS endpoints are available under this prefix. The cloud proxy authenticates you and forwards to the workspace's KiwiFS instance.
+    # URL clients (Cursor, Claude Code, Windsurf, VS Code, ...)
+    {"mcpServers": {"kiwi": {"url": "https://api.kiwifs.com/api/workspaces/my-workspace/mcp",
+                             "headers": {"Authorization": "Bearer ${env:KIWI_API_KEY}"}}}}
 
-    # Write a file
-    curl -X PUT "https://api.kiwifs.com/api/workspaces/{slug}/file?path=notes/hello.md" \
-      -H "Authorization: Bearer $KIWI_API_KEY" \
-      -H "X-Actor: my-app" \
-      -d "# Hello World"
+    # Claude Desktop (stdio bridge)
+    {"mcpServers": {"kiwi": {"command": "npx", "args": ["kiwifs", "mcp", "--remote",
+      "https://api.kiwifs.com/api/workspaces/my-workspace", "--api-key", "kiwi_sk_..."]}}}
 
-    # Read it back
-    curl "https://api.kiwifs.com/api/workspaces/{slug}/file?path=notes/hello.md" \
-      -H "Authorization: Bearer $KIWI_API_KEY"
-
-    # Search
-    GET /api/workspaces/{slug}/search?q=authentication
-
-    # File tree
-    GET /api/workspaces/{slug}/tree
-
-    # MCP endpoint
-    POST /api/workspaces/{slug}/mcp
-
-### Cloud MCP Config
-
-    {
-      "mcpServers": {
-        "kiwi": {
-          "url": "https://api.kiwifs.com/api/workspaces/{slug}/mcp"
-        }
-      }
-    }
-
-For CI/headless (no browser OAuth):
-
-    {
-      "mcpServers": {
-        "kiwi": {
-          "url": "https://api.kiwifs.com/api/workspaces/{slug}/mcp",
-          "headers": {
-            "Authorization": "Bearer kiwi_sk_..."
-          }
-        }
-      }
-    }
-
-### Connect CLI
-
-    kiwifs connect <workspace-slug>
-
-Generates and writes MCP config for the workspace.
+`kiwifs connect --write` targets: cursor (~/.cursor/mcp.json or .cursor/mcp.json), claude-code (~/.claude/settings.json or .mcp.json), windsurf (~/.codeium/windsurf/mcp_config.json), claude-desktop (claude_desktop_config.json). Only the `kiwi` entry is added or replaced. `kiwifs login` lets `connect` work without `--key`.
 
 ---
 
 ## Access Protocols
 
-| Protocol | Port  | Enable flag   |
-|----------|-------|---------------|
-| REST API | 3333  | (always on)   |
-| MCP      | 8181  | --http        |
-| NFS      | 2049  | --nfs         |
-| S3       | 3334  | --s3          |
-| WebDAV   | 3335  | --webdav      |
-| FUSE     | N/A   | kiwifs mount  |
+Every protocol goes through the same pipeline: atomic write, git commit, index update, SSE broadcast.
+
+| Protocol | Default port | Enable with | Auth |
+|---|---|---|---|
+| REST + web UI | 3333 | always on | every auth mode |
+| MCP | /mcp on 3333; stdio or 8181 via kiwifs mcp | always (/mcp) or kiwifs mcp | apikey mode only on HTTP |
+| NFS v3 | 2049 | serve --nfs | none; IP allowlist --nfs-allow (default loopback) |
+| S3-compatible | 3334 | serve --s3 | Bearer api_key in apikey mode only |
+| WebDAV | 3335 | serve --webdav | Bearer or Basic (any user, API key as password) in apikey mode only |
+| FUSE | — | kiwifs mount (client) | remote server's REST auth |
+
+- NFS: no portmapper; mount with `-o vers=3,tcp,port=2049,mountport=2049,nolock` (macOS `nolocks`). `.git` and `.kiwi` hidden. Supports symlinks, open-then-delete, stable handles.
+- S3: one bucket `knowledge` (one bucket per space with multiple spaces); object keys are paths; signatures not checked; ListObjectsV2 with delimiters and pagination.
+- WebDAV: MOVE, COPY, MKCOL, DELETE; large uploads buffered to disk.
+- FUSE: needs macFUSE or fuse3; foreground; sub-second mtimes, O_APPEND, symlinks, dir renames; no mmap.
+- S3 and WebDAV only check the global `[auth] api_key`; with perspace, oidc, or none they accept every request. Keep them on a private network.
+- POSIX level: local root full; NFS near-full; FUSE near-full (no mmap); WebDAV partial; REST, S3, MCP HTTP/tool semantics.
+- GET /readyz reports health of enabled protocols.
 
 ---
 
 ## Agent Playbook System
 
-KiwiFS ships agent-facing files that teach agents how to interact with a knowledge base.
+Every template except `blank` ships agent-facing files. An agent loads them with one `kiwi_context` call.
 
-### Core files (from kiwifs init)
+    SCHEMA.md            Folder layout, frontmatter fields, naming conventions
+    .kiwi/playbook.md    Step-by-step tool sequences (the copy kiwi_context serves)
+    .kiwi/rules.md       Always/never rules for every connected agent
+    index.md             Entry page linking every section (agents keep it current)
+    log.md               Append-only change record (memory template)
 
-    SCHEMA.md            Directory layout and frontmatter field definitions
-    .kiwi/playbook.md    Step-by-step MCP sequences for each operation
-    .kiwi/rules.md       Harness-specific agent behavior
-    index.md             Auto-maintained table of contents
-    log.md               Append-only change log
+`.kiwi/playbook.md` and `.kiwi/rules.md` are the only `.kiwi/` files reachable through the file API.
 
-### Load context in one call
+Load context: MCP `kiwi_context`; REST `GET /api/kiwi/context` → {"schema","playbook","index","rules"}. Schema alone: resource `kiwi://schema`.
 
-    MCP:  kiwi_context
-    REST: GET /api/kiwi/context
+Typical sequences:
 
-Returns schema, playbook, and index combined — the recommended first tool call for any agent session.
+    Ingest:      kiwi_context → kiwi_search (update, don't duplicate) → kiwi_write(path, content, provenance=...) →
+                 kiwi_read("index.md") → kiwi_write("index.md", ..., if_match=etag) → kiwi_append("log.md", ...)
+    Answer:      kiwi_brief(question) → kiwi_read(page) if the whole page is needed
+    Remember:    kiwi_remember(content, scope="user:alice")
+    Consolidate: kiwi_memory_report → kiwi_read(episode) → kiwi_write(page with merged-from)
+    Restructure: kiwi_refactor_plan(manifest) → kiwi_refactor_apply(manifest, digest)
+    Health:      kiwi_lint → kiwi_health_check(path) → kiwi_analytics
 
-### Export rules for your harness
+Rules export:
 
-    kiwifs rules export --format cursor    # .cursorrules style
-    kiwifs rules export --format claude    # CLAUDE.md style
-    kiwifs rules export --format agents    # AGENTS.md style
-    kiwifs rules export --format openclaw  # OpenClaw format
+    kiwifs rules                                  # print
+    kiwifs rules edit                             # $EDITOR
+    kiwifs rules export --format claude           # cursor (default) | claude | agents | openclaw | skill
+    kiwifs rules sync --format cursor --output .cursor/rules/kiwi.md
+    kiwifs rules sync --format skill              # .cursor/skills/team-wiki/SKILL.md
+    # add --remote http://host:3333 to read from a running server; REST: GET/PUT /api/kiwi/rules
+
+Provenance: `X-Provenance: run:run-249` (REST) or `provenance="run:run-249"` (MCP) appends to frontmatter `derived-from`.
 
 ### Episodic Memory
 
-Write observations to episodes/ as episodic memory. Periodically consolidate into durable pages/ using kiwi_memory_report to identify unmerged episodes.
+KiwiFS does not run an LLM; consolidation is the agent's or scheduler's job. Start with `kiwifs init --template memory`.
 
-Frontmatter for episodes: memory_kind: episodic, episode_id, derived-from, merged-from
+- `kiwi_remember` writes `episodes/<YYYY-MM-DD>/<episode_id>.md` with `memory_kind: episodic`, `created`, optional `scope` and `tags`; generates `episode_id` if omitted. It always writes under `episodes/`.
+- `kiwi_forget` sets `memory_status: superseded`, `valid_until` = now, optional `superseded_reason`; body kept.
+- Frontmatter: `memory_kind` (episodic | semantic | consolidation | working; anything under the episodes prefix is episodic unless semantic or consolidation), `memory_status` (active | contested | superseded (hidden from search unless include_superseded=true) | stale), `scope` (e.g. user:alice, project:billing; filter with `scope` on search), `expires_at` or `ttl` (janitor reports expired-memory; nothing deleted), `valid_from`/`valid_until`, `contradicts` (typed link; KiwiFS records, does not detect).
+- `derived-from` (set by KiwiFS from provenance) = which run produced the file. `merged-from` (set by you) = which episodes were folded in. Coverage uses only `merged-from`; entries of type episode (matching id or path) or run, session, trace, event, ingest (matching id) count.
+- Report: `kiwifs memory report`, `GET /api/kiwi/memory/report`, or `kiwi_memory_report` → coverage_pct, unmerged/total_unmerged, episodic_files/total_episodic, merged_from_refs, contradictions, contested_count, expired_count, avg_age_days, scope_counts, warnings. Cached 30 s. Prefix: `[memory] episodes_path_prefix`.
+
+---
+
+## Widgets
+
+A widget is a fenced code block whose body describes a picture or behavior. The web UI renders it; everywhere else (cat, diffs, export, search) it stays readable text. Typed fences have a YAML body checked against a schema on write.
+
+Fence spellings: bare name (e.g. `array`; renders only when the YAML has one of the fence's marker keys, otherwise stays a code block), `kiwi-` prefix (strict: always renders or errors), `widget:` prefix (strict, legacy). `[ui] typed_fences = false` disables bare names; `typed_fence_tags` allows a subset.
+
+Catalog by category (marker keys in parentheses, then extra aliases; full list via `kiwi_widget_reference` or `kiwifs widgets list`):
+
+- Data structures: `array` (values | rows; arraystack), `matrix` (values | layers; grid, dp), `table` (columns | rows | fromData; relation), `tree` (root | roots | parents | fromArray), `list` (nodes; linkedlist, linked-list), `stack` (values), `queue` (values; ringbuffer, ring-buffer; layout: ring), `map` (slots | entries; hashmap, hashtable; mode: open), `bits` (value; bitmask), `memory` (frames | heap; heap, stack-heap; Python Tutor trace format).
+- Charts and plots: `plot` (series; chart-xy), `bars` (values; histogram, barchart), `numberline` (min | max | xRange; number-line), `plane` (points | segments | polygons | circles | vectors | regions; geometry), `timeline` (intervals; gantt, schedule), `kiwi-chart` (bar, line, area, pie, radar, scatter from rows or DQL; Recharts), `kiwi-progress` (bars or radial gauges).
+- Diagrams: `graph` (nodes; layouts dagre, layered, circular), `sequence` (participants; seq), `steps` (diagram; mermaid-steps; Mermaid walked step by step, each step stands alone, needs non-empty steps), `mermaid` (focus=/dim= on the opening line, `click` directives), `d2` (rendered to SVG on the server), drawing embeds (`![[x.excalidraw.md|wide]]`, `![[y.canvas.json|full pin]]`).
+- Interactive and learning: quiz callouts (`> [!quiz single shuffle ^id] Question`; six kinds: single, multi, boolean, order, match, short; answer keys stay out of search), `kiwi-calc` (assumptions above `---`, derivations below; Tune sliders), `kiwi-playground` (controls exported as JSON, YAML, or a prompt), `kiwi-app` (sandboxed HTML/CSS/JS iframe; height=), `widget:live` (React Live with every widget view in scope; call render()), `widget:code` (runnable Python via Pyodide or JavaScript; lang=python|py|javascript|js).
+- Data and queries: `kiwi-query` (live DQL as table or list), `kiwi-data` (structured records with `kind`, queryable via `FROM RECORDS "<kind>"`), `kiwi-kanban` (YAML columns or DQL grouped by a field; drag does not change the file), `widget:tracker` (per-reader progress over numbered folders).
+- Page structure: callouts (`> [!NOTE]` and 26 other types, foldable), `:::tabs` with `::tab[Label]`, `:::columns{ratio="2:1"}` with `::col`, `:::figure{width=wide pin caption="..."}`, `:::claim{evidence=... confidence=0.9 source=...}` (queryable via `FROM CLAIMS`; unsourced badge), `kiwi-diff` (annotated diff, optional YAML header above ---), `kiwi-color` (swatches, one color per line), `_book.yaml` (folder reading order and book export).
+
+Writing a typed fence:
+- Top-level YAML keys are the widget's properties.
+- `steps:` makes a walkthrough; each step is a shallow patch over the previous step (use `frames:` to patch over the base; not both). A step may be a bare string (= note).
+- Step keys: note, line/next (highlight code line), label, why, breakpoint, duration (ms at 1x), expect.
+- Reserved top-level keys: code + lang, why, link {to, map: index}, props (escape hatch), caption, title, id, clock, width, autoplay, loop, frames, steps.
+- Meta string options (opening line): id=, clock= (shared step counter), caption="", title="", width=wide|full, autoplay, loop. Widget properties go in the YAML body, never the meta string.
+- A property marked "Fixed across steps" may only be set at the top level.
+- Playback: play/pause, step, speed 1x/2x/4x, copy link to step, download step image. URL fragment `#?step.<id>=N` or `#?step=N`.
+
+Validation: writes run the linter; with `[lint] reject_errors` (default) error-severity issues reject the write (broken YAML in a strict fence, wrong type, missing required key, fixed property set in a step). Unknown keys are warnings. Strict `kiwi-array|matrix|tree|memory|numberline|table` with no data key is an error. Bare-name parse failures are warnings. Check with `kiwifs lint`, `POST /api/kiwi/lint`, or `kiwi_lint`. Catalog: `kiwifs widgets list [fence] [--json]`, `GET /api/kiwi/widgets/reference`, `kiwi_widget_reference` (pass `examples: true`). `kiwifs widgets suggest` finds `widget:live` blocks that could be typed fences (read-only).
+
+Search indexes a fence's title, caption, step notes, code, and short labels (not coordinates). Document export replaces each typed fence with its caption and step notes as a blockquote followed by the YAML.
+
+---
+
+## Refactor
+
+Restructure from a manifest (YAML or JSON) into a reviewable plan, applied as one git commit, revertible. Every link to a moved page is respelled in its original style (full path, short name, relative path, markdown link, table cell) and re-resolved; a plan that would break a working link is rejected. Comments, personal state, frontmatter field ownership, and task claims follow their pages. Single renames (web UI, kiwi_rename, /rename) use the same engine and never overwrite a destination.
+
+Flow: plan (nothing written; digest) → review (CLI `--diff`, web UI Restructure view, JSON) → approve if an agent plan exceeds limits → apply with digest (stale digest → nothing written, fresh plan returned) → revert as a new commit (refuses if files changed since).
+
+Manifest keys (unknown keys are an error; at least one of moves, merges, edits, rename_tags, relinks, split):
+
+    moves:
+      - {from: guides/a.md, to: guides/b.md}                 # file
+      - {from: drafts/, to: archive/drafts/}                 # folder (trailing / keeps names)
+      - {from: "notes/**/*-meeting.md", to: meetings/}       # glob; ** spans folders, {a,b} alternates
+      - {from_regex: '^journal/(\d{4})-.*\.md$', to: 'journal/$1/'}   # $1 or ${name}
+    merges:
+      - {from: faq/duplicate.md, into: faq/canonical.md}     # from deleted; links/comments/state move to into; into body unchanged
+    edits:
+      - select: {paths: [...], glob: "notes/**", query: 'status = "draft"'}   # at least one; glob "**" = all
+        when: 'year(date) < "2024"'
+        set: {status: archived}
+        compute: {slug: 'slug(title)'}
+        unset: [reviewer]
+        add_tags: [archived]
+        remove_tags: [wip]
+        replace: [{find: "Acme Corp", with: "Acme", regex: false}]   # body text outside frontmatter and code
+        move_to: "archive/{{year}}/{{slug}}.md"
+        on_conflict: error            # or suffix("-%d")
+        force: false                  # take over keys owned by another field manager
+    rename_tags: [{from: ml, to: machine-learning}]          # frontmatter tags and inline #tags
+    relinks: [{from: old/path.md, to: new/path.md}]          # repair references after moves outside KiwiFS
+    split: [{from: guides/handbook.md, level: 2, into: guides/handbook/, confirm: true}]   # plan-only until confirm
+    delete_empty_dirs: true
+    now: "2026-10-19T00:00:00Z"                              # pins the clock expressions see
+
+Expressions use expr over the page before the manifest: path, dir, name, stem, title, tags, fm, links, date, modified, now; functions slug(), year(), month(), day(), date(t, layout). Pass the plan's reported `now` back to apply. Frontmatter edits are line-preserving (comments, key order survive).
+
+Conflict codes: exists, many_to_one, case_or_normalization, forbidden_chars, too_long, trailing_dot_or_space, empty_name, dir_cycle, parent_is_file, is_folder. Pages claimed by another actor cannot be moved.
+
+Scripts: Starlark (`kiwi_refactor_script`, `POST /refactor/script`) with read-only functions query(dql), files(glob), read(path), frontmatter(path), links(path), slug(text), json, print; no while loops or recursion; bounded steps, memory, time, reads. Return the manifest from main().
+
+Guardrails ([refactor]): protect globs, scope folder, folder_map page, approval_files 50, approval_links 200 (-1 disables). An agent (MCP, or REST with X-Kiwi-Client: mcp/...) over the limits needs approval: MCP elicitation if the client supports it, otherwise the plan waits in GET /refactor/pending until approved in the Restructure view or via POST /refactor/approve (valid once within the hour). REST apply returns 428.
+
+Safety: apply re-checks every ETag inside the write lock, writes a pre-image journal (.kiwi/state/refactor-journal.json) and rolls back on crash or failed commit. Commit trailers: Kiwi-Actor, Kiwi-Client, Kiwi-Refactor-Digest, Kiwi-Manifest, Kiwi-Base. Plans report `integrity` (already-broken links, pages left with no inbound links) and `stats` (pages, links, rewritten, unresolved).
+
+Interfaces: CLI `kiwifs refactor plan|apply|revert`; MCP kiwi_refactor_plan/apply/script/revert (+ resources kiwi://refactor/plans/{digest}, kiwi://refactor/raw-moves); REST /refactor/* (see REST Refactor); editors via `kiwifs lsp` (willRenameFiles), `?format=workspace-edit`, and `/refactor/from-workspace-edit`. Prefer one plan over a loop of kiwi_rename calls.
 
 ---
 
 ## Key Concepts
 
-- Files are truth: every page is a plain .md file with YAML frontmatter
-- Wiki links: [[page-name]] syntax with fuzzy resolution and backlink tracking
-- DQL: SQL-like query language over frontmatter (TABLE, LIST, COUNT, DISTINCT, WHERE, SORT, GROUP BY)
-- Versioning: every write is a git commit (configurable: git, cow, none)
-- Search: BM25 full-text via FTS5 + optional vector similarity via Ollama/OpenAI
-- Schemas: JSON Schema validation on frontmatter by type field
-- Workflows: JSON state machines with Kanban board visualization
-- Drafts: git-backed staging branches for safe agent edits
-- Claims: cooperative write leases to prevent concurrent edits
-- Webhooks: signed HTTP POST on file create/update/delete events
-- SSE: real-time event stream at GET /events
-- Multi-space: multiple isolated knowledge bases on one server
+- Files are truth: every page is a plain .md file with optional YAML frontmatter. Indexes (search, metadata, vectors, links) are derived and rebuilt with `kiwifs reindex`. Don't commit `.kiwi/state/`.
+- Write pipeline: storage → git commit → index update → SSE broadcast, for every protocol and for on-disk edits (watcher).
+- Optimistic concurrency: ETag = git blob hash; send If-Match (REST) or if_match (MCP); 409 on conflict.
+- Versioning: git (default; full history, blame, diff, revert), cow (snapshots under .versions/, max_versions 100), none.
+- Wiki links: `[[note]]`, `[[folder/note]]`, `[[/root/path]]`, `[[./rel]]`, `[[note|Label]]`, `[[note#Heading]]`. `.md` optional; case-insensitive; `-`, `_`, space equivalent; no prefix guessing. Duplicate names resolve: same folder, then shortest path, then alphabetical. Links in code are ignored. Typed frontmatter links via [links] typed_fields appear in backlinks with `relation`.
+- Search: grep (zero index) → SQLite FTS5 BM25 (default) → vector (pluggable embedder and store) → hybrid (RRF). Context packs via /brief and kiwi_brief. Measure with `kiwifs eval`.
+- DQL: TABLE, LIST, COUNT, DISTINCT, CALENDAR, TASK, JSON; clauses FROM "folder/" | #tag | RECORDS "<kind>" | CLAIMS, WHERE (repeatable, AND), SORT, GROUP BY, FLATTEN, LIMIT, OFFSET. Implicit fields _path, _name, _folder, _ext, _updated. Functions include lower, upper, length, contains, default, choice, date, days_since, days_ago, dateformat, regextest, round, sum, average, join. Custom fields in [dataview.custom_fields].
+- Computed views: page with `kiwi-view: true`, `kiwi-query`, optional `kiwi-format`; output after `<!-- kiwi:auto -->`; regenerated on read when stale or via /view/refresh.
+- Bases: saved DQL views in .kiwi/views/*.json with table, list, calendar, or kanban layouts.
+- Canvas: JSON Canvas 1.0 `.canvas.json` files (text, file, link, group nodes). Whiteboards: Excalidraw drawings in `.excalidraw.md` files, embeddable in pages.
+- Workflows: JSON state machines in .kiwi/workflows/; pages join via `workflow` and `state` frontmatter; WIP limits, terminal states, blocked cards; Kanban board in the web UI.
+- Claims: cooperative leases (default 30m, max 24h); they don't block writes; expired claims released every 30 s; refactors refuse to move claimed pages.
+- Drafts: git branches in separate worktrees; fast-forward merge only.
+- Schemas: JSON Schema per frontmatter `type` (or configured discriminator); reject (422) or warn.
+- Webhooks: signed POSTs per changed file for write, delete, bulk, rollback, transition.
+- SSE: GET /api/kiwi/events is the only real-time transport.
+- Multi-space: several roots, each with its own git history and indexes, on one port; route by /api/kiwi/{space}/ or X-Kiwi-Space; per-space keys.
+- Publishing: `published: true` (/p/*), `visibility: public`, share links with expiry and password, space visibility (private, unlisted, public).
+- Audit log: per-request JSONL in .kiwi/audit/YYYY-MM-DD.jsonl when [audit] enabled.
+- Episodic memory: episodes vs semantic pages; merged-from coverage report.
+- Refactor: manifest → plan → digest-checked apply → revert, links always preserved.
+- Widgets: typed YAML fences validated on write, rendered interactively, readable as plain text.
+- Agent onboarding: kiwi_context first; rules exported per harness with `kiwifs rules`.

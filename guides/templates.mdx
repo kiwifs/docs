@@ -1,410 +1,387 @@
 ---
 title: "Init templates"
-description: "Starter templates for new knowledge bases — kb, wiki, memory, tasks, data, cms, runbook, adr, prompt, research, log, and blank."
+description: "Scaffold a new knowledge base from one of 12 starter templates with folders, sample pages, schemas, and workflows."
 icon: "folder-open"
 ---
 
-`kiwifs init` scaffolds a knowledge directory from a built-in template. Each template provides a directory layout, sample files, a `.kiwi/config.toml`, a `SCHEMA.md`, a `playbook.md`, and optional workflows or JSON Schemas.
+`kiwifs init` creates a knowledge directory from a built-in template. Pick the template closest to how you will use the knowledge base. Everything it creates is plain markdown plus a `.kiwi/` folder, so you can change any of it later.
 
-```bash
-kiwifs init --template <name> --root <dir>
+```bash Terminal
+kiwifs init --template wiki --root ./knowledge
+kiwifs serve --root ./knowledge
 ```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--template` | `kb` | Template name (see below) |
+| `--root`, `-r` | `./knowledge` | Directory to initialize |
+
+`init` never overwrites existing files, so it is safe to run on a folder that already has content.
 
 ## Available templates
 
-| Template | Best for | Key features |
-|----------|----------|--------------|
-| `kb` | Governed knowledge bases | Article schema, verification workflow, FAQ/guides/reference structure |
-| `wiki` | Team wikis | Onboarding, ADRs, processes, page templates |
-| `memory` | Agent episodic memory | Episodes directory, consolidation log, memory report |
-| `tasks` | Task tracking | JSON Schema validation, Kanban workflow, claims |
-| `data` | Structured data collections | DQL dashboards, charts, import connectors |
-| `cms` | Headless CMS | Blog, docs, pages, editorial workflow, feeds |
-| `runbook` | Ops and incident response | Severity frontmatter, execution staleness, checklists |
-| `adr` | Architecture decision records | MADR format, supersession chains, status workflow |
-| `prompt` | Prompt management | System/task prompts, rubrics, eval metrics |
-| `research` | Research and literature | Papers, reading workflow, notes, BibTeX citations |
-| `log` | Append-only event log | Daily partitioning, sequence numbers, immutable writes |
-| `blank` | Empty starting point | `.kiwi/config.toml` only |
+| Template | Best for | What you get |
+| --- | --- | --- |
+| `kb` | Curated knowledge bases | Article types, verification workflow, freshness checks |
+| `wiki` | Team wikis | Onboarding, decision records, processes, reference docs |
+| `memory` | Agent memory | Episodic and semantic pages, consolidation log |
+| `tasks` | Task tracking | Task schema, status workflow with WIP limits, claim fields |
+| `data` | Structured records | Collections, DQL dashboards, chart widgets |
+| `cms` | Headless CMS | Blog, docs, pages, authors, editorial workflow, feeds |
+| `runbook` | Ops and incident response | Severity and service frontmatter, execution staleness |
+| `adr` | Architecture decision records | MADR format, status workflow, auto-numbering |
+| `prompt` | Prompt registry | System and task prompts, eval rubrics |
+| `research` | Literature and papers | Paper tracking, reading workflow, typed citation links |
+| `log` | Append-only event logs | Daily files that reject overwrites |
+| `blank` | Starting from scratch | Config, rules, and page templates only |
 
-<Tip>
-In the web UI and cloud dashboard, templates are also available when creating a new workspace or space.
-</Tip>
+<Note>
+The old template names `knowledge` and `prompt-library` are now `memory` and `prompt`. Using an old name returns an error that names the new one.
+</Note>
 
-Every template (except `blank`) includes two agent-facing documents:
+## What every template includes
 
-- **`SCHEMA.md`** — directory layout, frontmatter fields, and naming conventions. Agents read this via `kiwi_context` or `kiwi://schema`.
-- **`playbook.md`** — step-by-step MCP tool sequences for standard operations, with a cost table to minimize unnecessary calls.
+Every template, including `blank`, creates:
 
-Export harness-specific rules for your agent tool:
+- `.kiwi/config.toml` — server, search, versioning, and auth settings. Some templates ship their own; the rest get the default config.
+- `.kiwi/rules.md` — agent rules you can export with `kiwifs rules export`.
+- `.kiwi/templates/` — page templates for decisions, meeting notes, onboarding, product specs, SOPs, and tasks.
+- `.gitignore` — ignores `.kiwi/state/`, which holds rebuildable indexes.
+- `README.md`
 
-```bash
-kiwifs rules export --format cursor
+Every template except `blank` also includes two documents for agents:
+
+- **`SCHEMA.md`** — folder layout, frontmatter fields, and naming conventions.
+- **`playbook.md`** — step-by-step MCP tool sequences for common operations. `init` writes it to both the root and `.kiwi/playbook.md`. Agents receive it through `kiwi_context`.
+
+See [Agent playbook](/concepts/agent-playbook).
+
+### Export agent rules
+
+Turn `.kiwi/rules.md` into the rules file your agent harness reads:
+
+```bash Terminal
+kiwifs rules export --format cursor    # default
 kiwifs rules export --format claude
 kiwifs rules export --format agents
+kiwifs rules export --format skill
+kiwifs rules export --format openclaw
 ```
 
----
-
-## kb
-
-The `kb` (knowledge base) template is designed for governed, high-quality knowledge bases with article verification workflows.
-
-### Directory structure
-
-```
-kb/
-├── SCHEMA.md
-├── index.md
-├── faq/
-├── getting-started/
-├── guides/
-├── reference/
-├── troubleshooting/
-├── playbook.md
-└── .kiwi/
-    ├── config.toml
-    ├── schemas/
-    │   └── article.json
-    └── workflows/
-        └── kb.json          # draft → review → verified → stale → archived
-```
-
-<Accordion title="Verification workflow">
-Articles follow a `draft → review → verified → stale → archived` lifecycle. The janitor flags verified articles past their `review_date` as stale. Enable schema enforcement to require `title`, `type`, and `status` on every article.
-</Accordion>
-
-## wiki
-
-A structured team wiki with decision records, onboarding guides, and process documentation.
-
-### Directory structure
-
-```
-wiki/
-├── SCHEMA.md
-├── index.md
-├── welcome.md
-├── architecture.md
-├── how-we-work.md
-├── decisions/
-│   ├── index.md
-│   └── adr-001-example.md
-├── onboarding/
-│   └── index.md
-├── processes/
-│   ├── index.md
-│   ├── deployment.md
-│   ├── dev-setup.md
-│   └── incident-response.md
-├── reference/
-│   ├── index.md
-│   ├── faq.md
-│   └── glossary.md
-└── .kiwi/
-    ├── config.toml
-    ├── playbook.md
-    ├── rules.md
-    └── templates/
-        ├── decision.md
-        ├── meeting-notes.md
-        ├── onboarding.md
-        ├── product-spec.md
-        └── sop.md
-```
-
-<Accordion title="Page templates">
-The wiki template includes slash-command templates in `.kiwi/templates/` for common page types: architectural decision records, meeting notes, onboarding checklists, product specs, and standard operating procedures. These appear in the web UI's "new page" menu.
-</Accordion>
-
-## memory
-
-The `memory` template implements the episodic/semantic memory pattern. Agents write short-lived observations to `episodes/` and periodically consolidate them into durable pages.
-
-### Directory structure
-
-```
-memory/
-├── SCHEMA.md
-├── index.md
-├── log.md                     # Append-only change log
-├── pages/                     # Durable semantic pages
-├── episodes/                  # Short-lived episodic notes
-├── playbook.md
-└── .kiwi/
-    └── config.toml
-```
-
-<Accordion title="Memory lifecycle">
-Episodes use `memory_kind: episodic` frontmatter with optional `expires`, `scope`, and `validity` fields. Use `kiwi_memory_report` to find episodes ready for consolidation, then merge them into durable pages with `merged-from` provenance tracking. See [Episodic memory](/concepts/episodic-memory).
-</Accordion>
-
-## tasks
-
-Task tracking template with a pre-configured workflow, JSON Schema validation, and Kanban-ready frontmatter.
-
-### Directory structure
-
-```
-tasks/
-├── SCHEMA.md
-├── WORKFLOW.md
-├── index.md
-├── tasks/
-│   ├── example-task.md
-│   └── blocked-example.md
-├── playbook.md
-└── .kiwi/
-    ├── config.toml
-    └── schemas/
-        └── task.json
-```
+## Template reference
 
 <AccordionGroup>
-  <Accordion title="Task frontmatter">
-    Each task file uses structured frontmatter validated by `.kiwi/schemas/task.json`:
+  <Accordion title="kb — knowledge base" icon="book">
+    A curated knowledge base where articles are reviewed and kept fresh.
 
-    ```yaml
+    <Tree>
+      <Tree.Folder name="knowledge" defaultOpen>
+        <Tree.File name="SCHEMA.md" />
+        <Tree.File name="playbook.md" />
+        <Tree.File name="index.md" />
+        <Tree.Folder name="faq" />
+        <Tree.Folder name="getting-started" />
+        <Tree.Folder name="guides" />
+        <Tree.Folder name="reference" />
+        <Tree.Folder name="troubleshooting" />
+        <Tree.Folder name=".kiwi" defaultOpen>
+          <Tree.File name="config.toml" />
+          <Tree.File name="schemas/article.json" />
+          <Tree.File name="workflows/kb.json" />
+        </Tree.Folder>
+      </Tree.Folder>
+    </Tree>
+
+    - **Article frontmatter:** `title`, `type` (`how-to`, `troubleshooting`, `faq`, or `reference`), `owner`, `status`, `tags`, and `review_interval` are required.
+    - **Workflow:** `draft → review → verified → stale → archived`. Stale articles can go back to review.
+    - **Freshness:** the janitor flags pages older than `stale_days = 90`.
+  </Accordion>
+
+  <Accordion title="wiki — team wiki" icon="users">
+    A team wiki with onboarding, decisions, and processes. Uses the default config.
+
+    <Tree>
+      <Tree.Folder name="knowledge" defaultOpen>
+        <Tree.File name="SCHEMA.md" />
+        <Tree.File name="playbook.md" />
+        <Tree.File name="index.md" />
+        <Tree.File name="welcome.md" />
+        <Tree.File name="architecture.md" />
+        <Tree.File name="how-we-work.md" />
+        <Tree.Folder name="decisions" />
+        <Tree.Folder name="onboarding" />
+        <Tree.Folder name="processes" />
+        <Tree.Folder name="reference" />
+        <Tree.Folder name=".kiwi" />
+      </Tree.Folder>
+    </Tree>
+
+    `processes/` ships with deployment, dev setup, and incident response pages. `reference/` has an FAQ and a glossary.
+  </Accordion>
+
+  <Accordion title="memory — agent memory" icon="brain">
+    Episodic and semantic memory for agents. Agents write short-lived observations to `episodes/` and consolidate them into durable pages in `pages/`. Uses the default config.
+
+    <Tree>
+      <Tree.Folder name="knowledge" defaultOpen>
+        <Tree.File name="SCHEMA.md" />
+        <Tree.File name="playbook.md" />
+        <Tree.File name="index.md" />
+        <Tree.File name="log.md" />
+        <Tree.Folder name="episodes" />
+        <Tree.Folder name="pages" />
+        <Tree.Folder name=".kiwi" />
+      </Tree.Folder>
+    </Tree>
+
+    Use `kiwi_remember` to write an episode, `kiwi_memory_report` to find episodes not yet consolidated, and `kiwi_forget` to mark a memory as superseded. See [Episodic memory](/concepts/episodic-memory).
+  </Accordion>
+
+  <Accordion title="tasks — task tracking" icon="list-check">
+    Tasks as markdown files, ready for the kanban board and [claims](/concepts/claims). Uses the default config.
+
+    <Tree>
+      <Tree.Folder name="knowledge" defaultOpen>
+        <Tree.File name="SCHEMA.md" />
+        <Tree.File name="WORKFLOW.md" />
+        <Tree.File name="playbook.md" />
+        <Tree.File name="index.md" />
+        <Tree.Folder name="tasks" />
+        <Tree.Folder name=".kiwi" defaultOpen>
+          <Tree.File name="schemas/task.json" />
+          <Tree.File name="workflows/tasks.json" />
+        </Tree.Folder>
+      </Tree.Folder>
+    </Tree>
+
+    - **Task frontmatter:** `type: task`, `title`, `status`, and `priority` (an integer) are required. Optional fields include `category`, `effort`, `assignee`, `parent`, `blocked-by`, `due`, and claim fields such as `claimed-by` and `lease-expires`. Workflow actions read `workflow` and `state`, which is what the shipped example pages use.
+    - **Workflow:** `backlog → todo → in_progress → review → done`, with `cancelled` reachable from every open state. `in_progress` has a WIP limit of 5 and `review` a limit of 3.
+
+    ```yaml tasks/example-task.md
     ---
-    title: "Implement auth flow"
-    status: "in_progress"
-    assignee: "agent:eng-bot"
-    priority: "high"
-    workflow: "default"
-    state: "in_progress"
+    type: task
+    title: Implement auth flow
+    workflow: tasks
+    state: in_progress
+    priority: 1
+    assignee: agent:eng-bot
+    blocked_by: []
     ---
     ```
 
-    The `status` field drives Kanban board grouping. The `workflow` and `state` fields enable state-machine transitions via [Workflows](/concepts/workflows).
-  </Accordion>
-  <Accordion title="JSON Schema validation">
-    The `task.json` schema in `.kiwi/schemas/` validates that required fields (`title`, `status`) are present and that `status` is one of the allowed values. Enable enforcement with:
+    Advance a task through the workflow:
 
-    ```toml .kiwi/config.toml
-    [schema]
-    enforce = true
-    ```
-
-    See [Schemas](/concepts/schemas).
-  </Accordion>
-  <Accordion title="Kanban visualization">
-    With the workflow configured, the web UI renders tasks as a Kanban board grouped by state. Use the API to advance tasks programmatically:
-
-    ```bash
+    ```bash Terminal
     curl -X POST 'http://localhost:3333/api/kiwi/workflow/advance' \
       -H 'Content-Type: application/json' \
-      -d '{"path":"tasks/example-task.md","target_state":"done","actor":"agent:bot"}'
+      -d '{"path":"tasks/example-task.md","target_state":"review","actor":"agent:bot"}'
     ```
+  </Accordion>
+
+  <Accordion title="data — structured records" icon="database">
+    Collections of structured records with DQL dashboards.
+
+    <Tree>
+      <Tree.Folder name="knowledge" defaultOpen>
+        <Tree.File name="SCHEMA.md" />
+        <Tree.File name="playbook.md" />
+        <Tree.File name="index.md" />
+        <Tree.Folder name="collections" />
+        <Tree.Folder name="dashboards" />
+        <Tree.Folder name="imports" />
+        <Tree.Folder name=".kiwi" defaultOpen>
+          <Tree.File name="config.toml" />
+          <Tree.File name="schemas/record.json" />
+        </Tree.Folder>
+      </Tree.Folder>
+    </Tree>
+
+    Records need `title` and `type`. Dashboards in `dashboards/` combine `kiwi-query` and `kiwi-chart` blocks. Fill collections with [`kiwifs import`](/import/overview). See [DQL](/concepts/dql).
+  </Accordion>
+
+  <Accordion title="cms — headless CMS" icon="newspaper">
+    A git-native CMS with an editorial workflow, a public reader at `/p/*`, and feeds.
+
+    <Tree>
+      <Tree.Folder name="knowledge" defaultOpen>
+        <Tree.File name="SCHEMA.md" />
+        <Tree.File name="playbook.md" />
+        <Tree.File name="index.md" />
+        <Tree.Folder name="authors" />
+        <Tree.Folder name="blog" />
+        <Tree.Folder name="docs" />
+        <Tree.Folder name="pages" />
+        <Tree.Folder name=".kiwi" defaultOpen>
+          <Tree.File name="config.toml" />
+          <Tree.File name="schemas/blog-post.json" />
+          <Tree.File name="workflows/editorial.json" />
+        </Tree.Folder>
+      </Tree.Folder>
+    </Tree>
+
+    - **Post frontmatter:** `title`, `slug`, `type: blog-post`, `author`, `category`, `tags`, `published`, and `published_at` are required.
+    - **Workflow:** `draft → review → scheduled → published → archived`. Review can also publish directly.
+    - **Feeds:** `GET /api/kiwi/feed.xml` (Atom) and `GET /api/kiwi/feed.json` (JSON Feed).
+
+    See [Publishing](/concepts/publishing).
+  </Accordion>
+
+  <Accordion title="runbook — operations" icon="triangle-exclamation">
+    Runbooks with severity, affected services, and execution tracking.
+
+    <Tree>
+      <Tree.Folder name="knowledge" defaultOpen>
+        <Tree.File name="SCHEMA.md" />
+        <Tree.File name="playbook.md" />
+        <Tree.File name="index.md" />
+        <Tree.File name="example-high-cpu.md" />
+        <Tree.Folder name=".kiwi" defaultOpen>
+          <Tree.File name="config.toml" />
+          <Tree.File name="schemas/runbook.json" />
+          <Tree.File name="templates/runbook.md" />
+        </Tree.Folder>
+      </Tree.Folder>
+    </Tree>
+
+    - **Runbook frontmatter:** `type: runbook`, `title`, `trigger`, `severity` (`P1`–`P4`), `owner`, and `services` are required. Track runs with `last_executed`, `last_outcome`, and `execution_count`.
+    - **Execution staleness:** the janitor flags runbooks not executed in 90 days, and runbooks whose `last_outcome` is `failure`.
+    - `services` is a typed link field, so services appear as edges in the graph.
+  </Accordion>
+
+  <Accordion title="adr — architecture decisions" icon="scale-balanced">
+    Architecture Decision Records in MADR format.
+
+    <Tree>
+      <Tree.Folder name="knowledge" defaultOpen>
+        <Tree.File name="SCHEMA.md" />
+        <Tree.File name="playbook.md" />
+        <Tree.File name="index.md" />
+        <Tree.Folder name="decisions" />
+        <Tree.Folder name=".kiwi" defaultOpen>
+          <Tree.File name="config.toml" />
+          <Tree.File name="schemas/adr.json" />
+          <Tree.File name="templates/adr.md" />
+          <Tree.File name="workflows/adr.json" />
+        </Tree.Folder>
+      </Tree.Folder>
+    </Tree>
+
+    - **ADR frontmatter:** `type: adr`, `title`, `status`, `date`, and `deciders` are required.
+    - **Workflow:** `proposed → accepted → deprecated → superseded`.
+    - **Auto-numbering:** new files in `decisions/` get the next `adr_number`, configured with `[format_hooks.auto_sequence]`.
+    - `supersedes`, `superseded_by`, and `contradicts` are typed links, so the graph shows decision chains.
+  </Accordion>
+
+  <Accordion title="prompt — prompt registry" icon="message">
+    Versioned prompts with evaluation rubrics. Git history records every prompt change.
+
+    <Tree>
+      <Tree.Folder name="knowledge" defaultOpen>
+        <Tree.File name="SCHEMA.md" />
+        <Tree.File name="playbook.md" />
+        <Tree.File name="index.md" />
+        <Tree.Folder name="system-prompts" />
+        <Tree.Folder name="task-prompts" />
+        <Tree.Folder name="evaluation" />
+        <Tree.Folder name=".kiwi" defaultOpen>
+          <Tree.File name="config.toml" />
+          <Tree.File name="schemas/prompt.json" />
+          <Tree.File name="schemas/rubric.json" />
+        </Tree.Folder>
+      </Tree.Folder>
+    </Tree>
+
+    Prompts need `type: prompt`, `title`, `model`, and `label` (`production` or `staging`). Optional fields such as `temperature`, `eval_score`, `success_rate`, and `variant_of` make prompts queryable with DQL.
+  </Accordion>
+
+  <Accordion title="research — papers and notes" icon="graduation-cap">
+    A research library with a reading pipeline and typed citation links.
+
+    <Tree>
+      <Tree.Folder name="knowledge" defaultOpen>
+        <Tree.File name="SCHEMA.md" />
+        <Tree.File name="playbook.md" />
+        <Tree.File name="index.md" />
+        <Tree.Folder name="papers" />
+        <Tree.Folder name="notes" />
+        <Tree.Folder name="reviews" />
+        <Tree.Folder name=".kiwi" defaultOpen>
+          <Tree.File name="config.toml" />
+          <Tree.File name="schemas/paper.json" />
+          <Tree.File name="workflows/reading.json" />
+        </Tree.Folder>
+      </Tree.Folder>
+    </Tree>
+
+    - **Paper frontmatter:** `type: paper`, `title`, `authors`, `year`, `venue`, `workflow`, and `state` are required. `doi`, `bibtex_key`, and `cites` are optional.
+    - **Workflow:** `unread → reading → annotated → summarized → incorporated`, with a WIP limit of 10 on `reading`.
+    - `cites`, `contradicts`, `extends`, and `reviews` are typed links. The `kiwi_cite` MCP tool creates a paper page from a DOI or arXiv ID.
+  </Accordion>
+
+  <Accordion title="log — append-only events" icon="scroll">
+    An append-only event log with one file per day.
+
+    <Tree>
+      <Tree.Folder name="knowledge" defaultOpen>
+        <Tree.File name="SCHEMA.md" />
+        <Tree.File name="playbook.md" />
+        <Tree.File name="index.md" />
+        <Tree.Folder name="events" />
+        <Tree.Folder name=".kiwi" defaultOpen>
+          <Tree.File name="config.toml" />
+          <Tree.File name="schemas/event.json" />
+        </Tree.Folder>
+      </Tree.Folder>
+    </Tree>
+
+    Each daily file sets `append_only: true` in its frontmatter, and KiwiFS rejects overwrites of such files. Add entries with `POST /api/kiwi/file/append` or the `kiwi_append` MCP tool. Each entry is an H2 heading such as `## 2026-06-20T09:00:00Z | system.startup.v1`, and git history provides tamper evidence.
+  </Accordion>
+
+  <Accordion title="blank — empty" icon="file">
+    No sample pages, no `SCHEMA.md`, and no playbook. You get the files listed in [What every template includes](#what-every-template-includes) and nothing else.
   </Accordion>
 </AccordionGroup>
 
-## data
+## List templates over HTTP
 
-Structured data collections with DQL dashboards and import connectors.
+A running server lists its templates at `/api/init-templates`, outside the `/api/kiwi` prefix:
 
-### Directory structure
-
-```
-data/
-├── SCHEMA.md
-├── index.md
-├── collections/               # One directory per data collection
-├── dashboards/                # DQL-powered summary views
-├── imports/                   # Import connection configs
-├── playbook.md
-└── .kiwi/
-    ├── config.toml
-    └── schemas/
-        └── record.json
-```
-
-<Accordion title="DQL dashboards">
-Dashboard pages use `kiwi-view: true` and `kiwi-query` frontmatter to auto-generate tables and charts from collection data. Pair with `kiwi-chart` fenced blocks for visual summaries. See [DQL](/concepts/dql).
-</Accordion>
-
-## cms
-
-Git-native headless CMS with an editorial workflow, Atom/JSON feeds, and a published reader at `/p/*`.
-
-### Directory structure
-
-```
-cms/
-├── SCHEMA.md
-├── index.md
-├── blog/                      # Blog posts with slug, author, published_at
-├── docs/                      # Documentation pages
-├── pages/                     # Static pages
-├── authors/                   # Author profiles
-├── playbook.md
-└── .kiwi/
-    ├── config.toml
-    ├── schemas/
-    │   └── blog-post.json
-    └── workflows/
-        └── editorial.json     # Editorial publishing states
-```
-
-<Accordion title="Publishing and feeds">
-Publish pages to the reader at `/p/{path}` and subscribe via `GET /api/kiwi/feed.xml` (Atom) or `GET /api/kiwi/feed.json` (JSON Feed). The editorial workflow manages content through review stages before publication. See [Publishing](/concepts/publishing).
-</Accordion>
-
-## runbook
-
-Operations-focused template with incident response procedures and execution staleness tracking.
-
-### Directory structure
-
-```
-runbook/
-├── SCHEMA.md
-├── index.md
-├── example-high-cpu.md        # Sample runbook with severity + services
-├── playbook.md
-└── .kiwi/
-    ├── config.toml
-    └── schemas/
-        └── runbook.json
-```
-
-<Accordion title="Execution staleness">
-Each runbook uses `severity` (P1-P4), `services`, `trigger`, and `last_executed` frontmatter. The janitor flags runbooks that have not been executed within a configurable staleness window. Schema validation ensures required fields are present.
-</Accordion>
-
-## adr
-
-Architecture Decision Records using the MADR format with supersession chains and contradiction detection.
-
-### Directory structure
-
-```
-adr/
-├── SCHEMA.md
-├── index.md
-├── decisions/
-│   └── ADR-001-example.md
-├── playbook.md
-└── .kiwi/
-    ├── config.toml
-    ├── schemas/
-    │   └── adr.json
-    └── workflows/
-        └── adr.json           # proposed → accepted → deprecated → superseded
-```
-
-<Accordion title="Supersession and contradiction">
-ADRs track `supersedes` and `contradicts` typed links in frontmatter. The graph view highlights contradiction edges. The workflow enforces valid status transitions. Use `adr_number` for sequential numbering with auto-increment via `[sequences]` config.
-</Accordion>
-
-## prompt
-
-Versioned prompt management with rubrics and evaluation metrics.
-
-### Directory structure
-
-```
-prompt/
-├── SCHEMA.md
-├── index.md
-├── system-prompts/            # System-level prompts
-├── task-prompts/              # Task-specific prompts
-├── evaluation/                # Rubrics and eval results
-├── playbook.md
-└── .kiwi/
-    ├── config.toml
-    └── schemas/
-        ├── prompt.json
-        └── rubric.json
-```
-
-<Accordion title="Prompt versioning">
-Each prompt file includes `version`, `model`, and `temperature` frontmatter. Rubric files define scoring criteria. Use `kiwi_eval` to benchmark search quality against rubrics. Git versioning provides a full history of prompt iterations.
-</Accordion>
-
-## research
-
-Research template with structured note-taking, reading workflows, and citation tracking.
-
-### Directory structure
-
-```
-research/
-├── SCHEMA.md
-├── index.md
-├── papers/                    # Literature entries with BibTeX metadata
-├── notes/                     # Synthesis notes
-├── reviews/                   # Paper reviews
-├── playbook.md
-└── .kiwi/
-    ├── config.toml
-    ├── schemas/
-    │   └── paper.json
-    └── workflows/
-        └── reading.json       # Reading pipeline states
-```
-
-<Accordion title="Reading workflow">
-Paper files track `authors`, `year`, `doi`, `bibtex`, and reading status via the `reading` workflow. Use `kiwi_cite` to generate citations. The graph view visualizes citation networks between papers.
-</Accordion>
-
-## log
-
-Append-only event log with daily partitioning and sequence number validation.
-
-### Directory structure
-
-```
-log/
-├── SCHEMA.md
-├── index.md
-├── events/                    # Daily event files
-├── playbook.md
-└── .kiwi/
-    ├── config.toml
-    └── schemas/
-        └── event.json         # type: daily-log, append_only, entry_count, date
-```
-
-<Accordion title="Append-only guarantees">
-The log template configures `validate_write` guards to enforce append-only semantics. Sequence numbers (`<!-- seq:N -->` markers) are validated by the `kiwifs check` CLI to detect gaps or reordering. Daily files partition events by date with `FLATTEN` support in DQL queries.
-</Accordion>
-
-## blank
-
-Minimal template — creates only `.kiwi/config.toml`. Use this when you want to start from scratch or bring your own directory structure.
-
-## Listing templates via API
-
-```bash
-# Self-hosted
+```bash Terminal
 curl http://localhost:3333/api/init-templates
-
-# Cloud
-curl https://api.kiwifs.com/api/workspaces/init-templates \
-  -H "Authorization: Bearer $KIWI_API_KEY"
 ```
 
-Returns an array of template objects with `id`, `name`, and `description`.
+```json Response
+{
+  "templates": [
+    {
+      "id": "adr",
+      "label": "Architecture Decision Records",
+      "description": "Architecture Decision Records with MADR format, status workflow, and JSON Schema"
+    },
+    {
+      "id": "blank",
+      "label": "Blank",
+      "description": "Empty workspace with Kiwi config only"
+    }
+  ]
+}
+```
+
+Templates are sorted by label, with `blank` last.
 
 ## Related
 
 <CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install and run KiwiFS.
+  </Card>
   <Card title="Agent playbook" icon="book-open" href="/concepts/agent-playbook">
-    How agents onboard using SCHEMA.md and playbook.md.
+    How agents use `SCHEMA.md` and `playbook.md`.
   </Card>
   <Card title="Workflows" icon="bars-progress" href="/concepts/workflows">
-    State machines that drive Kanban boards and editorial pipelines.
+    State machines behind kanban boards and editorial pipelines.
   </Card>
   <Card title="Schemas" icon="shield-check" href="/concepts/schemas">
-    JSON Schema validation on writes.
-  </Card>
-  <Card title="Configuration" icon="gear" href="/configuration">
-    Full .kiwi/config.toml reference.
-  </Card>
-  <Card title="Episodic memory" icon="brain" href="/concepts/episodic-memory">
-    The episode/consolidation pattern used by the memory template.
-  </Card>
-  <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Install and run KiwiFS in 60 seconds.
+    Validate frontmatter on write.
   </Card>
 </CardGroup>

@@ -1,142 +1,169 @@
 ---
 title: "Publishing and sharing"
-description: "Make pages publicly accessible via publish flags, share links, or space visibility."
+description: "Open pages to readers without an API key through published permalinks, share links, or space visibility."
 icon: "globe"
 ---
 
-KiwiFS provides three ways to make content accessible without authentication: **per-page publishing**, **share links**, and **space-level visibility**.
+KiwiFS has three ways to let people read content without an API key. Pick by scope and lifetime:
 
-## Per-page publishing
+| Model | Scope | Lifetime | Stored in |
+| --- | --- | --- | --- |
+| [Published pages](#published-pages) | One page, plus its assets | Until you unpublish | `published: true` in frontmatter |
+| [Share links](#share-links) | One file | Until it expires or you revoke it | `.kiwi/state/sharelinks.json` |
+| [Space visibility](#space-visibility) | The whole space | Until you change it | `[space] visibility` in `config.toml` |
 
-Set `published: true` in a page's frontmatter to make it accessible at `/p/{path}` without authentication.
+These only matter when [authentication](/guides/auth-tokens) is on. Without auth, every route is already open.
 
-```yaml
+## Published pages
+
+A page with `published: true` in its frontmatter is served as a rendered HTML page at `/p/{path}`, with no authentication. Use it for docs, guides, and anything that should stay public.
+
+```markdown guides/onboarding.md
 ---
-title: "Getting Started"
+title: Onboarding
+description: First week checklist for new engineers
 published: true
-published_at: "2026-05-02T14:30:00Z"
+published_at: 2026-10-19T09:00:00Z
 ---
 ```
 
-Published pages are served as rendered HTML at their public permalink:
+The permalink works with or without the `.md` extension:
 
+```text
+http://localhost:3333/p/guides/onboarding
 ```
-http://localhost:3333/p/concepts/auth.md
-```
+
+Send `Accept: text/markdown` to get the raw markdown, or `Accept: application/json` for a JSON payload, instead of HTML. Pages that are not published return `404`, so readers cannot probe for pages that exist.
+
+### Publish a page
 
 <Tabs>
-  <Tab title="REST API">
-    ```bash
+  <Tab title="Web UI">
+    Click **Publish** in the page header. Once published, the same menu offers **Copy public link**, **View published page**, and **Unpublish**. In the file tree, right-click a page to **Publish** it, or a folder to **Publish folder** or **Unpublish folder** in one step.
+  </Tab>
+  <Tab title="REST">
+    ```bash Terminal
     curl -X POST 'http://localhost:3333/api/kiwi/publish' \
       -H 'Content-Type: application/json' \
-      -d '{"path":"concepts/auth.md"}'
+      -d '{"path": "guides/onboarding.md"}'
+    ```
+
+    ```json Response
+    {
+      "path": "guides/onboarding.md",
+      "published": true,
+      "published_at": "2026-10-19T09:00:00Z",
+      "public_url": "/p/guides/onboarding.md"
+    }
     ```
   </Tab>
   <Tab title="MCP">
-    Use `kiwi_write` to set `published: true` in frontmatter directly.
-  </Tab>
-  <Tab title="Web UI">
-    Toggle the publish switch in the page header menu.
+    Call `kiwi_patch_frontmatter` to set `published: true` on the page.
   </Tab>
 </Tabs>
 
-### Bulk operations
+Publishing sets `published: true` and stamps `published_at` the first time. Republishing later keeps the original date. Unpublishing sets `published: false`. Each change is a normal frontmatter write, so it is committed to git and appears in history.
 
-Publish or unpublish multiple pages at once:
+- `POST /api/kiwi/publish/bulk` and `/unpublish/bulk` change many pages in one commit and report how many changed or were skipped.
+- `GET /api/kiwi/publish/list` lists published pages, newest first.
+- `GET /api/kiwi/publish/status?path=...` returns the publish state and a `view_count` of permalink visits.
 
-```bash
-curl -X POST 'http://localhost:3333/api/kiwi/publish/bulk' \
-  -H 'Content-Type: application/json' \
-  -d '{"paths":["concepts/auth.md","concepts/billing.md"]}'
-```
+### Images and attachments
 
-### Listing published pages
+Non-markdown files such as images and PDFs are public when a markdown page in the same folder, or in any parent folder, is published or has `visibility: public`. Relative image links in a published page therefore keep working at `/p/...`.
 
-```bash
-curl 'http://localhost:3333/api/kiwi/publish/list'
-```
-
-See [Publish API](/api/publish) for full endpoint reference.
+<Warning>
+Publishing a page also exposes every other non-markdown file in its folder and in the folders below it. Keep private attachments out of folders that contain published pages.
+</Warning>
 
 ## Share links
 
-Create time-limited, optionally password-protected links to individual pages. Share links work independently from publishing — a page does not need to be published to be shared.
+A share link gives one file to someone who has no account, without publishing it. Each link has a long random token, an optional expiry, and an optional password.
 
-```bash
+```bash Terminal
 curl -X POST 'http://localhost:3333/api/kiwi/share' \
   -H 'Content-Type: application/json' \
-  -d '{"path": "concepts/auth.md", "expiresIn": "168h", "password": "optional-secret"}'
+  -d '{"path": "reviews/q4-plan.md", "expiresIn": "168h", "password": "hunter2"}'
 ```
 
-Recipients open the returned token URL without API authentication:
-
+```json Response
+{
+  "id": "9c1e4b7a2f3d5e60",
+  "path": "reviews/q4-plan.md",
+  "token": "3b7f...e91a",
+  "expiresAt": "2026-10-26T09:00:00Z",
+  "createdBy": "alice",
+  "createdAt": "2026-10-19T09:00:00Z",
+  "viewCount": 0
+}
 ```
-GET /api/kiwi/public/:token
+
+The recipient fetches the file at `/api/kiwi/public/{token}`. It returns the raw file, not rendered HTML. For a password-protected link, pass `?password=...` or an `X-Share-Password` header; a wrong or missing password returns `401`.
+
+```bash Terminal
+curl 'http://localhost:3333/api/kiwi/public/3b7f...e91a' \
+  -H 'X-Share-Password: hunter2'
 ```
 
-<Note>
-Share links have their own view counter. Revoke a link with `DELETE /api/kiwi/share/:id` using the share `id` (not the long token).
-</Note>
+- Omit `expiresIn` for a link that never expires. It takes a duration such as `24h` or `30m`.
+- Every successful fetch increments `viewCount`.
+- `GET /api/kiwi/share?path=...` lists a file's links. Revoke one with `DELETE /api/kiwi/share/{id}`, using the short `id`, not the token.
 
 ## Space visibility
 
-Control access at the space level with the `visibility` setting in `.kiwi/config.toml`:
+`[space] visibility` decides how much of the API is open to readers with no credentials. It never opens writes.
 
-```toml
+```toml .kiwi/config.toml
 [space]
-visibility = "private"   # "private", "unlisted", or "public"
+visibility = "unlisted"
 ```
 
-| Visibility | Behavior |
+| Value | Unauthenticated `GET` requests |
 | --- | --- |
-| `private` | All access requires authentication (default) |
-| `unlisted` | Accessible to anyone with the URL, not listed publicly |
-| `public` | Pages with `visibility: public` in frontmatter are browseable without authentication |
+| `private` (default) | Rejected. Only `/p/...`, share links, and the public routes below work. |
+| `unlisted` | Direct reads with a `path`, such as `/api/kiwi/file?path=...`, `/peek`, and `/section`, are open. Tree, search, and listings still need auth. |
+| `public` | Every `GET` under `/api/kiwi` is open, including tree and search. |
 
-### Public visibility browsing
+Unauthenticated requests are recorded with the actor `anonymous`. Change visibility at runtime without a restart:
 
-When space visibility allows it, pages that declare `visibility: public` in their frontmatter are accessible via dedicated endpoints:
-
-```bash
-curl 'http://localhost:3333/api/kiwi/public/file?path=concepts/open.md'
-curl 'http://localhost:3333/api/kiwi/public/tree?path='
-```
-
-Non-public pages return `404` to avoid leaking existence.
-
-### Changing visibility at runtime
-
-```bash
+```bash Terminal
 curl -X PUT 'http://localhost:3333/api/kiwi/space/visibility' \
   -H 'Content-Type: application/json' \
-  -d '{"visibility": "public"}'
+  -d '{"visibility": "unlisted"}'
 ```
 
-## How the models interact
+This updates `[space] visibility` in `.kiwi/config.toml` and takes effect immediately. `GET /api/kiwi/space/info` returns the current value.
 
-| Model | Scope | Auth needed to read? | Persisted where? |
-| --- | --- | --- | --- |
-| Published pages | Single page | No — served at `/p/{path}` | `published: true` in frontmatter |
-| Share links | Single page | No — token in URL | Server-side share store |
-| Space visibility | All public pages | No — via `/public/*` endpoints | `[space] visibility` in config + per-page `visibility` frontmatter |
+### Public pages in a private space
+
+Two read-only routes serve individual pages that opt in with `visibility: public` or `published: true` in frontmatter, whatever the space visibility:
+
+```bash Terminal
+curl 'http://localhost:3333/api/kiwi/public/file?path=guides/onboarding.md'
+curl 'http://localhost:3333/api/kiwi/public/tree?path=/'
+```
+
+`/public/tree` lists only those pages and hides empty folders. Add `filter=published` to list published pages only. Pages that do not opt in return `404`. Pages with `visibility: public` are also served at `/p/{path}`.
+
+## Choose a model
 
 <Tip>
-Use **publishing** for content you want permanently public (docs, guides). Use **share links** for temporary or restricted sharing (reviews, previews). Use **space visibility** to open an entire knowledge base for browsing.
+Publish content that should stay public, such as docs and guides. Use share links for temporary or restricted access, such as a review draft. Use `unlisted` or `public` visibility to open a whole space for reading.
 </Tip>
 
-## Related documentation
+## Related
 
 <CardGroup cols={2}>
   <Card title="Publish API" icon="globe" href="/api/publish">
-    REST endpoints for publish, unpublish, and status.
+    Publish, unpublish, bulk, list, and status.
   </Card>
-  <Card title="Analytics" icon="chart-bar" href="/api/analytics">
-    Share links, comments, and real-time events.
+  <Card title="Share links API" icon="link" href="/api/publish#create-a-share-link">
+    Create, list, and revoke share links.
   </Card>
   <Card title="Configuration" icon="gear" href="/configuration#space-visibility">
-    Space visibility settings.
+    The `[space]` section.
   </Card>
-  <Card title="Optional features" icon="toggle-on" href="/concepts/optional-features">
-    Feature matrix and error codes.
+  <Card title="Authentication" icon="key" href="/guides/auth-tokens">
+    API keys, per-space keys, and OIDC.
   </Card>
 </CardGroup>

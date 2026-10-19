@@ -1,76 +1,106 @@
 ---
-title: "Velocity and graph analytics"
-description: "Change velocity, PageRank, and structural analysis of your knowledge base."
+title: "Velocity, graph, and similarity"
+sidebarTitle: "Velocity and graph"
+description: "Measure change velocity, analyze the wiki link graph, find related pages, and evaluate search quality."
 icon: "chart-line"
 ---
 
+These endpoints help you understand the shape of a knowledge base: which pages churn, which are central, how pages connect, which pages are related but not linked, and how well search finds the right page.
+
+| Endpoint | Needs |
+| --- | --- |
+| Velocity | Git versioning |
+| Graph endpoints | The link index (on by default). `503` when unavailable. |
+| Suggestions, embeddings | Vector search. `503` when it is off. |
+| Similar | A `[[similarity.profiles]]` block in config. `503` without one. |
+
 ## Change velocity
 
-Analyze the rate and distribution of changes across your knowledge base over a time period.
+Analyze git history for a period: which pages change most, which don't change at all, which are suddenly busy, and which have a single author.
 
 ```http
 GET /api/kiwi/velocity
 ```
 
 <ParamField query="period" type="string" default="30d">
-  Time window. Supports `Nd` (days), `Nw` (weeks), `Nm` (months).
+  Window as a number followed by `d` (days), `w` (weeks), or `m` (months, counted as 30 days).
 </ParamField>
 <ParamField query="limit" type="integer" default="20">
-  Max number of items in hot/cold spot lists.
+  Maximum entries in `hot_spots`.
 </ParamField>
 <ParamField query="path_prefix" type="string">
-  Limit analysis to a subdirectory.
+  Only analyze pages under this prefix.
 </ParamField>
 
 ```bash
-curl 'http://localhost:3333/api/kiwi/velocity?period=14d&limit=5'
+curl 'http://localhost:3333/api/kiwi/velocity?period=2w&limit=5'
 ```
+
+Only markdown files are counted. Returns `500` if `git log` fails, for example when versioning is off.
+
+<ResponseField name="period" type="string">Period used.</ResponseField>
+<ResponseField name="total_changes" type="integer">File changes (one per commit per file) in the period.</ResponseField>
+<ResponseField name="hot_spots" type="object[]">
+  Most changed pages, descending.
+  <Expandable title="properties">
+    <ResponseField name="path" type="string">Page path.</ResponseField>
+    <ResponseField name="changes" type="integer">Commits touching the page.</ResponseField>
+    <ResponseField name="authors" type="integer">Distinct commit authors.</ResponseField>
+    <ResponseField name="lines_changed" type="integer">Lines added plus lines deleted.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="cold_spots" type="object[]">
+  Every page with no changes in the period, each with `path` and `days_since_change`.
+</ResponseField>
+<ResponseField name="bursts" type="object[]">
+  Pages whose change rate over the last 7 days is more than three times their average for the period.
+  <Expandable title="properties">
+    <ResponseField name="path" type="string">Page path.</ResponseField>
+    <ResponseField name="recent_rate" type="number">Changes per day over the last 7 days.</ResponseField>
+    <ResponseField name="avg_rate" type="number">Changes per day over the whole period.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="single_author_pages" type="string[]">Pages changed in the period by only one author.</ResponseField>
 
 ```json
 {
-  "period": "14d",
+  "period": "2w",
   "total_changes": 87,
   "hot_spots": [
-    {"path": "concepts/auth.md", "changes": 12},
-    {"path": "runbooks/deploy.md", "changes": 9}
+    { "path": "concepts/auth.md", "changes": 12, "authors": 3, "lines_changed": 240 }
   ],
   "cold_spots": [
-    {"path": "concepts/legacy.md", "changes": 0, "days_since_update": 120}
+    { "path": "concepts/legacy.md", "days_since_change": 120 }
   ],
   "bursts": [
-    {"date": "2026-04-28", "changes": 23, "actor": "agent:importer"}
+    { "path": "runbooks/deploy.md", "recent_rate": 1.29, "avg_rate": 0.36 }
   ],
-  "single_author_pages": 14
+  "single_author_pages": ["runbooks/deploy.md"]
 }
 ```
 
-<ResponseField name="total_changes" type="integer">Total commits in the period.</ResponseField>
-<ResponseField name="hot_spots" type="array">Most frequently changed pages.</ResponseField>
-<ResponseField name="cold_spots" type="array">Least recently changed pages.</ResponseField>
-<ResponseField name="bursts" type="array">Days with unusually high change counts.</ResponseField>
-<ResponseField name="single_author_pages" type="integer">Pages with only one contributor.</ResponseField>
-
-<Tip>
-Use velocity data to identify knowledge that's churning (hot spots may need stabilization) and knowledge that's stale (cold spots may need review).
-</Tip>
-
----
-
 ## Graph analytics
 
-Structural analysis of the wiki-link graph using PageRank and connectivity metrics.
+Summarize the wiki link graph: size, connected components, orphans, and the highest PageRank pages.
 
 ```http
 GET /api/kiwi/graph/analytics
 ```
 
 <ParamField query="limit" type="integer" default="20">
-  Number of top pages to return.
+  Number of pages in `top_pages`.
 </ParamField>
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/graph/analytics?limit=10'
 ```
+
+<ResponseField name="total_nodes" type="integer">Pages in the link graph.</ResponseField>
+<ResponseField name="total_edges" type="integer">Wiki links.</ResponseField>
+<ResponseField name="components" type="integer">Disconnected subgraphs.</ResponseField>
+<ResponseField name="largest_component_size" type="integer">Pages in the largest component.</ResponseField>
+<ResponseField name="orphans" type="string[]">Pages with no incoming links.</ResponseField>
+<ResponseField name="top_pages" type="object[]">Highest PageRank pages, each with `path`, `pagerank`, `in_degree`, and `out_degree`.</ResponseField>
 
 ```json
 {
@@ -78,172 +108,393 @@ curl 'http://localhost:3333/api/kiwi/graph/analytics?limit=10'
   "total_edges": 387,
   "components": 3,
   "largest_component_size": 138,
-  "orphans": ["concepts/legacy.md", "scratch/notes.md"],
+  "orphans": ["concepts/legacy.md"],
   "top_pages": [
-    {"path": "concepts/auth.md", "pagerank": 0.042, "in_degree": 18, "out_degree": 5},
-    {"path": "concepts/users.md", "pagerank": 0.038, "in_degree": 15, "out_degree": 8}
+    { "path": "concepts/auth.md", "pagerank": 0.042, "in_degree": 18, "out_degree": 5 }
   ]
 }
 ```
 
-<ResponseField name="total_nodes" type="integer">Total pages in the graph.</ResponseField>
-<ResponseField name="total_edges" type="integer">Total wiki-link connections.</ResponseField>
-<ResponseField name="components" type="integer">Number of disconnected subgraphs.</ResponseField>
-<ResponseField name="largest_component_size" type="integer">Pages in the largest connected component.</ResponseField>
-<ResponseField name="orphans" type="array">Pages with no incoming or outgoing links.</ResponseField>
-<ResponseField name="top_pages" type="array">Highest PageRank pages with degree counts.</ResponseField>
+## Centrality
 
-Returns `503` if the link indexer is not available.
+Return PageRank, betweenness, and degree for every page, highest PageRank first.
 
-### Centrality, communities, path, and walk
+```http
+GET /api/kiwi/graph/centrality
+```
 
-Additional graph helpers live alongside `/graph/analytics`:
+<ParamField query="limit" type="integer">
+  Maximum pages. Omit to return all.
+</ParamField>
 
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /graph/centrality?limit=50` | PageRank and betweenness-style rankings per page. |
-| `GET /graph/communities` | Louvain community detection over wiki-link edges. |
-| `GET /graph/path?from=a.md&to=b.md` | Shortest path between two pages. |
-| `GET /graph/walk?path=a.md` | One-hop neighbors, backlinks, and optional same-directory siblings. |
+```bash
+curl 'http://localhost:3333/api/kiwi/graph/centrality?limit=20'
+```
 
-See [Utilities](/api/utilities#extended-graph-apis) for response notes and error codes.
+<ResponseField name="pages" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="path" type="string">Page path.</ResponseField>
+    <ResponseField name="pagerank" type="number">PageRank score.</ResponseField>
+    <ResponseField name="betweenness" type="number">How often the page sits on shortest paths between other pages.</ResponseField>
+    <ResponseField name="in_degree" type="integer">Incoming links.</ResponseField>
+    <ResponseField name="out_degree" type="integer">Outgoing links.</ResponseField>
+  </Expandable>
+</ResponseField>
 
----
+```json
+{
+  "pages": [
+    { "path": "concepts/auth.md", "pagerank": 0.042, "betweenness": 0.18, "in_degree": 18, "out_degree": 5 }
+  ]
+}
+```
 
-## Suggestions
+## Communities
 
-Get semantically similar pages for a given page, useful for "related pages" features and discovering missing links.
+Group pages into topic clusters with Louvain community detection. Links are treated as undirected.
+
+```http
+GET /api/kiwi/graph/communities
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/graph/communities'
+```
+
+<ResponseField name="communities" type="object[]">Clusters, each with a numeric `id` and its `pages`.</ResponseField>
+
+```json
+{
+  "communities": [
+    { "id": 0, "pages": ["concepts/auth.md", "concepts/sessions.md", "runbooks/login-flow.md"] },
+    { "id": 1, "pages": ["concepts/billing.md", "concepts/invoices.md"] }
+  ]
+}
+```
+
+## Shortest path
+
+Return the shortest chain of wiki links from one page to another, following link direction.
+
+```http
+GET /api/kiwi/graph/path
+```
+
+<ParamField query="from" type="string" required>
+  Start page.
+</ParamField>
+<ParamField query="to" type="string" required>
+  End page.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/graph/path?from=concepts/auth.md&to=concepts/billing.md'
+```
+
+Returns `400` if either parameter is missing, and `404` if a page isn't in the graph or no path exists.
+
+<ResponseField name="path" type="string[]">Pages from `from` to `to`, inclusive.</ResponseField>
+
+```json
+{ "path": ["concepts/auth.md", "concepts/users.md", "concepts/billing.md"] }
+```
+
+## Graph walk
+
+Return one page's immediate neighborhood: outgoing links, backlinks, and pages in the same folder or with a shared tag.
+
+```http
+GET /api/kiwi/graph/walk
+```
+
+<ParamField query="path" type="string" required>
+  Page path.
+</ParamField>
+<ParamField query="include_siblings" type="boolean" default="true">
+  Set to `false` to skip folder and tag siblings, which requires scanning every page.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/graph/walk?path=concepts/auth.md'
+```
+
+Returns `404` if the page does not exist.
+
+<ResponseField name="path" type="string">Page path.</ResponseField>
+<ResponseField name="links_out" type="string[]">Wiki link targets in the page, as written.</ResponseField>
+<ResponseField name="links_in" type="string[]">Pages that link here.</ResponseField>
+<ResponseField name="siblings" type="object[]">
+  Each with `path`, `relation` (`sibling_dir` or `sibling_tag`), and `shared_tag` for tag siblings.
+</ResponseField>
+<ResponseField name="hub_score" type="number">Incoming links divided by pages in the graph.</ResponseField>
+<ResponseField name="in_degree" type="integer">Length of `links_in`.</ResponseField>
+<ResponseField name="out_degree" type="integer">Length of `links_out`.</ResponseField>
+
+```json
+{
+  "path": "concepts/auth.md",
+  "links_out": ["sessions", "api-keys"],
+  "links_in": ["index.md", "runbooks/login-flow.md"],
+  "siblings": [
+    { "path": "concepts/sessions.md", "relation": "sibling_dir" },
+    { "path": "runbooks/login-flow.md", "relation": "sibling_tag", "shared_tag": "security" }
+  ],
+  "hub_score": 0.014,
+  "in_degree": 2,
+  "out_degree": 2
+}
+```
+
+## Link suggestions
+
+Find pages that are semantically close to a page but not yet linked to or from it. Use this to discover missing wiki links.
 
 ```http
 GET /api/kiwi/suggestions
 ```
 
 <ParamField query="path" type="string" required>
-  File path to find suggestions for.
+  Page path.
 </ParamField>
-<ParamField query="limit" type="integer" default="5">
-  Max suggestions to return.
+<ParamField query="limit" type="integer" default="10">
+  Maximum suggestions.
 </ParamField>
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/suggestions?path=concepts/auth.md&limit=3'
 ```
 
+Returns `400` if `path` is missing, `404` if the page does not exist, and `503` if vector search is off. `suggestions` is `null` when nothing qualifies.
+
+<ResponseField name="suggestions" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="target" type="string">Suggested page.</ResponseField>
+    <ResponseField name="similarity" type="number">Vector similarity score.</ResponseField>
+    <ResponseField name="snippet" type="string">Matching text from the suggested page.</ResponseField>
+  </Expandable>
+</ResponseField>
+
 ```json
 {
   "suggestions": [
-    {"target": "concepts/api-keys.md", "similarity": 0.89, "snippet": "API key authentication..."},
-    {"target": "concepts/sessions.md", "similarity": 0.84, "snippet": "Session management..."}
+    { "target": "concepts/api-keys.md", "similarity": 0.89, "snippet": "API key authentication..." }
   ]
 }
 ```
 
-Already-linked pages are filtered out. Requires vector search to be enabled.
+## Similar pages
 
----
+Rank pages by how similar their frontmatter is, using Gower distance over the fields in a similarity profile. Query by a page, or by an inline set of field values for a case that isn't in the knowledge base yet.
+
+```toml .kiwi/config.toml
+[[similarity.profiles]]
+name = "dataset"
+match = { kind = "dataset" }
+numeric = ["stats.rows", "stats.columns"]
+categorical = ["format", "license"]
+weights = { "license" = 3.0 }
+```
+
+```http
+GET /api/kiwi/similar
+```
+
+<ParamField query="path" type="string">
+  Page to find neighbors of. Required unless `vector` is set.
+</ParamField>
+<ParamField query="vector" type="string">
+  JSON object of field values. Combined with `path`, it overrides that page's values.
+</ParamField>
+<ParamField query="profile" type="string">
+  Profile name. Optional when only one profile is configured.
+</ParamField>
+<ParamField query="k" type="integer" default="5">
+  Number of neighbors.
+</ParamField>
+
+```bash
+curl -G 'http://localhost:3333/api/kiwi/similar' \
+  --data-urlencode 'vector={"format":"parquet","stats.rows":120000}' \
+  --data-urlencode 'profile=dataset'
+```
+
+Returns `400` when neither `path` nor `vector` is given, the profile is unknown, `k` isn't a positive integer, or `vector` isn't a JSON object.
+
+<ResponseField name="profile" type="string">Profile used.</ResponseField>
+<ResponseField name="query_path" type="string">Page queried, if any.</ResponseField>
+<ResponseField name="query_vector" type="object">Field values compared against.</ResponseField>
+<ResponseField name="fields" type="string[]">Profile fields.</ResponseField>
+<ResponseField name="candidate_count" type="integer">Pages considered.</ResponseField>
+<ResponseField name="truncated" type="boolean">`true` if the candidate set hit its cap.</ResponseField>
+<ResponseField name="neighbors" type="object[]">
+  Most similar first.
+  <Expandable title="properties">
+    <ResponseField name="path" type="string">Page path.</ResponseField>
+    <ResponseField name="score" type="number">Similarity from 0 to 1. Results are ordered by this.</ResponseField>
+    <ResponseField name="distance" type="number">Gower distance over the fields both sides have.</ResponseField>
+    <ResponseField name="rank_distance" type="number">Distance that counts missing fields as maximally different.</ResponseField>
+    <ResponseField name="coverage" type="number">Weighted share of fields that could be compared.</ResponseField>
+    <ResponseField name="comparable_fields" type="integer">Fields both sides had.</ResponseField>
+    <ResponseField name="total_fields" type="integer">Fields in the profile.</ResponseField>
+    <ResponseField name="contributions" type="object[]">Per-field `field`, `kind`, `distance`, `weight`, `skipped`, and the two values `a` and `b`.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{
+  "profile": "dataset",
+  "query_vector": { "format": "parquet", "stats.rows": 120000 },
+  "fields": ["stats.rows", "stats.columns", "format", "license"],
+  "candidate_count": 38,
+  "neighbors": [
+    {
+      "path": "datasets/orders.md",
+      "score": 0.81,
+      "distance": 0.06,
+      "rank_distance": 0.19,
+      "coverage": 0.5,
+      "comparable_fields": 2,
+      "total_fields": 4,
+      "contributions": [
+        { "field": "format", "kind": "categorical", "distance": 0, "weight": 1, "skipped": false, "a": "parquet", "b": "parquet" }
+      ]
+    }
+  ]
+}
+```
 
 ## Embeddings
 
-Retrieve the raw embedding vectors for a page's chunks.
+Return the stored text chunks and embedding vectors for a page.
 
 ```http
 GET /api/kiwi/embeddings
 ```
 
 <ParamField query="path" type="string" required>
-  File path to retrieve embeddings for.
+  Page path.
 </ParamField>
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/embeddings?path=concepts/auth.md'
 ```
 
+Returns `400` if `path` is missing, `404` if the page has no embeddings, and `503` if vector search is off.
+
+<ResponseField name="path" type="string">Page path.</ResponseField>
+<ResponseField name="dimensions" type="integer">Vector length.</ResponseField>
+<ResponseField name="chunks" type="object[]">Each with `chunk_idx`, `text`, and `vector`.</ResponseField>
+
 ```json
 {
   "path": "concepts/auth.md",
   "dimensions": 768,
   "chunks": [
-    {"chunk_idx": 0, "text": "# Authentication\n\nOAuth2...", "vector": [0.012, -0.034, ...]},
-    {"chunk_idx": 1, "text": "## Refresh tokens\n\n...", "vector": [0.008, 0.021, ...]}
+    { "chunk_idx": 0, "text": "# Authentication\n\nOAuth2...", "vector": [0.012, -0.034, 0.051] }
   ]
 }
 ```
-
-Returns `503` if vector search is not enabled.
-
----
-
-## Eligible tasks
-
-Retrieve ranked actionable tasks inferred from frontmatter metadata — pages with `status` fields indicating they are available for work.
-
-```http
-GET /api/kiwi/eligible
-```
-
-```bash
-curl 'http://localhost:3333/api/kiwi/eligible?limit=10'
-```
-
-```json
-{
-  "tasks": [
-    {"path": "tasks/t-42.md", "title": "Fix auth timeout", "status": "open", "priority": "high"},
-    {"path": "tasks/t-15.md", "title": "Update onboarding", "status": "open", "priority": "medium"}
-  ]
-}
-```
-
-Useful for agents that need to pick up the next available task. MCP: **`kiwi_eligible`**.
-
----
 
 ## Search evaluation
 
-Benchmark your search quality against expected results.
+Score full-text, semantic, and hybrid search against questions with known answers. Reports hit rate, MRR, precision, and nDCG at `top_k`. Same as `kiwifs eval`.
 
 ```http
 POST /api/kiwi/eval
 ```
 
-<Tabs>
-  <Tab title="Golden set (CI)">
-    Topics and qrels live in `.kiwi/eval/`. Same as `kiwifs eval`.
+<ParamField body="set" type="string">
+  Golden set name. Loads `<set>.topics` and `<set>.qrels` from `.kiwi/eval/`. Use either `set` or `queries`.
+</ParamField>
+<ParamField body="queries" type="object[]">
+  Inline questions.
+  <Expandable title="properties">
+    <ParamField body="question" type="string" required>Search text.</ParamField>
+    <ParamField body="expected_paths" type="string[]">Relevant pages, each graded 1.</ParamField>
+    <ParamField body="grades" type="object">Map from path to graded relevance (higher is more relevant). Only nDCG uses grades.</ParamField>
+  </Expandable>
+</ParamField>
+<ParamField body="exclude_prefix" type="string | string[]">
+  Path prefixes hidden from retrieval before ranking. Use this for leave-one-out evaluation.
+</ParamField>
+<ParamField body="top_k" type="integer" default="5">
+  Cutoff for every metric.
+</ParamField>
 
-    ```bash
-    kiwifs eval --set leave-one-out --exclude-prefix drafts/ --min-hit-rate 0.6
+<CodeGroup>
+```bash Golden set
+curl -X POST 'http://localhost:3333/api/kiwi/eval' \
+  -H "Content-Type: application/json" \
+  -d '{"set": "leave-one-out", "exclude_prefix": "drafts/", "top_k": 10}'
+```
 
-    curl -X POST 'http://localhost:3333/api/kiwi/eval' \
-      -H "Content-Type: application/json" \
-      -d '{"set": "leave-one-out", "exclude_prefix": "drafts/", "top_k": 10}'
-    ```
-  </Tab>
-  <Tab title="Inline queries">
-    ```bash
-    curl -X POST 'http://localhost:3333/api/kiwi/eval' \
-      -H "Content-Type: application/json" \
-      -d '{
-        "queries": [
-          {"question": "how does authentication work", "expected_paths": ["concepts/auth.md"]},
-          {"question": "deploy checklist", "expected_paths": ["runbooks/deploy.md"]}
-        ]
-      }'
-    ```
-  </Tab>
-</Tabs>
+```bash Inline queries
+curl -X POST 'http://localhost:3333/api/kiwi/eval' \
+  -H "Content-Type: application/json" \
+  -d '{
+    "queries": [
+      {"question": "how does authentication work", "expected_paths": ["concepts/auth.md"]},
+      {"question": "deploy checklist", "expected_paths": ["runbooks/deploy.md"]}
+    ]
+  }'
+```
+</CodeGroup>
+
+Returns `400` when both or neither of `set` and `queries` are given or the set can't be loaded, and `500` if every search failed.
+
+<ResponseField name="top_k" type="integer">Cutoff used.</ResponseField>
+<ResponseField name="exclude_prefix" type="string[]">Prefixes excluded, if any.</ResponseField>
+<ResponseField name="fts" type="object">
+  Full-text search metrics. `semantic` and `hybrid` have the same shape; `hybrid` only has data when vector search is on.
+  <Expandable title="properties">
+    <ResponseField name="hit_rate" type="number">Share of questions with a relevant page in the top `top_k`.</ResponseField>
+    <ResponseField name="mrr" type="number">Mean reciprocal rank of the first relevant page.</ResponseField>
+    <ResponseField name="precision_at_k" type="number">Mean precision in the top `top_k`.</ResponseField>
+    <ResponseField name="precision_at_5" type="number" deprecated>Same value as `precision_at_k`.</ResponseField>
+    <ResponseField name="ndcg" type="number">Mean nDCG at `top_k`.</ResponseField>
+    <ResponseField name="queries" type="integer">Questions scored.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="semantic" type="object">Semantic search metrics.</ResponseField>
+<ResponseField name="hybrid" type="object">Hybrid (reciprocal rank fusion) metrics.</ResponseField>
+<ResponseField name="per_query" type="object[]">
+  Per question: `question`, `relevant`, and for each engine its rank (`fts_rank`, `semantic_rank`, `hybrid_rank`; `0` means not found), hits, and nDCG.
+</ResponseField>
+<ResponseField name="skipped" type="object[]">Questions that couldn't be scored, each with `question` and `reason`.</ResponseField>
+<ResponseField name="errors" type="integer">Failed searches.</ResponseField>
 
 ```json
 {
-  "fts": {"hit_rate": 1.0, "mrr": 0.75, "precision_at_5": 0.6, "ndcg": 0.81},
-  "semantic": {"hit_rate": 1.0, "mrr": 0.9, "precision_at_5": 0.8, "ndcg": 0.88},
-  "hybrid": {"hit_rate": 1.0, "mrr": 0.92, "precision_at_5": 0.82, "ndcg": 0.90},
+  "top_k": 5,
+  "fts": { "hit_rate": 1.0, "mrr": 0.75, "precision_at_k": 0.3, "precision_at_5": 0.3, "ndcg": 0.81, "queries": 2 },
+  "semantic": { "hit_rate": 1.0, "mrr": 0.9, "precision_at_k": 0.4, "precision_at_5": 0.4, "ndcg": 0.88, "queries": 2 },
+  "hybrid": { "hit_rate": 1.0, "mrr": 0.92, "precision_at_k": 0.4, "precision_at_5": 0.4, "ndcg": 0.9, "queries": 2 },
   "per_query": [
-    {"question": "how does authentication work", "fts_rank": 2, "semantic_rank": 1, "hybrid_rank": 1}
-  ]
+    {
+      "question": "how does authentication work",
+      "relevant": ["concepts/auth.md"],
+      "fts_rank": 2, "semantic_rank": 1, "hybrid_rank": 1,
+      "fts_hits": ["concepts/sessions.md", "concepts/auth.md"],
+      "semantic_hits": ["concepts/auth.md"],
+      "hybrid_hits": ["concepts/auth.md"],
+      "fts_ndcg": 0.63, "semantic_ndcg": 1, "hybrid_ndcg": 1
+    }
+  ],
+  "errors": 0
 }
 ```
 
-<ResponseField name="hit_rate" type="number">Fraction of queries where the expected page appeared in top-k.</ResponseField>
-<ResponseField name="mrr" type="number">Mean Reciprocal Rank across all queries.</ResponseField>
-<ResponseField name="precision_at_5" type="number">Average precision in the top-5 results.</ResponseField>
-<ResponseField name="ndcg" type="number">Normalized discounted cumulative gain across engines, including hybrid.</ResponseField>
+## MCP equivalents
+
+`kiwi_velocity`, `kiwi_graph_analytics`, `kiwi_graph_centrality`, `kiwi_graph_communities`, `kiwi_graph_path`, `kiwi_graph_walk`, `kiwi_suggestions`, `kiwi_similar`, `kiwi_embeddings`, and `kiwi_eval`. The `kiwi_eligible` task-ranking tool is MCP-only; there is no REST endpoint for it.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Analytics and health" icon="chart-bar" href="/api/analytics">
+    Page views, failed searches, and health checks.
+  </Card>
+  <Card title="Search" icon="magnifying-glass" href="/api/search">
+    Full-text, semantic, and hybrid search.
+  </Card>
+</CardGroup>

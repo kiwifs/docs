@@ -1,117 +1,169 @@
 ---
 title: "Multi-space"
-description: "Run multiple isolated knowledge bases on one KiwiFS server with path or header routing."
+description: "Serve several isolated knowledge bases from one KiwiFS process, routed by URL prefix or header."
 icon: "layer-group"
 ---
 
-Multi-space mode lets one KiwiFS process host **multiple independent knowledge bases**. Each space has its own root directory, git repo, search index, and `.kiwi/` state.
+A **space** is one knowledge base: a root directory with its own git history, search index, and `.kiwi/state/`. Multi-space mode serves several spaces from one KiwiFS process and port. Use it for separate team wikis on one host, per-tenant knowledge bases, or workspaces you create on demand.
 
-## When to use multi-space
+## How it works
 
-- Separate team wikis on one host (engineering vs product).
-- Per-tenant isolation in self-hosted deployments.
-- A default space plus dynamically provisioned workspaces.
+```mermaid
+flowchart LR
+  Client --> Router{"Resolve space"}
+  Router -- "X-Kiwi-Space: product" --> P["product<br/>/data/product-wiki"]
+  Router -- "/api/kiwi/engineering/..." --> E["engineering<br/>/data/eng-wiki"]
+  Router -- "no space given" --> D["primary<br/>--root"]
+```
 
-## Configure spaces
+- The **primary** space is the directory you pass to `--root`. It is named `default` unless you set `[space] name`. Requests that name no space go here.
+- **Additional** spaces come from `--space` flags, `[[spaces]]` in the primary's `config.toml`, or `POST /api/spaces`.
+- Each space has its own write pipeline, so writes, events, claims, webhooks, and the audit log stay within that space.
+
+## Add spaces
 
 <Tabs>
   <Tab title="config.toml">
-    ```toml .kiwi/config.toml
+    ```toml knowledge/.kiwi/config.toml
+    [space]
+    name = "handbook"   # optional name for the primary space
+
     [[spaces]]
     name = "engineering"
     root = "/data/eng-wiki"
 
     [[spaces]]
     name = "product"
-    root = "/data/product-wiki"
+    root = "product-wiki"   # relative paths resolve against --root
+    ```
+
+    ```bash Terminal
+    kiwifs serve --root ./knowledge
     ```
   </Tab>
   <Tab title="CLI flags">
-    ```bash
-    kiwifs serve \
+    ```bash Terminal
+    kiwifs serve --root ./knowledge \
       --space engineering=/data/eng-wiki \
       --space product=/data/product-wiki
     ```
+
+    `--space` takes `name=path` and can repeat. If a name appears in both a flag and `[[spaces]]`, the flag wins.
+  </Tab>
+  <Tab title="REST">
+    ```bash Terminal
+    curl -X POST 'http://localhost:3333/api/spaces' \
+      -H 'Content-Type: application/json' \
+      -d '{"name": "research", "template": "research"}'
+    ```
+
+    Without `root`, the space is created at `{primary root}/.spaces/{name}`, hidden from the primary space's file tree. `template` picks a `kiwifs init` template and defaults to `blank`. Spaces created this way are saved to `.kiwi/spaces.json` in the primary root and restored on restart.
   </Tab>
 </Tabs>
 
-<Info>
-The **primary** space is the one you serve from `--root`, optionally named with `[space] name`. Requests without a space identifier route there. Additional `[[spaces]]` entries are extra isolated knowledge bases.
-</Info>
+<Warning>
+Every space runs with the **primary space's `config.toml`**. A space's own `.kiwi/config.toml` is not read at startup, so settings such as `[search]`, `[auth]`, and `[space] visibility` are shared across spaces.
+</Warning>
 
-## Browser URLs
+## Route requests to a space
 
-| Space | Page URL |
-| --- | --- |
-| Primary | `/page/{path}` |
-| Other | `/s/{space}/page/{path}` |
-
-Legacy `/page/{space}/{path}` links still resolve when `{space}` is a registered name.
-
-## Request routing
-
-Resolution order:
+KiwiFS resolves the space for each request in this order:
 
 | Priority | Method | Example |
 | --- | --- | --- |
-| 1 | `X-Kiwi-Space` header | Set by a reverse proxy (subdomain → space name) |
-| 2 | URL path prefix | `/api/kiwi/{space}/tree` |
-| 3 | Primary space | `[space] name`, or `"default"` |
+| 1 | `X-Kiwi-Space` header | Set by a reverse proxy that maps subdomains to spaces |
+| 2 | URL prefix | `/api/kiwi/engineering/tree` is served as `/api/kiwi/tree` in `engineering` |
+| 3 | Primary space | Any request with neither |
 
 <CodeGroup>
-```bash Path-based routing
-curl 'http://localhost:3333/api/kiwi/engineering/tree?path='
+```bash Path prefix
+curl 'http://localhost:3333/api/kiwi/engineering/file?path=index.md'
 ```
 
-```bash Header-based routing
-curl 'http://localhost:3333/api/kiwi/tree?path=' \
+```bash Header
+curl 'http://localhost:3333/api/kiwi/file?path=index.md' \
   -H 'X-Kiwi-Space: engineering'
 ```
 </CodeGroup>
 
-<Warning>
-If `X-Kiwi-Space` is set but the space does not exist, the request fails immediately — no silent fallback to the default.
-</Warning>
+If `X-Kiwi-Space` names a space that does not exist, the request returns `404` instead of falling back to the primary space. A URL prefix that is not a space name is treated as part of the normal path.
 
-## Space admin API
+The header works on every route, including `/p/...`, `/raw/...`, `/mcp`, and the web UI. That makes subdomain routing straightforward:
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/spaces` | List all spaces with metadata |
-| `GET` | `/api/spaces/:name` | Single space summary |
-| `POST` | `/api/spaces` | Create `{ "name", "root" }` |
-| `DELETE` | `/api/spaces/:name` | Remove a dynamic space |
+```text Caddyfile
+*.wiki.example.com {
+  @space header_regexp space Host ^([a-z0-9-]+)\.wiki\.example\.com$
+  request_header @space X-Kiwi-Space {re.space.1}
+  reverse_proxy localhost:3333
+}
+```
 
-Dynamic spaces persist to `.kiwi/spaces.json` under the first space's root and restore on restart.
+## Web UI
 
-See [Spaces API](/api/spaces) for curl examples.
+The space selector in the sidebar switches between spaces. Page URLs show which space you are in:
 
-## Per-space auth
+| Space | Page URL |
+| --- | --- |
+| Primary | `/page/{path}` |
+| Any other | `/s/{space}/page/{path}` |
 
-With `auth.type = "perspace"`, API keys scope to a single space:
+## Authentication per space
 
-```toml .kiwi/config.toml
+With `type = "perspace"`, each API key can be limited to one space. A key without `space` works in every space.
+
+```toml knowledge/.kiwi/config.toml
+[auth]
+type = "perspace"
+
 [[auth.api_keys]]
 key = "kiwi_sk_eng_..."
 space = "engineering"
 actor = "eng-team"
+
+[[auth.api_keys]]
+key = "kiwi_sk_admin_..."
+actor = "admin"
 ```
 
-## MCP
+<Warning>
+The space management routes under `/api/spaces` are not covered by API key auth. On a shared network, block or authenticate `/api/spaces` at your reverse proxy.
+</Warning>
 
-Use `--space <name>` when the knowledge root hosts multiple configured spaces:
+## Manage spaces
 
-```bash
-kiwifs mcp --root /data --space engineering
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/spaces` | List spaces with `fileCount`, `sizeBytes`, and `lastModified` |
+| `GET` | `/api/spaces/{name}` | One space's summary |
+| `POST` | `/api/spaces` | Create a space from `name`, optional `root`, and optional `template` |
+| `DELETE` | `/api/spaces/{name}` | Unregister a space |
+| `GET` | `/api/init-templates` | Templates available for `template` |
+
+Deleting a space renames its root directory to `{root}.deleted-{timestamp}`, so the files stay recoverable and the name is free to reuse.
+
+## Agents and MCP
+
+Each space serves its own Streamable HTTP MCP endpoint. Reach it at `/mcp` with an `X-Kiwi-Space` header; without the header, `/mcp` serves the primary space. For a stdio MCP client, point `kiwifs mcp` at the server and pick a space:
+
+```bash Terminal
+kiwifs mcp --remote http://localhost:3333 --space engineering
 ```
 
-## Related documentation
+In local mode, `--root` already selects one knowledge base directly, so `--space` is rejected. Use `kiwifs mcp --root /data/eng-wiki` instead.
+
+## Related
 
 <CardGroup cols={2}>
-  <Card title="Configuration" icon="gear" href="/configuration#multi-space">
-    `[[spaces]]` config syntax.
-  </Card>
   <Card title="Spaces API" icon="server" href="/api/spaces">
-    REST CRUD for space management.
+    Create, list, and delete spaces.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration#multi-space">
+    `[space]` and `[[spaces]]` syntax.
+  </Card>
+  <Card title="Draft spaces" icon="code-branch" href="/concepts/draft-spaces">
+    Temporary branches of one knowledge base.
+  </Card>
+  <Card title="Authentication" icon="key" href="/guides/auth-tokens">
+    API keys, per-space keys, and OIDC.
   </Card>
 </CardGroup>

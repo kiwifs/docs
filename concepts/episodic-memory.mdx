@@ -1,113 +1,171 @@
 ---
 title: "Episodic memory"
-description: "Separate raw agent sessions from durable semantic pages using frontmatter conventions and merge reports."
+description: "Keep raw agent observations apart from durable knowledge, and track which episodes have been consolidated."
 icon: "brain"
 ---
 
-KiwiFS provides a **data model** for agent memory systems: episodic files accumulate raw observations, semantic pages hold durable knowledge, and a **merge report** shows which episodes are not yet referenced by any downstream page.
+KiwiFS gives agent memory systems a data model on top of plain files. Episodes hold raw, per-session observations. Semantic pages hold curated knowledge. A coverage report shows which episodes have not yet been folded into a semantic page.
 
-KiwiFS does not run an LLM. Consolidation is your job; KiwiFS gives you conventions and tooling.
-
-## Two layers
+KiwiFS does not run an LLM. Consolidation is your agent's or scheduler's job; KiwiFS provides the conventions, the tools, and the report.
 
 <CardGroup cols={2}>
   <Card title="Episodic memory" icon="clock-rotate-left">
-    Per-run or per-session raw notes. High volume, append-friendly, lives under `episodes/`.
+    Raw notes per run or session. High volume and append-friendly. Lives under `episodes/`.
   </Card>
   <Card title="Semantic memory" icon="book">
-    Durable curated knowledge on entity and concept pages. Built from episodes after consolidation.
+    Durable entity and concept pages, built from episodes during consolidation.
   </Card>
 </CardGroup>
 
-## Provenance vs consolidation
+Start a workspace with this layout using `kiwifs init --template memory`. It ships `episodes/`, `pages/`, `log.md`, and a playbook for ingest, recall, and consolidation.
 
-| Frontmatter | Set by | Meaning |
+## Record and retire memories
+
+<Tabs>
+  <Tab title="MCP">
+    `kiwi_remember` writes an episode to `episodes/<YYYY-MM-DD>/<episode_id>.md` with `memory_kind: episodic`, a `created` timestamp, and optional `scope` and `tags`. It generates an `episode_id` when you omit one.
+
+    `kiwi_forget` retires a page without deleting it. It sets `memory_status: superseded`, `valid_until` to now, and an optional `superseded_reason`, and keeps the body.
+  </Tab>
+  <Tab title="REST">
+    Write episodes like any other file, with `X-Provenance` to record the run:
+
+    ```bash Terminal
+    curl -X PUT 'http://localhost:3333/api/kiwi/file?path=episodes/2026-05-21/run-7f3a.md' \
+      -H 'X-Actor: agent:assistant' \
+      -H 'X-Provenance: run:run-7f3a' \
+      --data-binary $'---\nepisode_id: run-7f3a\nscope: user:alice\n---\nUser prefers email over Slack.'
+    ```
+  </Tab>
+</Tabs>
+
+## Frontmatter conventions
+
+<AccordionGroup>
+  <Accordion title="memory_kind: what a page is">
+    | Value | Role |
+    | --- | --- |
+    | `episodic` | Raw run or session material |
+    | `semantic` | Durable, curated knowledge |
+    | `consolidation` | Staging area before a merge into semantic pages |
+    | `working` | Scratch, high churn |
+
+    Any page under the episodes prefix counts as episodic unless it sets `memory_kind: semantic` or `consolidation`.
+  </Accordion>
+  <Accordion title="memory_status: where a page is in its lifecycle">
+    | Value | Effect |
+    | --- | --- |
+    | `active` | Default. Retrieved normally. |
+    | `contested` | A contradiction was flagged. Still retrieved, counted in the report. |
+    | `superseded` | Replaced. Hidden from search unless you pass `include_superseded=true`. |
+    | `stale` | Aged out |
+  </Accordion>
+  <Accordion title="scope: who a memory belongs to">
+    Partition memories by user, project, or tenant with values such as `user:alice` or `project:billing`. Pass `scope` to `kiwi_search`, `kiwi_search_semantic`, or `GET /api/kiwi/search` to see only that partition.
+  </Accordion>
+  <Accordion title="Time: expires_at, ttl, valid_from, valid_until">
+    `expires_at` (RFC3339) or `ttl` (such as `7d` or `24h`, counted from `created`) flag a page for review once it passes. `kiwifs janitor` reports it as `expired-memory`; nothing is deleted.
+
+    `valid_from` and `valid_until` record when a fact was true, such as a policy that applied only for a quarter.
+  </Accordion>
+  <Accordion title="contradicts: conflicting pages">
+    Set `contradicts` to the path or wiki link of a conflicting page, and prefer `memory_status: contested` over silently overwriting. The link is indexed with relation `contradicts` and appears in the target's backlinks. KiwiFS records contradictions you declare; it does not detect them.
+  </Accordion>
+</AccordionGroup>
+
+## Production versus consolidation
+
+Two frontmatter lists answer different questions.
+
+| Field | Set by | Answers |
 | --- | --- | --- |
-| `derived-from` | KiwiFS (from `X-Provenance` header) | Which run or job **produced** this file |
-| `merged-from` | You (or your consolidation job) | Which episodes were **folded into** this downstream page |
+| `derived-from` | KiwiFS, from `X-Provenance` or the MCP `provenance` argument | Which run **produced** this file |
+| `merged-from` | You or your consolidation job | Which episodes were **folded into** this page |
 
-<Info>
-`derived-from` records authorship. `merged-from` records consumption. The memory report uses only `merged-from` to determine coverage.
-</Info>
+Coverage uses only `merged-from`. An episode is identified by its `episode_id`, or `id` when that is absent.
 
-## Classify pages with `memory_kind`
-
-| Value | Role |
-| --- | --- |
-| `episodic` | Raw run or session material |
-| `semantic` | Durable curated knowledge |
-| `consolidation` | Staging area before merge to semantic |
-| `working` | Scratch, high churn |
-
-<Note>
-`memory_kind: semantic` or `consolidation` prevents a file from being treated as episodic even when it lives under the episodes path prefix.
-</Note>
-
-## Path convention
-
-By default, markdown under **`episodes/`** is treated as episodic when `memory_kind` is absent or set to `episodic`.
-
-```toml .kiwi/config.toml
-[memory]
-episodes_path_prefix = "episodes/"
-```
-
-## Episodic identity and `merged-from`
-
-Prefer **`episode_id`** in episodic frontmatter. If absent, KiwiFS falls back to `id`.
-
-```yaml frontmatter example
+```yaml pages/communication-preferences.md
 merged-from:
   - type: episode
     id: run-7f3a
-    date: "2026-04-27T12:00:00Z"
-    note: "merged into concepts/auth from nightly job"
+    date: "2026-05-21T12:00:00Z"
+    note: "nightly consolidation"
+  - type: episode
+    path: episodes/2026-05-22/run-8b1c.md
 ```
 
-An episode is **covered** when any page references it in `merged-from` — by `id` or by compatible `type` (`run`, `session`, `trace`, `event`, `ingest`).
+An episode counts as merged when any page lists it as `type: episode` with a matching `id` or `path`. Entries of `type` `run`, `session`, `trace`, `event`, or `ingest` with the same `id` also count, so consolidators that key on run IDs match too.
 
-## Operator workflow
+## Consolidation workflow
 
 <Steps>
   <Step title="Agents write episodes">
-    Write under `episodes/` with `X-Provenance` and optional `episode_id` in frontmatter.
+    Use `kiwi_remember`, or write under `episodes/` with `X-Provenance` and an `episode_id`.
   </Step>
-  <Step title="Consolidation job runs">
-    Read unmerged episodes, consolidate with your LLM or rules, then update `pages/` with `merged-from`.
+  <Step title="Find what is unmerged">
+    Run the memory report and take the `unmerged` list as your queue.
   </Step>
-  <Step title="Verify coverage">
-    Re-run the memory report until `unmerged` is empty or acceptable.
+  <Step title="Consolidate">
+    Read those episodes, merge them into `pages/` with your model or rules, and list them in `merged-from`. Retire episodes you no longer need with `kiwi_forget`.
+  </Step>
+  <Step title="Verify">
+    Re-run the report until `unmerged` is empty or acceptable.
   </Step>
 </Steps>
 
-## Check coverage
+## Memory report
 
 <Tabs>
   <Tab title="CLI">
-    ```bash
+    ```bash Terminal
     kiwifs memory report --root ./knowledge
     kiwifs memory report --root ./knowledge --json
     kiwifs memory report --episodes-prefix raw/
     ```
   </Tab>
   <Tab title="REST">
-    ```bash
-    curl -s 'http://localhost:3333/api/kiwi/memory/report'
-    curl -s 'http://localhost:3333/api/kiwi/memory/report?episodes_prefix=raw/&limit=10&offset=0'
+    ```bash Terminal
+    curl 'http://localhost:3333/api/kiwi/memory/report'
+    curl 'http://localhost:3333/api/kiwi/memory/report?episodes_prefix=raw/&limit=10&offset=0'
     ```
   </Tab>
   <Tab title="MCP">
-    Call **`kiwi_memory_report`** with optional `episodes_prefix`, `limit`, and `offset`.
+    Call `kiwi_memory_report` with optional `episodes_prefix`, `limit`, and `offset`.
   </Tab>
 </Tabs>
 
-## Related documentation
+| Field | Meaning |
+| --- | --- |
+| `coverage_pct` | Share of episodes listed in some `merged-from` |
+| `unmerged`, `total_unmerged` | Episodes not yet consolidated |
+| `episodic_files`, `total_episodic` | All episodes |
+| `contradictions` | Pages with `contradicts` or `memory_status: contested` |
+| `contested_count`, `expired_count` | Pages contested or past expiry |
+| `avg_age_days` | Mean age of active pages |
+| `scope_counts` | Pages per `scope` value |
+
+`limit` and `offset` page `episodic_files` and `unmerged`; the `total_*` fields stay unpaginated.
+
+To use a folder other than `episodes/` for the report and episode classification, set it in config. `kiwi_remember` always writes under `episodes/`.
+
+```toml .kiwi/config.toml
+[memory]
+episodes_path_prefix = "episodes/"
+```
+
+## Related
 
 <CardGroup cols={2}>
-  <Card title="Configuration" icon="gear" href="/configuration#memory">
-    `[memory]` section in config.toml.
+  <Card title="Agent playbook" icon="book-open" href="/concepts/agent-playbook">
+    The files that tell agents how to remember and consolidate.
   </Card>
   <Card title="Analytics API" icon="chart-bar" href="/api/analytics#memory-report">
-    Response fields for the memory report endpoint.
+    Full response for the memory report.
+  </Card>
+  <Card title="Search" icon="magnifying-glass" href="/concepts/search">
+    Scope filters and superseded pages.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration#memory">
+    The `[memory]` section.
   </Card>
 </CardGroup>

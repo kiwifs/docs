@@ -1,139 +1,245 @@
 ---
 title: "Metadata and graph"
-description: "DQL queries, aggregations, backlinks, and knowledge graph endpoints."
+description: "DQL queries, frontmatter aggregations, computed view refresh, backlinks, and the wiki link graph."
 icon: "tags"
 ---
 
-KiwiFS treats frontmatter as structured metadata you can query, aggregate, and graph. The metadata API provides a DataView Query Language (DQL) engine, SQL-style aggregations, and a full wiki-link graph.
+Query frontmatter as structured data with DQL, aggregate it by field, and walk the wiki link graph. All paths are relative to `http://localhost:3333/api/kiwi`.
 
-## DQL queries
+<Info>
+DQL, aggregations, and view refresh need the SQLite search backend (the default). With another backend they return `501`.
+</Info>
 
-Query pages using DataView Query Language. DQL operates over frontmatter fields and supports multiple output modes.
+## DQL query
+
+Run a Dataview Query Language (DQL) query over the frontmatter index.
+
+**`GET /api/kiwi/query`**
 
 <ParamField query="q" type="string" required>
-  DQL query string.
+  DQL query. See [query types](#query-types) and the [DQL reference](/concepts/dql).
+</ParamField>
+<ParamField query="limit" type="integer" default="50">
+  Overrides the query's own `LIMIT`. Capped at `200`.
+</ParamField>
+<ParamField query="offset" type="integer" default="0">
+  Overrides the query's own `OFFSET`.
+</ParamField>
+<ParamField query="format" type="string" default="json">
+  `json` returns the structure below. `table`, `list`, `count`, or `distinct` return the result rendered as plain text (markdown) instead.
 </ParamField>
 
 ```bash
-curl 'http://localhost:3333/api/kiwi/query?q=TABLE+title,+status+FROM+"concepts"+WHERE+status+=+"draft"'
+curl -G 'http://localhost:3333/api/kiwi/query' \
+  --data-urlencode 'q=TABLE title, status FROM "concepts" WHERE status = "draft" SORT title ASC'
 ```
 
-```json
+<ResponseField name="columns" type="string[]">
+  Column names. Includes `_path` first unless the query uses `WITHOUT ID`.
+</ResponseField>
+<ResponseField name="rows" type="object[]">
+  One object per row, keyed by column name (or alias). Page rows also carry `path`.
+</ResponseField>
+<ResponseField name="total" type="integer">Rows in this response, or `-1` when `has_more` is `true`. It is not a count of all matches; use a `COUNT` query for that.</ResponseField>
+<ResponseField name="has_more" type="boolean">`true` when more rows exist past this page.</ResponseField>
+<ResponseField name="groups" type="object[]">
+  Present for `GROUP BY` queries. Each group has `key`, `count`, and `rows`.
+</ResponseField>
+
+```json Response
 {
-  "mode": "TABLE",
-  "headers": ["path", "title", "status"],
+  "columns": ["_path", "title", "status"],
   "rows": [
-    ["concepts/billing.md", "Billing", "draft"],
-    ["concepts/users.md", "Users", "draft"]
-  ]
+    { "_path": "concepts/billing.md", "path": "concepts/billing.md", "title": "Billing", "status": "draft" },
+    { "_path": "concepts/users.md", "path": "concepts/users.md", "title": "Users", "status": "draft" }
+  ],
+  "total": 2,
+  "has_more": false
 }
 ```
 
-### Query modes
+Returns `400` when `q` is missing or the query does not parse.
 
-| Mode | Description | Example |
+### Query types
+
+| Type | Returns | Example |
 |---|---|---|
-| `TABLE` | Tabular results with selected fields | `TABLE title, status FROM "concepts"` |
-| `LIST` | Flat list of matching page paths | `LIST FROM "concepts" WHERE status = "verified"` |
-| `COUNT` | Count of matching pages | `COUNT FROM "concepts" WHERE status = "draft"` |
-| `DISTINCT` | Unique values for a field | `DISTINCT status FROM "concepts"` |
+| `TABLE` | Selected fields per page. Supports `AS` aliases and `WITHOUT ID`. | `TABLE title, status FROM "concepts"` |
+| `LIST` | Matching pages, optionally with one or more fields. | `LIST FROM #runbook WHERE status = "verified"` |
+| `COUNT` | A single `count` column. | `COUNT FROM "concepts" WHERE status = "draft"` |
+| `DISTINCT` | Unique values of one field. | `DISTINCT status FROM "concepts"` |
+| `CALENDAR` | Pages placed by a date field. | `CALENDAR due FROM "tasks"` |
+| `TASK` | Markdown checklist items with `text`, `completed`, `line`, `tags`, and `due`. | `TASK FROM "projects"` |
+| `JSON` | Selected fields as JSON values. | `JSON title, tags FROM "concepts"` |
+
+After the type, add any of these clauses: `FROM "folder/"` or `FROM #tag` (also `FROM RECORDS "<kind>"` and `FROM CLAIMS`), `WHERE <expression>` (repeatable, AND-joined), `SORT field ASC|DESC` (repeatable), `GROUP BY field`, `FLATTEN field`, `LIMIT n`, and `OFFSET n`.
 
 <CodeGroup>
-```bash Table query
-curl 'http://localhost:3333/api/kiwi/query?q=TABLE+title,+status+FROM+"concepts"+WHERE+status+=+"draft"'
-```
-
-```bash Count query
-curl 'http://localhost:3333/api/kiwi/query?q=COUNT+FROM+"concepts"+WHERE+status+=+"draft"'
+```bash Count
+curl -G 'http://localhost:3333/api/kiwi/query' \
+  --data-urlencode 'q=COUNT FROM "concepts" WHERE status = "draft"'
 ```
 
 ```bash Distinct values
-curl 'http://localhost:3333/api/kiwi/query?q=DISTINCT+status+FROM+"concepts"'
+curl -G 'http://localhost:3333/api/kiwi/query' \
+  --data-urlencode 'q=DISTINCT status FROM "concepts"'
+```
+
+```bash Rendered as a markdown table
+curl -G 'http://localhost:3333/api/kiwi/query' \
+  --data-urlencode 'q=TABLE title, owner FROM #runbook' \
+  --data-urlencode 'format=table'
 ```
 </CodeGroup>
 
-## Aggregations
+## Aggregate frontmatter
 
-SQL-style aggregation queries over frontmatter fields.
+Group pages by a frontmatter field and compute counts, sums, averages, minimums, and maximums.
 
-<ParamField query="group" type="string" required>
-  Frontmatter field to group by.
+**`GET /api/kiwi/query/aggregate`**
+
+<ParamField query="group_by" type="string" required>
+  Frontmatter field to group by, for example `status`.
 </ParamField>
-<ParamField query="calc" type="string" required>
-  Comma-separated aggregation functions. Format: `function` or `function:field`.
+<ParamField query="calc" type="string" default="count">
+  Comma-separated calculations. Use `count`, or `func:field` where `func` is `avg`, `sum`, `min`, or `max`, for example `count,avg:priority`.
 </ParamField>
-
-Supported functions: `count`, `avg`, `sum`, `min`, `max`.
+<ParamField query="path_prefix" type="string">
+  Only include pages whose path starts with this prefix.
+</ParamField>
 
 ```bash
-curl 'http://localhost:3333/api/kiwi/query/aggregate?group=status&calc=count,avg:priority'
+curl 'http://localhost:3333/api/kiwi/query/aggregate?group_by=status&calc=count,avg:priority'
 ```
 
-```json
-[
-  {"status": "draft", "count": 12, "avg_priority": 2.3},
-  {"status": "verified", "count": 45, "avg_priority": 1.8},
-  {"status": "stale", "count": 3, "avg_priority": 3.0}
-]
+<ResponseField name="groups" type="object">
+  Map from group value to an object of results keyed by calculation label (`count`, `avg:priority`, and so on). Pages without the field are grouped under `(none)`.
+</ResponseField>
+
+```json Response
+{
+  "groups": {
+    "draft": { "count": 12, "avg:priority": 2.3 },
+    "verified": { "count": 45, "avg:priority": 1.8 },
+    "(none)": { "count": 3, "avg:priority": null }
+  }
+}
 ```
 
-## Refresh computed views
+Returns `400` when `group_by` is missing or a field name or calculation is invalid.
 
-Trigger a refresh of all computed views (materialized DQL queries).
+## Refresh a computed view
+
+Re-run the query in a computed view page and rewrite its generated section if the result changed.
+
+**`POST /api/kiwi/view/refresh`**
+
+A computed view is a markdown page with `kiwi-view: true` and a `kiwi-query` DQL string in its frontmatter. An optional `kiwi-format` (default `table`) picks how the result is rendered. Generated output sits after the `<!-- kiwi:auto -->` marker.
+
+<ParamField body="path" type="string" required>
+  Path of the view page. You can also pass it as the `path` query parameter.
+</ParamField>
 
 ```bash
-curl -X POST 'http://localhost:3333/api/kiwi/view/refresh'
+curl -X POST 'http://localhost:3333/api/kiwi/view/refresh' \
+  -H "Content-Type: application/json" \
+  -d '{"path": "dashboards/open-incidents.md"}'
 ```
 
-```json
-{"refreshed": 4, "duration_ms": 120}
+<ResponseField name="path" type="string">The view page path.</ResponseField>
+<ResponseField name="status" type="string">`regenerated` when the file was rewritten, `unchanged` otherwise.</ResponseField>
+
+```json Response
+{ "path": "dashboards/open-incidents.md", "status": "regenerated" }
 ```
+
+Returns `400` when `path` is missing, the page is not a computed view, or its query fails.
 
 <Note>
-Views refresh automatically on file writes. Use this endpoint to force a manual refresh after bulk imports or direct filesystem changes.
+Views are marked stale when pages change and regenerate the next time you read them through `GET /file`. Call this endpoint to regenerate one immediately, for example after edits made outside KiwiFS. For saved DQL views stored in `.kiwi/views/`, see [Views](/api/views).
 </Note>
 
 ## Backlinks
 
-Get all pages that link to a given page via wiki links.
+List pages that link to a given page.
+
+**`GET /api/kiwi/backlinks`**
 
 <ParamField query="path" type="string" required>
-  File path to find backlinks for.
+  Target page path.
 </ParamField>
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/backlinks?path=concepts/auth.md'
 ```
 
-```json
-[
-  {"path": "concepts/users.md", "title": "Users", "context": "...uses [[auth]] for login..."},
-  {"path": "concepts/api-keys.md", "title": "API Keys", "context": "...see [[auth]] for details..."}
-]
+<ResponseField name="path" type="string">The target page.</ResponseField>
+<ResponseField name="backlinks" type="object[]">
+  Linking pages. Each has `path`, `count` (number of links from that page), and `relation` for links that come from frontmatter fields such as `supersedes` or `contradicts`.
+</ResponseField>
+
+```json Response
+{
+  "path": "concepts/auth.md",
+  "backlinks": [
+    { "path": "concepts/users.md", "count": 2 },
+    { "path": "decisions/auth-v2.md", "count": 1, "relation": "supersedes" }
+  ]
+}
 ```
 
-## Knowledge graph
+Returns `400` when `path` is missing. With the grep search backend, which keeps no link index, `backlinks` is always empty.
 
-Retrieve the full wiki-link graph as JSON. This powers the graph visualization in the web UI.
+## Link graph
+
+Return every page and every wiki link as a node and edge list. This powers the graph view in the web UI.
+
+**`GET /api/kiwi/graph`**
+
+This endpoint takes no parameters. The result is cached and rebuilt after writes.
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/graph'
 ```
 
-```json
+<ResponseField name="nodes" type="object[]">
+  One per file. Each has `path` and, when the page has `tags` (or `labels`) in frontmatter, `tags`.
+</ResponseField>
+<ResponseField name="edges" type="object[]">
+  One per link. Each has `source` (page path), `target` (the raw text inside the wiki link, not resolved to a path), and `relation` when typed.
+</ResponseField>
+
+```json Response
 {
   "nodes": [
-    {"id": "concepts/auth.md", "title": "Authentication", "group": "concepts"},
-    {"id": "concepts/users.md", "title": "Users", "group": "concepts"},
-    {"id": "concepts/billing.md", "title": "Billing", "group": "concepts"}
+    { "path": "concepts/auth.md", "tags": ["security"] },
+    { "path": "concepts/billing.md" },
+    { "path": "concepts/users.md" }
   ],
   "edges": [
-    {"source": "concepts/users.md", "target": "concepts/auth.md"},
-    {"source": "concepts/billing.md", "target": "concepts/users.md"}
+    { "source": "concepts/users.md", "target": "auth" },
+    { "source": "concepts/billing.md", "target": "users" }
   ]
 }
 ```
 
 <Tip>
-Use the graph endpoint to build custom visualizations or to analyze the connectivity of your knowledge base. Orphan pages (nodes with no edges) are candidates for linking or removal.
+Edge targets are unresolved, so match them to node paths by exact path, file stem, or prefix. For ready-made analysis, use [graph centrality, communities, path, and walk](/api/velocity) or [graph analytics](/api/velocity).
 </Tip>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="DQL" icon="code" href="/concepts/dql">
+    Full query language reference.
+  </Card>
+  <Card title="Views" icon="table" href="/api/views">
+    Saved DQL views and their execution.
+  </Card>
+  <Card title="Search" icon="magnifying-glass" href="/api/search">
+    Full-text, semantic, and frontmatter search.
+  </Card>
+  <Card title="Wiki links" icon="link" href="/concepts/wiki-links">
+    How links are parsed and resolved.
+  </Card>
+</CardGroup>

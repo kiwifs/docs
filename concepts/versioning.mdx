@@ -1,92 +1,130 @@
 ---
 title: "Versioning"
-description: "Git-backed versioning strategies: full git, copy-on-write, or none."
+description: "Every write is versioned with git, copy-on-write snapshots, or not at all."
 icon: "code-branch"
 ---
 
-KiwiFS versions every write so you never lose data. Choose the strategy that fits your use case.
+KiwiFS records a version for every write, whichever protocol it came through. Pick a strategy based on how much history you need: full git history with blame, lightweight per-file snapshots, or none.
 
-## Strategies
+| Strategy | History | Blame | Draft spaces | Best for |
+| --- | --- | --- | --- | --- |
+| `git` (default) | Real git commits | Yes | Yes | Production, audit trails, multi-agent work |
+| `cow` | Per-file snapshots in `.versions/` | No | No | Simple rollback without a git repository |
+| `none` | None | No | No | Scratch data, CI, throwaway runs |
 
-Configure via CLI flag or `.kiwi/config.toml`:
+Set it with a flag or in config. The flag wins when both are set.
 
-```bash
+<CodeGroup>
+
+```bash Terminal
 kiwifs serve --versioning git
 ```
 
-```toml
+```toml .kiwi/config.toml
 [versioning]
-strategy = "git"
+strategy = "git"   # git | cow | none
 ```
 
-### git (default)
+</CodeGroup>
 
-Every write creates a real git commit. You get full `git log`, `git blame`, `git diff`, and `git revert` for free. The `X-Actor` header becomes the commit author.
+## git
 
-```bash
-$ git log --oneline knowledge/
-e4f5g6h agent:docs-writer update concepts/auth.md
-a1b2c3d agent:importer    create concepts/auth.md
+Every write becomes a git commit in the knowledge base's own repository. The writer's identity becomes the commit author: the `X-Actor` header over REST, or the `actor` argument over MCP. Writes without an actor are attributed to `anonymous` over REST and `mcp-agent` over MCP.
+
+```bash Terminal
+$ git log --format='%h %an  %s'
+e4f5g6h agent:docs-writer  agent:docs-writer: concepts/auth.md
+a1b2c3d agent:importer     agent:importer: concepts/auth.md
 ```
 
-Best for: production, audit trails, multi-agent environments.
+Because it is a normal repository, `git log`, `git blame`, `git diff`, and `git revert` all work. Edits made directly on disk are picked up by the file watcher and committed the same way.
 
-### cow (copy-on-write)
+### Batched commits
 
-Lighter-weight versioning that stores snapshots without a real git repo. Useful when you want rollback capability but don't need the full git workflow.
+Under heavy write load, KiwiFS batches commits. Writes from the same actor that land within the batch window share one commit; a different actor always starts a new commit, so authorship never mixes.
 
-```toml
+| Key | Flag | Default | Meaning |
+| --- | --- | --- | --- |
+| `async_commit` | `--async-commit` | `true` | Batch commits in the background |
+| `batch_window_ms` | `--batch-window` | `200` | How long to collect writes |
+| `batch_max_size` | `--batch-max-size` | `50` | Most paths in one commit |
+
+A batched commit with several files lists every path in its message, so `git log` stays useful.
+
+## cow
+
+Copy-on-write keeps a snapshot of a file in `.versions/<path>/` before each overwrite and before a delete. Older snapshots beyond `max_versions` per file are pruned.
+
+```toml .kiwi/config.toml
 [versioning]
 strategy = "cow"
-max_versions = 100    # max snapshots per file
+max_versions = 100   # snapshots kept per file (default 100)
 ```
 
-Best for: high-write environments, embedded use cases.
+Version history, reading an old version, and line diffs work. Blame and word-level diffs return `501`.
 
-### none
+## none
 
-No versioning at all. Writes overwrite files in place. Use this for ephemeral or scratch knowledge bases.
-
-Best for: development, temporary data, CI pipelines.
-
-## Async batching
-
-To reduce git overhead under high write volume, KiwiFS batches commits:
-
-```toml
-[versioning]
-async_commit = true
-batch_window_ms = 200    # collect writes for 200ms
-batch_max_size = 50      # then commit up to 50 paths in one commit
-```
-
-Multiple writes within the batch window are combined into a single git commit. This dramatically improves throughput while preserving atomicity per batch.
+Writes overwrite files in place, and the history endpoints return empty results. The write pipeline, search index, and live events still run.
 
 ## Optimistic locking
 
-The versioning system powers optimistic concurrency control via ETags. When you read a file, the response includes an `ETag` header containing the git blob SHA.
+Every read returns an `ETag`: the git blob hash of the content. Send it back in `If-Match` and the write fails with `409 Conflict` if someone changed the file since you read it. This works under every strategy, because the hash is computed from the content itself.
 
-```bash
-# Read and capture ETag
+```bash Terminal
+# Read and note the ETag header
 curl -i 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md'
-# ETag: "a1b2c3d4..."
 
-# Write with If-Match
+# Write only if nobody else has
 curl -X PUT 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
-  -H "If-Match: a1b2c3d4..." \
-  -d "updated content"
+  -H 'If-Match: "a1b2c3d4..."' \
+  -H 'X-Actor: agent:docs-writer' \
+  --data-binary @auth.md
 ```
 
-If the file was modified between your read and write, you get a `409 Conflict` response.
+Over MCP, pass the ETag from `kiwi_read` as `if_match` to `kiwi_write`.
 
-## API endpoints
+## Moves and restructuring
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/kiwi/versions` | GET | Version history for a file |
-| `/api/kiwi/version` | GET | Read a specific version |
-| `/api/kiwi/diff` | GET | Unified diff between two versions |
-| `/api/kiwi/blame` | GET | Per-line git blame |
-| `/api/kiwi/changes` | GET | List recent changes across the knowledge base |
+Renames, moves, and merges go through the refactor engine. Every wiki link and markdown link that pointed at the old path is rewritten, and the move plus every relinked page land in a single commit, so one `git revert` undoes the whole change. See [Refactor](/concepts/refactor).
 
-See the [Versioning API reference](/api/versioning) for detailed endpoint documentation.
+## Read history
+
+<Tabs>
+  <Tab title="REST">
+    | Endpoint | Purpose |
+    | --- | --- |
+    | `GET /api/kiwi/versions?path=` | Version list for a file: hash, date, author, message |
+    | `GET /api/kiwi/version?path=&version=` | File content at one version |
+    | `GET /api/kiwi/diff?path=&from=&to=` | Unified diff. Add `granularity=word` for a word diff (git only). |
+    | `GET /api/kiwi/blame?path=` | Per-line author and commit (git only) |
+    | `GET /api/kiwi/changes` | Recent commits across the knowledge base, with long polling |
+
+    ```bash Terminal
+    curl 'http://localhost:3333/api/kiwi/versions?path=concepts/auth.md'
+    ```
+  </Tab>
+  <Tab title="MCP">
+    `kiwi_versions` lists the history of a file. `kiwi_changes` lists recent changes across the knowledge base.
+  </Tab>
+  <Tab title="Web UI">
+    Open a page and choose **History** to browse versions, compare any two, and see who changed each line.
+  </Tab>
+</Tabs>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Versioning API" icon="code" href="/api/versioning">
+    Parameters and responses for history, diff, and blame.
+  </Card>
+  <Card title="Draft spaces" icon="code-branch" href="/concepts/draft-spaces">
+    Stage a batch of edits on a branch before merging.
+  </Card>
+  <Card title="Backup and sync" icon="cloud-arrow-up" href="/deploy/backup-sync">
+    Push the repository to a git remote on a schedule.
+  </Card>
+  <Card title="Files as truth" icon="file-lines" href="/concepts/files-as-truth">
+    Why the files, not the index, are the record.
+  </Card>
+</CardGroup>

@@ -1,88 +1,82 @@
 ---
 title: "Introduction"
-description: "KiwiFS is a markdown filesystem for agents and teams. Searchable. Structured. Versioned. One binary, zero config."
+description: "A markdown filesystem for agents and teams: searchable, structured, and versioned, in one binary."
 icon: "house"
 ---
 
-KiwiFS is a **markdown filesystem for agents and teams** — one Go binary that turns markdown on disk into a searchable, queryable, versioned store accessible via REST, MCP, NFS, S3, WebDAV, and FUSE.
+KiwiFS turns a folder of markdown files into a knowledge server. Agents and people read and write the same files over REST, MCP, NFS, S3, WebDAV, or a FUSE mount, and KiwiFS indexes, versions, and serves them through a built-in web UI.
 
-## Why KiwiFS?
+The files on disk stay the source of truth. Search indexes, link graphs, and query caches are derived from them and can be rebuilt at any time.
 
-Markdown is the lingua franca of agents and developers — but raw `.md` files are just files. No search, no versioning, no structure. KiwiFS layers database-like guarantees on top of plain markdown:
+## Why KiwiFS
 
-- **Files are the truth** — every page is a plain markdown file with YAML frontmatter. No proprietary format, no lock-in.
-- **Agents already know the API** — `cat`, `grep`, `echo` work out of the box. No SDK needed.
-- **Every write is a git commit** — full history, blame, diff, and rollback for free.
-- **Full-text + vector search** — BM25 via SQLite FTS5 out of the box, with pluggable vector embeddings.
-- **Query language (DQL)** — SQL-like queries over frontmatter metadata.
-- **Web UI included** — wiki links, knowledge graph, Mermaid diagrams, markdown editing, Bases, canvas, whiteboard, comments, and dark mode.
-- **Single binary, zero config** — download and run. No Node, no Docker required (Docker optional).
-- **Fair Source** — [BSL 1.1](https://github.com/kiwifs/kiwifs/blob/main/LICENSE). Self-host and embed freely. Each release converts to Apache 2.0 after four years.
+- **Plain files, no lock-in.** Every page is a markdown file with YAML frontmatter. Copy the folder and you have everything.
+- **Agents already know the interface.** Mount the folder and use `cat`, `grep`, and `echo`, or call the REST API or the 78 MCP tools.
+- **Every write is a git commit.** History, blame, diff, and restore come for free, with the writer's identity as the commit author.
+- **Search that works out of the box.** BM25 full-text search over SQLite FTS5 by default, with optional vector search through OpenAI, Ollama, Cohere, Voyage, Bedrock, Vertex, or any HTTP embedder.
+- **Frontmatter you can query.** DQL runs SQL-like queries over frontmatter, and Bases save them as table and board views.
+- **Restructure without breaking links.** Refactor plans move, merge, and split pages and rewrite every wiki link that pointed at them. Agents can plan and apply them over MCP, with approval thresholds for large changes.
+- **Pages that explain.** Wiki links, steppable Mermaid, D2 diagrams rendered on the server, typed widget fences (arrays, trees, graphs, plots, timelines, and more), and quiz callouts whose answers stay out of search.
+- **Built for many writers.** Optimistic concurrency with ETags, draft spaces, path claims, workflows, webhooks, and a live event stream.
+- **One binary.** The Go server embeds the web UI. No Node, database, or Docker required.
+- **Source available.** [BSL 1.1](https://github.com/kiwifs/kiwifs/blob/main/LICENSE): run it in production and embed it in your own products. Each release converts to Apache 2.0 after four years.
 
 ## How it works
 
-<Mermaid>
-flowchart TD
-  subgraph Protocols
-    REST["REST API :3333"]
-    NFS["NFS :2049"]
-    S3["S3 :3334"]
-    WebDAV["WebDAV :3335"]
-    FUSE["FUSE mount"]
-    MCP["MCP stdio/HTTP"]
+```mermaid
+flowchart LR
+  subgraph Clients
+    REST["REST + web UI<br/>:3333"]
+    MCP["MCP<br/>stdio or /mcp"]
+    S3["S3<br/>:3334"]
+    DAV["WebDAV<br/>:3335"]
+    NFS["NFS<br/>:2049"]
+    FUSE["FUSE<br/>kiwifs mount"]
+    Disk["Direct edits<br/>on disk"]
   end
 
-  REST & NFS & S3 & WebDAV & FUSE & MCP --> Storage
+  REST & MCP & S3 & DAV & NFS & FUSE & Disk --> Pipe
 
-  subgraph KiwiFS["KiwiFS Server"]
-    Storage["Storage Layer"] --> Git["Git Commit"]
-    Git --> Index["Search Index"]
-    Index --> SSE["SSE Broadcast"]
+  subgraph Server["KiwiFS"]
+    Pipe["Write pipeline"] --> Files["Markdown files"]
+    Files --> Git["Git commit"]
+    Git --> Index["Search + link index"]
+    Index --> SSE["SSE event"]
   end
-</Mermaid>
+```
 
-All protocols flow through the same storage layer. Every write — regardless of how it enters — gets a git commit, a search index update, and an SSE broadcast.
+Every write takes the same path no matter where it comes from: it lands on disk, becomes a git commit, updates the search and link indexes, and broadcasts an event to open web UIs and subscribers. A file watcher catches edits made directly on disk and sends them through the same pipeline.
 
-## For AI agents
+The REST API, web UI, and MCP-over-HTTP endpoint share port `3333`. S3, WebDAV, and NFS stay off until you start the server with `--s3`, `--webdav`, or `--nfs`. See [Alternate protocols](/guides/alternate-protocols).
 
-KiwiFS publishes machine-readable documentation for LLMs and agent frameworks:
+## For agents
 
-- **[llms.txt](/llms.txt)** — concise overview with key endpoints and MCP tool names
-- **[llms-full.txt](/llms-full.txt)** — complete API + MCP + CLI reference in a single file
+These docs are published in machine-readable form:
 
-Point your agent at `llms-full.txt` to give it everything it needs to read, write, search, and manage a KiwiFS knowledge base.
+- [`llms.txt`](https://docs.kiwifs.com/llms.txt): a short overview with key endpoints and MCP tool names.
+- [`llms-full.txt`](https://docs.kiwifs.com/llms-full.txt): the full API, MCP, and CLI reference in one file.
+
+A running KiwiFS server also serves its own `/llms.txt` and `/llms-full.txt` for the knowledge base it hosts. When auth is on, both list only public or published pages. See [Agent interface](/concepts/agent-interface#llms-txt).
 
 ## Next steps
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Install and run KiwiFS in 60 seconds.
+    Install KiwiFS, start a server, and make your first write.
   </Card>
-  <Card title="Configuration" icon="gear" href="/configuration">
-    Configure search, auth, versioning, and more.
+  <Card title="Connect an agent over MCP" icon="plug" href="/concepts/mcp">
+    Give Claude, Cursor, or any MCP client the 78 KiwiFS tools.
   </Card>
-  <Card title="Agent Interface" icon="robot" href="/concepts/agent-interface">
-    How AI agents read and write markdown.
+  <Card title="Agent interface" icon="robot" href="/concepts/agent-interface">
+    Filesystem, REST, and MCP access patterns.
   </Card>
-  <Card title="MCP" icon="plug" href="/concepts/mcp">
-    Connect Claude, Cursor, and other AI tools.
-  </Card>
-  <Card title="Draft spaces" icon="code-branch" href="/concepts/draft-spaces">
-    Stage agent edits in git-backed drafts before merge.
-  </Card>
-  <Card title="Bases (views)" icon="table" href="/concepts/bases-views">
-    Saved DQL queries with table and board layouts.
+  <Card title="Widgets and diagrams" icon="puzzle-piece" href="/concepts/widgets">
+    Typed widget fences, D2, Mermaid, and quiz callouts.
   </Card>
   <Card title="Web UI" icon="window" href="/guides/web-ui">
-    Browse, edit, and visualize your knowledge base.
+    Browse, edit, search, and visualize your knowledge base.
   </Card>
-  <Card title="Examples" icon="lightbulb" href="/guides/examples">
-    Agent workflows, DQL, import, and deployment recipes.
-  </Card>
-  <Card title="FAQ" icon="circle-question" href="/guides/faq">
-    Common questions about KiwiFS.
-  </Card>
-  <Card title="Widgets" icon="puzzle-piece" href="/concepts/widgets">
-    Charts, calc, steps, claims, and other rich blocks.
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Every `.kiwi/config.toml` key and its default.
   </Card>
 </CardGroup>

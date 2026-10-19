@@ -1,339 +1,719 @@
 ---
 title: "Configuration"
-description: "Configure KiwiFS via .kiwi/config.toml — search, auth, versioning, vector embeddings, and more."
+description: "Every .kiwi/config.toml key, its default, and the environment variables and flags that override it."
 icon: "gear"
 ---
 
-KiwiFS is configured via `.kiwi/config.toml` inside your knowledge root directory. All settings are optional — KiwiFS runs with sensible defaults out of the box.
+KiwiFS reads `.kiwi/config.toml` from the knowledge root when the server starts. Every key is optional: a missing key takes the default listed on this page, and a missing file means all defaults.
 
-Environment variables in the form `${VAR}` are expanded in all string values.
+Settings are applied in this order, last one wins:
+
+1. Built-in defaults.
+2. `.kiwi/config.toml`.
+3. Environment variables that override specific keys (see [Environment variables](#environment-variables)).
+4. `kiwifs serve` flags you pass explicitly, such as `--port` or `--auth`.
+
+Changes take effect on restart. Auth settings can also be reloaded in place by sending `SIGHUP` to the server.
+
+<Tip>
+Any string value can reference an environment variable as `${NAME}`. It is expanded at load time, and an unset variable expands to an empty string. Use this to keep secrets out of the file: `api_key = "${OPENAI_API_KEY}"`.
+</Tip>
+
+## The starter file
+
+`kiwifs init`, and `kiwifs serve` on a folder without a config, writes this file. The rest of the generated file is commented-out examples.
+
+```toml .kiwi/config.toml
+[server]
+port = 3333
+host = "0.0.0.0"
+
+[storage]
+root = "."
+
+[search]
+engine = "sqlite"
+
+[versioning]
+strategy = "git"
+
+[auth]
+type = "none"
+```
+
+`[storage] root` is informational. The server always uses the folder passed to `--root`.
 
 ## Server
 
-```toml
+```toml .kiwi/config.toml
 [server]
 host = "0.0.0.0"
 port = 3333
-cors_origins = ["https://app.example.com"]
 public_url = "https://wiki.example.com"
+cors_origins = ["https://app.example.com"]
+```
 
+| Key | Default | Description |
+| --- | --- | --- |
+| `host` | `"0.0.0.0"` | Bind address for the REST API, web UI, and `/mcp`. Also used by `--s3`, `--webdav`, and `--nfs`. |
+| `port` | `3333` | HTTP port. |
+| `public_url` | unset | Base URL for permalinks (the `X-Permalink` header and share links). The `KIWI_PUBLIC_URL` environment variable overrides it. |
+| `cors_origins` | `[]` | Browser origins allowed to call the API. Merged with `[server.cors] allowed_origins`. |
+
+### CORS
+
+```toml .kiwi/config.toml
 [server.cors]
 allowed_origins = ["https://app.example.com"]
-allowed_methods = ["GET", "POST", "PUT", "PATCH", "DELETE"]
+allowed_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 allow_credentials = true
 max_age = 86400
 ```
 
-The `public_url` is used for permalink generation. Override via `KIWI_PUBLIC_URL` env var.
+| Key | Default | Description |
+| --- | --- | --- |
+| `allowed_origins` | `[]` | Allowed origins. `"*"` allows any origin. |
+| `allowed_methods` | `GET`, `PUT`, `POST`, `DELETE`, `OPTIONS` | Methods advertised in preflight responses. |
+| `allow_credentials` | `false` | Send `Access-Control-Allow-Credentials`. |
+| `max_age` | `3600` | Preflight cache lifetime in seconds. |
 
-Use `cors_origins` for a simple allowlist, or `[server.cors]` for fine-grained CORS control (methods, credentials, preflight cache).
+Origins on `localhost`, `127.0.0.1`, and `[::1]` are always allowed. Beyond those:
+
+- With auth off (`type = "none"`), no other origin is allowed, whatever the lists say.
+- With auth on and both lists empty, any origin is allowed, because every request still needs a token.
+- With auth on and either list set, only listed origins are allowed.
 
 ### Rate limiting
 
-```toml
+```toml .kiwi/config.toml
 [server.rate_limit]
 requests_per_minute = 600
 burst_size = 50
 ```
 
-When `requests_per_minute` is greater than zero, KiwiFS applies a token-bucket limiter keyed by Bearer token hash (or client IP when anonymous). Health, readiness, and metrics routes are exempt.
+| Key | Default | Description |
+| --- | --- | --- |
+| `requests_per_minute` | `0` (off) | Sustained rate per client. Any value above `0` turns the limiter on. |
+| `burst_size` | `50` | Requests a client may make at once before the rate applies. |
+
+Clients are identified by a hash of their bearer token, or by IP address when they send none. `/health`, `/healthz`, `/readyz`, and `/metrics` are never limited.
 
 ## Search
 
-```toml
+```toml .kiwi/config.toml
 [search]
-engine = "sqlite"        # "sqlite" (default) or "grep"
+engine = "sqlite"
 async_index = true
 index_window_ms = 200
-index_batch_max = 50
+index_batch_max = 100
 ```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `engine` | `"sqlite"` | `sqlite` for BM25 full-text search over SQLite FTS5, or `grep` for a zero-index scan. DQL, Bases, analytics, and most health checks need `sqlite`. |
+| `async_index` | `true` | Index writes in the background in small batches instead of inside each request. |
+| `index_window_ms` | `200` | How long the background indexer collects writes before flushing. |
+| `index_batch_max` | `100` | Flush early once this many paths are queued. |
+
+See [Search](/concepts/search).
 
 ### Vector search
 
-Enable semantic search by configuring an embedder and a vector store.
+Semantic search is off until you set `enabled = true` and configure an embedder. The vector store defaults to an embedded SQLite store.
 
-```toml
+```toml .kiwi/config.toml
 [search.vector]
 enabled = true
-worker_count = 5          # default; lower for small local embedders
+worker_count = 5
 
 [search.vector.embedder]
-provider = "openai"      # openai | ollama | cohere | voyage | http | bedrock | vertex
+provider = "openai"
 model = "text-embedding-3-small"
 api_key = "${OPENAI_API_KEY}"
 dimensions = 1536
-# timeout = "120s"       # optional for Ollama; default is 30s
 
 [search.vector.store]
-provider = "sqlite-vec"  # sqlite-vec | qdrant | pgvector | pinecone | weaviate
+provider = "sqlite"
 ```
 
-### Chunking
-
-Control how documents are split before embedding:
-
-```toml
-[search.vector.chunk]
-size = 512
-overlap = 64
-```
-
-| Field | Default | Description |
+| Key | Default | Description |
 | --- | --- | --- |
-| `size` | `512` | Target tokens per chunk |
-| `overlap` | `64` | Token overlap between consecutive chunks |
-
-For local Ollama on a small CPU-only VPS, lower `worker_count` and raise the Ollama request timeout. See [Ollama vector search on a small VPS](/deploy/ollama-vector-search).
+| `enabled` | `false` | Turn on embedding, the vector store, and semantic search. |
+| `worker_count` | `5` | Parallel embed-and-store workers. Lower it for a small local embedder. |
 
 <AccordionGroup>
-<Accordion title="Embedder providers">
+  <Accordion title="Embedder providers">
+    Set under `[search.vector.embedder]`. `provider` defaults to `openai`.
 
-| Provider | Required fields |
-|----------|----------------|
-| `openai` | `api_key`, `model` |
-| `ollama` | `base_url`, `model` |
-| `cohere` | `api_key`, `model` |
-| `voyage` | `api_key`, `model` |
-| `http` | `url` (custom endpoint) |
-| `onnx` | `model_path`, `tokenizer_path` (`kiwifs model download`) |
-| `bedrock` | `region`, `model` |
-| `vertex` | `project`, `location`, `model` |
+    | `provider` | Keys |
+    | --- | --- |
+    | `openai` | `api_key`, `model`, optional `base_url` for OpenAI-compatible endpoints. `azure-openai` is an alias. |
+    | `ollama` | `model`, optional `base_url` and `timeout` (for example `"120s"`) |
+    | `cohere` | `api_key`, `model`, optional `base_url` |
+    | `voyage` | `api_key`, `model`, optional `base_url` |
+    | `http` | `url`, optional `headers` table. Any service that returns embeddings over HTTP. |
+    | `bedrock` | `model`, `region`. Uses the standard AWS credential chain. |
+    | `vertex` | `project`, `location`, `model`, optional `credentials_file` (falls back to application default credentials) |
+    | `onnx` | `model_path`, `tokenizer_path`. Requires a binary built with `-tags onnx`; see [Optional features](/concepts/optional-features#build-time-features). Fetch a model with `kiwifs model download`. |
 
-</Accordion>
-<Accordion title="Vector store providers">
+    `dimensions` sets the vector size for providers that support it.
 
-| Provider | Notes |
-|----------|-------|
-| `sqlite-vec` | Zero-config, embedded (default when vector is enabled) |
-| `qdrant` | Requires separate Qdrant server |
-| `pgvector` | Requires PostgreSQL with pgvector extension |
-| `pinecone` | Cloud-hosted |
-| `weaviate` | Self-hosted or cloud |
+    The `onnx` provider also accepts `runtime_path`, `max_tokens`, `pooling` (`mean` or `cls`), `normalize` (default `true`), `query_prefix`, `passage_prefix`, and tensor-name overrides `input_ids_name`, `attention_name`, `token_type_name`, and `output_name`.
+  </Accordion>
+  <Accordion title="Vector store providers">
+    Set under `[search.vector.store]`. `provider` defaults to `sqlite` (`sqlite-vec` is an alias).
 
-</Accordion>
+    | `provider` | Keys |
+    | --- | --- |
+    | `sqlite` | None. Stored under `.kiwi/state/`. |
+    | `qdrant` | `url`, optional `api_key`, `collection` |
+    | `pgvector` | `dsn` (a PostgreSQL connection string), optional `table` |
+    | `pinecone` | `url`, `api_key`, optional `namespace` |
+    | `weaviate` | `url`, optional `api_key`, `collection` (the class name) |
+    | `milvus` | `url`, optional `api_key`, `collection` |
+  </Accordion>
 </AccordionGroup>
+
+For a CPU-only VPS running Ollama, see [Ollama vector search on a small VPS](/deploy/ollama-vector-search).
+
+#### Chunking
+
+Pages are split into chunks before embedding.
+
+```toml .kiwi/config.toml
+[search.vector.chunk]
+size = 1500
+overlap = 150
+context_template = "{{ .Title }}{{ if .Headings }} > {{ .Headings }}{{ end }}"
+```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `size` | `1500` | Target chunk size in characters. Chunks break on paragraph boundaries where possible. |
+| `overlap` | `0` | Characters carried over from the end of one chunk to the start of the next. |
+| `context_template` | `"{{ .Headings }}"` | Go template prepended to each chunk before embedding, so a chunk carries where it came from. Fields: `.Title`, `.Path`, `.Headings`, `.HeadingPath`, `.Frontmatter`. |
+| `context_hook_url` | unset | URL that receives a POST per chunk and returns `{"context": "..."}` to use instead of the template. Any failure falls back to the template. |
+
+<Warning>
+Changing `size`, `overlap`, or `context_template` affects only chunks embedded afterwards. Run `kiwifs reindex` to rebuild existing vectors.
+</Warning>
 
 ## Versioning
 
-```toml
+```toml .kiwi/config.toml
 [versioning]
-strategy = "git"          # "git" (default), "cow", or "none"
+strategy = "git"
 async_commit = true
 batch_window_ms = 200
 batch_max_size = 50
-max_versions = 100        # only for "cow" strategy
 ```
 
-- **git** — every write is a real git commit. Full history, blame, diff.
-- **cow** — copy-on-write snapshots without git. Lighter, limited history.
-- **none** — no versioning. Writes overwrite in place.
+| Key | Default | Description |
+| --- | --- | --- |
+| `strategy` | `"git"` | `git`: every write is a git commit. `cow`: copy-on-write snapshots under `.versions/`, no git needed. `none`: writes overwrite in place. |
+| `async_commit` | `true` | Batch git commits in the background. Writes are logged first and recovered on restart if the server stops before committing. |
+| `batch_window_ms` | `200` | How long to collect writes before committing a batch. |
+| `batch_max_size` | `50` | Commit early once this many paths are pending. |
+| `max_versions` | `100` | Snapshots kept per file with `strategy = "cow"`. |
+
+If git is not available, the server logs a warning and runs with `none`. See [Versioning](/concepts/versioning).
 
 ## Authentication
 
-```toml
+```toml .kiwi/config.toml
 [auth]
-type = "none"             # "none", "apikey", "perspace", or "oidc"
-api_key = "kiwi_sk_..."   # for type = "apikey"
-
-# Per-space keys
-[[auth.api_keys]]
-key = "kiwi_sk_eng_..."
-space = "engineering"
-actor = "eng-team"
-
-# OIDC
-[auth.oidc]
-issuer = "https://accounts.google.com"
-client_id = "your-client-id"
+type = "apikey"
+api_key = "${KIWI_API_KEY}"
 ```
 
-Auth is hot-reloadable — send `SIGHUP` to the server process to reload auth configuration from disk without restarting.
+| `type` | Behavior |
+| --- | --- |
+| `none` (default) | No authentication. |
+| `apikey` | One shared key in `api_key`. Clients send `Authorization: Bearer <key>`. |
+| `perspace` | Keys listed in `[[auth.api_keys]]`, each scoped to a space, an access level, and optionally a path prefix. |
+| `oidc` | Bearer tokens validated against an OpenID Connect issuer. |
 
-## Assets
+<AccordionGroup>
+  <Accordion title="Per-space keys">
+    ```toml .kiwi/config.toml
+    [auth]
+    type = "perspace"
 
-```toml
-[assets]
-max_file_size = "10MB"
-allowed_types = ["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"]
+    [[auth.api_keys]]
+    key = "${ENG_READ_KEY}"
+    space = "engineering"
+    actor = "ci-reader"
+    scope = "read"
+    prefix = "docs/"
+    ```
+
+    | Key | Default | Description |
+    | --- | --- | --- |
+    | `key` | required | The bearer token. |
+    | `space` | required | Space the key is valid for. |
+    | `actor` | unset | Identity recorded as the git author for writes made with this key. |
+    | `scope` | `"admin"` | `read`, `write`, or `admin`. |
+    | `prefix` | unset | Limit the key to paths under this prefix. |
+
+    `kiwifs token create` generates and stores scoped keys for you. See [Auth tokens](/guides/auth-tokens).
+  </Accordion>
+  <Accordion title="OIDC">
+    ```toml .kiwi/config.toml
+    [auth]
+    type = "oidc"
+
+    [auth.oidc]
+    issuer = "https://accounts.google.com"
+    client_id = "your-client-id"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+The `--auth`, `--api-key`, `--oidc-issuer`, and `--oidc-client-id` flags on `kiwifs serve` override these keys.
+
+## Space visibility
+
+```toml .kiwi/config.toml
+[space]
+name = "docs"
+visibility = "private"
 ```
 
-## UI
-
-```toml
-[ui]
-theme_locked = false      # when true, users cannot change the theme
-start_page = "welcome"    # welcome | recent | dashboard | or a path
-custom_css = ".kiwi/custom.css"
-keybindings_file = ".kiwi/keybindings.json"
-
-[ui.features]
-edit = true
-history = true
-publish = true
-graph = true
-kanban = true
-canvas = true
-whiteboard = true
-timeline = true
-bases = true
-data_sources = true
-
-[ui.toolbar]
-views = ["graph", "kanban", "bases", "canvas", "whiteboard", "timeline"]
-
-[ui.tags]
-banner = ["status", "difficulty", "tags"]
-hide = ["internal_id"]
-
-[ui.tags.colors]
-easy = "emerald"
-google = "#4285F4"
-
-[ui.sidebar]
-pinned = ["index.md"]
-hidden = [".kiwi/"]
-
-[[ui.sidebar.sections]]
-label = "Guides"
-paths = ["getting-started/", "guides/"]
-
-[ui.branding]
-name = "My Wiki"
-logo_url = "assets/logo.png"
-welcome_title = "Welcome"
-welcome_message = "Start here."
-```
-
-Set a `[ui.features]` flag to `false` to hide that chrome. Banner tags render as chips under the page title. See [Web UI](/guides/web-ui).
-
-## Backup
-
-```toml
-[backup]
-remote = "git@github.com:org/knowledge.git"
-interval = "5m"
-branch = "main"
-rebase_before_push = true  # default: true
-```
-
-KiwiFS fetches and rebases onto the backup branch before pushing by default. This avoids routine non-fast-forward failures when another client pushed to the same backup branch first.
-
-Override via env: `KIWI_BACKUP_REMOTE`, `KIWI_BACKUP_INTERVAL`, `KIWI_BACKUP_REBASE_BEFORE_PUSH`.
-
-See [Backup sync](/deploy/backup-sync) for the full workflow, opt-outs, and troubleshooting.
-
-## Janitor
-
-The janitor periodically scans for stale pages, orphans, and broken links.
-
-```toml
-[janitor]
-interval = "1h"
-stale_days = 30
-startup_scan = true
-```
-
-## DataView
-
-```toml
-[dataview]
-max_scan_rows = 10000
-query_timeout = "5s"
-max_auto_indexes = 20
-computed_fields = true
-
-[dataview.custom_fields]
-age_days = "days_since(updated)"
-is_long = "len(body) > 5000"
-```
-
-## Memory
-
-Episodic vs semantic conventions for agent memory. See [Episodic memory](/concepts/episodic-memory).
-
-```toml
-[memory]
-episodes_path_prefix = "episodes/"
-```
-
-## Drafts
-
-```toml
-[drafts]
-enabled = true
-max_active = 10
-auto_discard = "720h"
-```
-
-`auto_discard` is a duration string (for example `"720h"` for 30 days). Draft branches older than this threshold are discarded automatically.
-
-## Workflow
-
-```toml
-[workflow]
-enforce_transitions = false
-transitions = ["open->in_progress", "in_progress->done", "in_progress->blocked", "blocked->in_progress"]
-```
-
-| Field | Default | Description |
+| Key | Default | Description |
 | --- | --- | --- |
-| `enforce_transitions` | `false` | When `true`, `POST /workflow/advance` rejects transitions not listed in the workflow definition |
-| `transitions` | `[]` | Global default transitions (workflow definitions can override per-workflow) |
+| `name` | `"default"` | Name of the primary space (the `--root` folder) in the space selector and in `/api/kiwi/{name}/...` routes. |
+| `visibility` | `"private"` | Who can read without a token. |
 
-## Audit
+Visibility only matters when auth is on. It relaxes auth for `GET` and `HEAD` requests:
 
-```toml
-[audit]
-enabled = true
+| Value | Reads without a token |
+| --- | --- |
+| `private` | None. |
+| `unlisted` | Single-file reads by exact path. Tree, search, and listings still need a token. |
+| `public` | All reads. |
+
+Change it at runtime with `PUT /api/kiwi/space/visibility`.
+
+## Multi-space
+
+Serve several independent knowledge bases, each with its own git history and indexes, from one server.
+
+```toml .kiwi/config.toml
+[[spaces]]
+name = "engineering"
+root = "/data/eng-wiki"
+visibility = "private"
+
+[[spaces]]
+name = "notes"
+root = "../notes"
 ```
 
-Requires `[audit] enabled = true` for `GET /api/kiwi/audit`. See [Optional features](/concepts/optional-features).
+| Key | Default | Description |
+| --- | --- | --- |
+| `name` | required | Space name. Its API lives under `/api/kiwi/{name}/...`. |
+| `root` | required | Folder for the space. Relative paths resolve against `--root`. |
+| `visibility` | `"private"` | Same values as `[space] visibility`. |
 
-## Webhooks
+You can also add spaces with `kiwifs serve --space eng=/data/eng`. See [Multi-space](/concepts/multi-space) and the [Spaces API](/api/spaces).
 
-```toml
-[webhooks]
-enabled = true
-max_workers = 4
-max_retries = 3
-```
+## Content rules
 
-See [Webhooks](/concepts/webhooks).
+### Lint
 
-Register static webhooks at startup with `[[webhook_entries]]`:
-
-```toml
-[[webhook_entries]]
-url = "https://hooks.example.com/kiwifs"
-events = ["file.created", "file.updated", "file.deleted"]
-secret = "${WEBHOOK_SECRET}"
-path_glob = "concepts/**"
-```
-
-## Lint
-
-```toml
+```toml .kiwi/config.toml
 [lint]
 auto_format = true
 reject_errors = true
 ```
 
-When `auto_format` is true (default), KiwiFS normalizes markdown on write (table alignment, trailing whitespace). When `reject_errors` is true (default), writes that fail lint checks with error severity are rejected.
+| Key | Default | Description |
+| --- | --- | --- |
+| `auto_format` | `true` | Normalize markdown on write: table alignment, trailing whitespace, unclosed fences. |
+| `reject_errors` | `true` | Reject writes that still have error-severity lint issues after formatting. |
 
-## Schema enforcement
+### Schemas
 
-```toml
+```toml .kiwi/config.toml
 [schema]
-enforce = false
-discriminator = "type"    # frontmatter field that selects .kiwi/schemas/{value}.json
-enforce_level = "reject"  # "reject" (default) or "warn"
+enforce = true
+discriminator = "type"
+enforce_level = "reject"
 ```
 
-When `enforce = true`, writes are validated against `.kiwi/schemas/`. `enforce_level = "warn"` logs violations but still commits. Use `discriminator = "kind"` if your pages key schemas on `kind` instead of `type`. See [Schemas](/concepts/schemas).
+| Key | Default | Description |
+| --- | --- | --- |
+| `enforce` | `false` | Validate frontmatter against `.kiwi/schemas/{value}.json` on write. |
+| `discriminator` | `"type"` | Frontmatter field whose value picks the schema. Use `"kind"` if your pages key on `kind`. |
+| `enforce_level` | `"reject"` | `reject` fails the write. `warn` logs the violation and commits anyway, which helps when adopting schemas on existing content. |
 
-## Import (Airbyte)
+See [Schemas](/concepts/schemas).
 
-```toml
+### Typed links
+
+```toml .kiwi/config.toml
+[links]
+typed_fields = ["supersedes", "superseded_by", "cites", "extends", "contradicts"]
+```
+
+Frontmatter fields listed in `typed_fields` are indexed as wiki links with that relation, so they show up in backlinks, the graph, and refactor link rewrites. The default is `["contradicts", "supersedes", "superseded_by"]`. See [Wiki links](/concepts/wiki-links).
+
+### Write guards
+
+`[[validate_write]]` rules protect existing files based on their current frontmatter. New files are never affected.
+
+```toml .kiwi/config.toml
+[[validate_write]]
+name = "accepted-adrs-are-immutable"
+match = { frontmatter = "status", values = ["accepted", "superseded"] }
+reject = "body_change"
+message = "Accepted ADRs are immutable. Write a new ADR that supersedes this one."
+```
+
+| Key | Description |
+| --- | --- |
+| `name` | Label used in logs. |
+| `match` | `frontmatter` names the field; `value` or `values` lists the values that trigger the rule. |
+| `reject` | `overwrite` rejects any write to a matching file. `body_change` allows frontmatter edits but rejects changes to the body. |
+| `message` | Error returned to the writer. |
+
+### Sequence numbers
+
+```toml .kiwi/config.toml
+[sequences]
+directories = ["logs/"]
+
+[format_hooks.auto_sequence]
+directory = "decisions/"
+field = "number"
+```
+
+- `[sequences] directories`: writes under these folders get a monotonic `<!-- seq:N -->` marker so gaps are detectable.
+- `[format_hooks.auto_sequence]`: a new file under `directory` without `field` in its frontmatter gets the next number, such as `number: 12` for ADRs.
+
+### Workflow transitions
+
+```toml .kiwi/config.toml
+[workflow]
+enforce_transitions = true
+
+[workflow.transitions]
+open = ["in_progress"]
+in_progress = ["done", "blocked"]
+blocked = ["in_progress"]
+```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `enforce_transitions` | `false` | Reject writes that change frontmatter `status` from one value to another not listed for it. |
+| `transitions` | `{}` | Map from each status to the statuses it may move to. A status with no entry is unrestricted. |
+
+Per-workflow state machines live in `.kiwi/workflows/*.json`. See [Workflows](/concepts/workflows).
+
+## Refactoring
+
+Standing rules for refactor plans from the CLI, REST API, MCP, and the web UI's **Restructure** view.
+
+```toml .kiwi/config.toml
+[refactor]
+approval_files = 50
+approval_links = 200
+protect = ["policies/**", "index.md"]
+scope = "wiki/"
+folder_map = "index.md"
+```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `approval_files` | `50` | A plan an agent applies that writes or deletes more files than this needs a person's approval. `-1` turns the check off. |
+| `approval_links` | `200` | Same, counted in rewritten links. |
+| `protect` | `[]` | Globs no plan may write, delete, or move. |
+| `scope` | unset | When set, the only folder plans may touch. |
+| `folder_map` | unset | A page that lists where pages belong (a `folders:` frontmatter list or `- folder` bullets). Moving a page into an unlisted folder is a warning. |
+
+Agents that apply a plan over the limits are asked to confirm through MCP elicitation when their client supports it. Otherwise the plan waits in `GET /api/kiwi/refactor/pending` until someone approves it. See [Refactor](/concepts/refactor).
+
+## Collaboration
+
+### Drafts
+
+```toml .kiwi/config.toml
+[drafts]
+enabled = true
+max_active = 10
+```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Turn on draft spaces: git branches in separate worktrees where agents stage edits before merging. Needs `strategy = "git"`. |
+| `max_active` | `10` | Maximum open drafts at once. |
+
+See [Draft spaces](/concepts/draft-spaces).
+
+### Webhooks
+
+```toml .kiwi/config.toml
+[webhooks]
+enabled = true
+max_workers = 4
+max_retries = 5
+
+[[webhook_entries]]
+url = "https://hooks.example.com/kiwifs"
+events = ["write", "delete"]
+secret = "${WEBHOOK_SECRET}"
+path_glob = "concepts/**"
+```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Turn on webhook delivery and the webhooks API. |
+| `max_workers` | `4` | Concurrent deliveries. |
+| `max_retries` | `5` | Retries per delivery, backing off from 5 seconds to 1 hour. |
+
+`[[webhook_entries]]` registers webhooks at startup, skipping any URL that is already registered. `events` can include `write`, `delete`, `transition`, `bulk`, and `rollback`. `path_glob` defaults to `**`. Without a `secret`, one is generated. See [Webhooks](/concepts/webhooks).
+
+### Audit
+
+```toml .kiwi/config.toml
+[audit]
+enabled = true
+```
+
+Records every API request with its actor and serves the log at `GET /api/kiwi/audit`. Off by default. See [Audit log](/concepts/audit-log).
+
+## Maintenance
+
+### Janitor
+
+The janitor scans for stale pages, orphans, and broken links on a schedule.
+
+```toml .kiwi/config.toml
+[janitor]
+interval = "24h"
+stale_days = 90
+startup_scan = true
+```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `interval` | `"24h"` | Time between scans. `"0s"` turns the scheduled scan off. |
+| `stale_days` | `90` | Pages not updated or reviewed within this many days are reported as stale. |
+| `startup_scan` | `false` | Also scan once when the server starts. |
+
+To flag runbooks whose last execution is too old or failed:
+
+```toml .kiwi/config.toml
+[janitor.execution_staleness]
+directory = "runbooks/"
+date_field = "last_executed"
+max_age_days = 90
+
+[janitor.execution_staleness.flag_values]
+last_outcome = "failure"
+```
+
+`date_field` defaults to `last_executed` and `max_age_days` to `stale_days`. Findings appear in `kiwifs check`, `kiwifs janitor`, and `GET /api/kiwi/janitor`.
+
+### Backup
+
+Push the git history to a remote on a timer.
+
+```toml .kiwi/config.toml
+[backup]
+remote = "git@github.com:org/knowledge.git"
+interval = "5m"
+branch = "main"
+rebase_before_push = true
+```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `remote` | unset | Git remote URL. Backup is off until this is set. |
+| `interval` | `"5m"` | Time between pushes. |
+| `branch` | current branch | Remote branch to push to. |
+| `rebase_before_push` | `true` | Fetch and rebase onto the remote branch before pushing, to avoid non-fast-forward failures. |
+
+See [Backup sync](/deploy/backup-sync).
+
+## Queries
+
+### DataView
+
+```toml .kiwi/config.toml
+[dataview]
+max_scan_rows = 10000
+query_timeout = "5s"
+max_auto_indexes = 20
+
+[dataview.custom_fields]
+age_days = "days_since(updated)"
+is_long = "_word_count > 1500"
+```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `max_scan_rows` | `10000` | Rows a single DQL query may scan. |
+| `query_timeout` | `"5s"` | Time limit for a DQL query over the API. |
+| `max_auto_indexes` | `20` | Frontmatter fields KiwiFS may index automatically after they appear in `WHERE` or `SORT`. |
+| `custom_fields` | `{}` | Computed fields available in every query, defined as DQL expressions. |
+
+See [DQL](/concepts/dql).
+
+### Similarity profiles
+
+Named nearest-neighbour searches over frontmatter, served by `GET /api/kiwi/similar` and the `kiwi_similar` MCP tool.
+
+```toml .kiwi/config.toml
+[[similarity.profiles]]
+name = "dataset"
+match = { kind = "dataset" }
+path_prefix = "datasets/"
+numeric = ["stats.rows", "stats.columns"]
+categorical = ["format", "license"]
+weights = { "license" = 3.0 }
+```
+
+| Key | Description |
+| --- | --- |
+| `name` | Profile name to pass as `profile`. |
+| `match` | Only pages whose frontmatter equals these values are candidates. |
+| `path_prefix` | Optional subtree filter. |
+| `numeric` | Fields compared by range-scaled difference. Dotted paths reach into nested frontmatter. |
+| `categorical` | Fields compared by equality. |
+| `weights` | Per-field multipliers. Unlisted fields weigh `1`. |
+
+### Memory
+
+```toml .kiwi/config.toml
+[memory]
+episodes_path_prefix = "episodes/"
+```
+
+Pages under `episodes_path_prefix` (default `episodes/`) are treated as episodic when their frontmatter does not say. See [Episodic memory](/concepts/episodic-memory).
+
+## Web UI
+
+```toml .kiwi/config.toml
+[ui]
+theme_locked = false
+start_page = "welcome"
+custom_css = ".kiwi/custom.css"
+keybindings_file = ".kiwi/keybindings.json"
+typed_fences = true
+```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `theme_locked` | `false` | Stop readers from switching between light and dark themes. |
+| `start_page` | `"welcome"` | First view when no page is in the URL: `welcome`, `recent`, `dashboard`, or a page path such as `index.md`. |
+| `custom_css` | `".kiwi/custom.css"` | Stylesheet loaded after the built-in styles. |
+| `keybindings_file` | `".kiwi/keybindings.json"` | JSON file of shortcut overrides. |
+| `typed_fences` | `true` | Render bare widget fences such as ` ```tree ` as widgets. Set `false` if existing pages use those tags for something else. The `kiwi-` spellings always render. |
+| `typed_fence_tags` | all | Render only these bare widget tags, for example `["array", "matrix"]`. |
+
+<AccordionGroup>
+  <Accordion title="Feature switches and toolbar">
+    Every switch defaults to `true`. Set one to `false` to hide that part of the web UI, for example for a read-only public site.
+
+    ```toml .kiwi/config.toml
+    [ui.features]
+    edit = false
+    history = false
+    publish = false
+    graph = true
+    kanban = true
+    canvas = true
+    whiteboard = true
+    timeline = true
+    bases = true
+    data_sources = true
+
+    [ui.toolbar]
+    views = ["graph", "bases", "kanban"]
+    ```
+
+    `[ui.toolbar] views` picks which view buttons appear in the header and in what order: `graph`, `bases`, `canvas`, `whiteboard`, `timeline`, `kanban`, and `data`. An empty list hides them all.
+  </Accordion>
+  <Accordion title="Sidebar">
+    ```toml .kiwi/config.toml
+    [ui.sidebar]
+    pinned = ["index.md"]
+    hidden = ["archive/"]
+
+    [[ui.sidebar.sections]]
+    label = "Guides"
+    paths = ["getting-started/", "guides/"]
+    ```
+  </Accordion>
+  <Accordion title="Frontmatter chips">
+    ```toml .kiwi/config.toml
+    [ui.tags]
+    banner = ["status", "difficulty", "tags"]
+    hide = ["internal_id"]
+
+    [ui.tags.colors]
+    easy = "emerald"
+    google = "#4285F4"
+    ```
+
+    `banner` lists the frontmatter keys shown as chips under the page title. It defaults to `["tags"]`, and an empty list hides chips. Colors are token names such as `emerald`, `amber`, `red`, or `blue`, or hex values.
+  </Accordion>
+  <Accordion title="Branding">
+    ```toml .kiwi/config.toml
+    [ui.branding]
+    name = "Team Wiki"
+    logo_url = "assets/logo.png"
+    favicon_url = "assets/favicon.svg"
+    welcome_title = "Welcome"
+    welcome_message = "Start with the onboarding guide."
+    ```
+
+    Relative paths are served from the knowledge base. Unset keys keep the KiwiFS defaults.
+  </Accordion>
+  <Accordion title="Keyboard shortcuts">
+    ```toml .kiwi/config.toml
+    [ui.keybindings]
+    search = "mod+j"
+    toggle_sidebar = "mod+b"
+    ```
+
+    `mod` is Cmd on macOS and Ctrl elsewhere. Actions include `search`, `new_page`, `toggle_editor`, `save`, `toggle_sidebar`, `graph`, `toggle_bases`, `toggle_timeline`, `toggle_kanban`, `toggle_mode`, `shortcuts_help`, `undo`, `focus_tree_filter`, and `close_overlay`.
+  </Accordion>
+  <Accordion title="Editor slash commands">
+    Add entries to the editor's `/` menu that insert a template page:
+
+    ```toml .kiwi/config.toml
+    [[ui.editor.slash_commands]]
+    id = "incident"
+    label = "Incident report"
+    icon = "siren"
+    description = "Insert the incident template"
+    template = ".kiwi/templates/incident.md"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+See [Web UI](/guides/web-ui).
+
+## Assets
+
+```toml .kiwi/config.toml
+[assets]
+max_file_size = "25MB"
+allowed_types = ["image/png", "image/jpeg", "application/pdf"]
+```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `max_file_size` | `"100MB"` | Largest upload accepted. |
+| `allowed_types` | common types | MIME types accepted for upload. The default covers PNG, JPEG, GIF, WebP, SVG, AVIF, HEIC, HEIF, BMP, MP4, WebM, Ogg, QuickTime, MP3, WAV, FLAC, AAC, M4A, and PDF. |
+
+## Import
+
+Settings for [Airbyte-based imports](/import/airbyte).
+
+```toml .kiwi/config.toml
 [import]
 airbyte_api_key = "${AIRBYTE_API_KEY}"
 airbyte_workspace_id = "${AIRBYTE_WORKSPACE_ID}"
@@ -343,66 +723,62 @@ image_prefix = "airbyte/"
 pull_policy = "if-not-present"
 ```
 
-| Field | Default | Description |
+| Key | Default | Description |
 | --- | --- | --- |
-| `docker_host` | `$DOCKER_HOST` | Docker socket for local Airbyte connectors |
-| `prefer_airbyte` | `true` | Route network sources through Airbyte when available |
-| `image_prefix` | `airbyte/` | Prefix for connector Docker images |
-| `pull_policy` | `if-not-present` | Image pull policy: `always`, `if-not-present`, or `never` |
+| `airbyte_api_key` | unset | Airbyte Cloud API key, for running connectors without local Docker. |
+| `airbyte_workspace_id` | unset | Airbyte Cloud workspace. |
+| `docker_host` | `$DOCKER_HOST` | Docker socket for local connectors. |
+| `prefer_airbyte` | `true` | Route network sources through Airbyte even when a built-in connector exists. |
+| `image_prefix` | `"airbyte/"` | Prefix for connector images, for example a private registry. |
+| `pull_policy` | `"if-not-present"` | `always`, `if-not-present`, or `never`. |
 
-See [Airbyte import](/import/airbyte) and [Import connections](/import/connections).
+See also [Import connections](/import/connections).
 
 ## Tracing
 
-Query tracing is enabled by default and writes structured JSON records of what KiwiFS did during each request.
+KiwiFS writes a structured JSON record of what each REST or MCP request did: files read, searches run, and writes made.
 
-```toml
+```toml .kiwi/config.toml
 [tracing]
-enabled = true            # default true; set false to suppress
-output = "stderr"         # "stderr" (default) or "file"
+enabled = true
+output = "file"
 file = "/var/log/kiwifs-trace.jsonl"
 ```
 
-## Space visibility
+| Key | Default | Description |
+| --- | --- | --- |
+| `enabled` | `true` | Set `false` to turn tracing off. |
+| `output` | `"stderr"` | `stderr` or `file`. |
+| `file` | unset | Path for `output = "file"`. Falls back to stderr if unset or not writable. |
 
-Control whether a space is accessible without authentication.
+## Environment variables
 
-```toml
-[space]
-name = "docs"            # primary space name in the selector and API routes
-visibility = "private"   # "private" (default), "unlisted", or "public"
-```
+| Variable | Used by | Effect |
+| --- | --- | --- |
+| `KIWI_PUBLIC_URL` | `serve` | Overrides `[server] public_url`. |
+| `KIWI_BACKUP_REMOTE` | `serve` | Overrides `[backup] remote`. |
+| `KIWI_BACKUP_INTERVAL` | `serve` | Overrides `[backup] interval`. |
+| `KIWI_BACKUP_REBASE_BEFORE_PUSH` | `serve` | Overrides `[backup] rebase_before_push`. Accepts `true`, `1`, `yes`, or `on`. |
+| `KIWI_API_KEY` | `connect`, `rules`, `refactor` | Default API key when talking to a remote server. |
+| `KIWIFS_API_KEY`, `KIWIFS_BEARER`, `KIWIFS_BASIC_PASS` | `mount` | Credentials for the FUSE client. |
+| `DOCKER_HOST` | `import` | Docker socket for Airbyte connectors, unless `[import] docker_host` is set. |
+| `NOTION_API_KEY`, `AIRTABLE_API_KEY`, `CONFLUENCE_BASE_URL`, `CONFLUENCE_EMAIL`, `CONFLUENCE_API_TOKEN` | `import` | Credentials for those import sources when not passed as flags. |
 
-`name` labels the primary space. Unset, it is `"default"`. Browser URLs stay `/page/{path}` for the primary space and use `/s/{space}/page/{path}` for others.
+Any other variable can be pulled into the config with `${NAME}`.
 
-| Value | Behavior |
-| --- | --- |
-| `private` | Requires authentication for all access |
-| `unlisted` | Accessible to anyone with the URL, not listed publicly |
-| `public` | Browseable and searchable without authentication |
+## Related
 
-Visibility can also be changed at runtime via `PUT /api/kiwi/space/visibility`.
-
-## Multi-space
-
-Run multiple independent knowledge bases from one server.
-
-```toml
-[[spaces]]
-name = "engineering"
-root = "/data/eng-wiki"
-visibility = "private"
-
-[[spaces]]
-name = "product"
-root = "/data/product-wiki"
-visibility = "unlisted"
-```
-
-Each space gets its own API under `/api/kiwi/{name}/...` or via the `X-Kiwi-Space` header. Administrators use `/api/spaces` to create and list spaces.
-
-<Tip>
-You can also add spaces via CLI flags: `kiwifs serve --space eng=/data/eng --space product=/data/product`.
-</Tip>
-
-See [Multi-space](/concepts/multi-space) and [Spaces API](/api/spaces).
+<CardGroup cols={2}>
+  <Card title="CLI reference" icon="terminal" href="/cli/commands">
+    `kiwifs serve` flags and every other command.
+  </Card>
+  <Card title="Optional features" icon="toggle-on" href="/concepts/optional-features">
+    What is off by default and how to turn it on.
+  </Card>
+  <Card title="Auth tokens" icon="key" href="/guides/auth-tokens">
+    Create scoped API keys.
+  </Card>
+  <Card title="Deploy with Docker" icon="docker" href="/deploy/docker">
+    Pass config and secrets to a container.
+  </Card>
+</CardGroup>

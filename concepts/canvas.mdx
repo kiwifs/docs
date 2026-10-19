@@ -1,44 +1,121 @@
 ---
 title: "Canvas files"
-description: "JSON Canvas files for spatial diagrams — nodes, edges, interactive Flow rendering, and graph-assisted layout."
+sidebarTitle: "Canvas"
+description: "JSON Canvas diagrams of cards, pages, links, and groups that you edit in the web UI or build from the wiki link graph."
 icon: "diagram-project"
 ---
 
-Canvas files are JSON documents with a **`.canvas.json`** suffix. They store `nodes` and `edges` for infinite-canvas layouts in the web UI and for agents via API or MCP.
+A canvas is a spatial diagram stored as a **`.canvas.json`** file. It holds cards, references to pages, web links, and groups, joined by labeled edges. Use a canvas to map a system, plan a project, or lay out how a set of pages relate.
+
+Canvas files follow the open [JSON Canvas 1.0](https://jsoncanvas.org) format used by Obsidian, so you can move them between tools. They are ordinary files: every save goes through the write pipeline, gets a git commit, and broadcasts a `write` event.
 
 ## File format
 
-Each canvas is JSON with top-level `nodes` and `edges` arrays. Node and edge objects carry `id`, `type`, optional coordinates (`x`, `y`), and a `data` map for extensibility.
+The document has two top-level arrays, `nodes` and `edges`. Both are required.
 
-Common node types include file references, text labels, link arrows, and grouped regions.
+```json canvases/auth-flow.canvas.json
+{
+  "nodes": [
+    { "id": "n1", "type": "text", "x": 0, "y": 0, "width": 260, "height": 120,
+      "text": "## Login\nUser submits credentials" },
+    { "id": "n2", "type": "file", "x": 360, "y": 0, "width": 260, "height": 120,
+      "file": "concepts/auth.md", "color": "4" },
+    { "id": "n3", "type": "link", "x": 360, "y": 200, "width": 260, "height": 80,
+      "url": "https://datatracker.ietf.org/doc/html/rfc6749" },
+    { "id": "g1", "type": "group", "x": -40, "y": -60, "width": 700, "height": 380,
+      "text": "Auth" }
+  ],
+  "edges": [
+    { "id": "e1", "fromNode": "n1", "toNode": "n2", "fromSide": "right", "toSide": "left",
+      "label": "validates with" }
+  ]
+}
+```
+
+| Node `type` | Content field | Renders as |
+| --- | --- | --- |
+| `text` | `text` (markdown) | An editable card |
+| `file` | `file` (path in the knowledge base) | A card that opens the page |
+| `link` | `url` | A card for an external URL |
+| `group` | `text` (title) | A region that visually groups other nodes |
+
+Every node has `id`, `type`, `x`, `y`, `width`, and `height`. `color` is optional: a preset `"1"` through `"6"` (red, orange, yellow, green, cyan, purple) or a hex value. Edges use `fromNode` and `toNode`, plus optional `fromSide`, `toSide` (`top`, `right`, `bottom`, `left`), `label`, and `color`. The API checks only that `nodes` and `edges` are arrays and keeps any extra fields you add. Saving from the web UI editor keeps only the fields listed here.
 
 ## Web UI
 
-Click **Canvas** in the toolbar to open the canvas hub. You can create, rename, and switch between canvases stored under `canvases/`. The interactive **Flow** renderer lets you drag nodes, pan and zoom, and edit the diagram visually. Changes persist to the underlying `.canvas.json` file.
+<Steps>
+  <Step title="Open the canvas hub">
+    Click **Canvas** in the toolbar. The hub lists every `.canvas.json` file and reopens the last one you used.
+  </Step>
+  <Step title="Create or pick a canvas">
+    Click **New canvas** and enter a name. KiwiFS creates `canvases/{name}.canvas.json`. Use the dropdown to switch canvases.
+  </Step>
+  <Step title="Edit">
+    Use **Add** to place a text card, link card, or group, or double-click empty space. Drag a page from the file tree onto the canvas to add a file card. Paste a URL to add a link card. Drag between node handles to connect them.
+  </Step>
+</Steps>
 
-## Graph-assisted layout
+Changes save automatically about 1.5 seconds after you stop editing. You can also press `Ctrl+S` (`Cmd+S` on macOS). Other shortcuts: `Ctrl+Z` to undo, `Ctrl+Shift+Z` to redo, `Ctrl+A` to select all, and `Delete` or `Backspace` to remove the selection. Right-click a node to change its color. **Auto-layout** in the canvas toolbar tidies node positions.
 
-`POST /api/kiwi/canvas/generate` builds a new canvas from the **wiki-link graph** using layout modes such as `hierarchical`, `radial`, `force`, or `circular`. Restrict to a folder prefix so only part of the graph is laid out.
+Opening a `.canvas.json` file from the file tree opens it in the canvas editor. To show a canvas inside a page, embed it with `![[canvases/auth-flow.canvas.json]]`.
 
-For canvases that already exist, `POST /api/kiwi/canvas/auto-layout?path=...` repositions nodes using Graphviz engines (`dot`, `neato`, `fdp`, `circo`).
+## Build canvases with the API
 
-## Incremental edits
+<AccordionGroup>
+  <Accordion title="Generate a canvas from the link graph">
+    `POST /api/kiwi/canvas/generate` creates a canvas with one file node per page and one edge per [wiki link](/concepts/wiki-links). Choose a `layout` of `hierarchical` (default), `radial`, `force`, or `circular`. Set `folder` to a path prefix to limit the graph. Nodes are colored by link community unless you pass `"colorize": false`.
 
-Agents can apply batched operations with `PATCH /api/kiwi/canvas` instead of rewriting the full JSON document. See the [Canvas REST API](/api/canvas) for supported `op` values.
+    ```bash Terminal
+    curl -X POST 'http://localhost:3333/api/kiwi/canvas/generate' \
+      -H 'Content-Type: application/json' \
+      -d '{"path": "canvases/concepts-map.canvas.json", "layout": "radial", "folder": "concepts/"}'
+    ```
+  </Accordion>
+  <Accordion title="Patch nodes and edges">
+    `PATCH /api/kiwi/canvas?path=...` applies a batch of `add_node`, `update_node`, `remove_node`, `add_edge`, `update_edge`, and `remove_edge` operations as one commit, so agents never rewrite the whole document. Patching a missing file starts from an empty canvas.
 
-## Related documentation
+    ```bash Terminal
+    curl -X PATCH 'http://localhost:3333/api/kiwi/canvas?path=canvases/auth-flow.canvas.json' \
+      -H 'Content-Type: application/json' \
+      -H 'X-Actor: agent:architect' \
+      -d '{"operations": [
+        {"op": "add_node", "node": {"id": "n4", "type": "text", "x": 0, "y": 200, "width": 260, "height": 80, "text": "MFA challenge"}},
+        {"op": "add_edge", "edge": {"id": "e2", "fromNode": "n1", "toNode": "n4"}}
+      ]}'
+    ```
+  </Accordion>
+  <Accordion title="Query a canvas">
+    `GET /api/kiwi/canvas/query` filters nodes by `type`, substring `q`, or nodes `connected` to a given node ID, without loading the whole document.
+  </Accordion>
+  <Accordion title="Auto-layout an existing canvas">
+    `POST /api/kiwi/canvas/auto-layout?path=...` repositions nodes with a Graphviz engine: `dot` (default), `neato`, `fdp`, or `circo`. Only `x` and `y` change.
+  </Accordion>
+</AccordionGroup>
+
+Agents connected over MCP use `kiwi_canvas_list`, `kiwi_canvas_read`, and `kiwi_canvas_write`.
+
+## Canvas or whiteboard
+
+| | Canvas | [Whiteboard](/concepts/whiteboard) |
+| --- | --- | --- |
+| File | `.canvas.json` | `.excalidraw.md` |
+| Content | Structured cards, page references, and edges | Freeform shapes, arrows, and sketches |
+| Agent-friendly | Yes: typed nodes, patch and query endpoints | Read and write as a markdown file |
+| Best for | Concept maps, architecture, link-graph views | Brainstorming and hand-drawn diagrams |
+
+## Related
 
 <CardGroup cols={2}>
   <Card title="Canvas REST API" icon="diagram-project" href="/api/canvas">
-    List, read, write, patch, query, and auto-layout.
+    List, read, write, patch, query, generate, and auto-layout.
   </Card>
   <Card title="Whiteboard" icon="pen" href="/concepts/whiteboard">
-    Excalidraw diagrams in markdown files.
+    Excalidraw drawings stored as markdown.
   </Card>
-  <Card title="MCP" icon="plug" href="/concepts/mcp">
-    `kiwi_canvas_list`, `kiwi_canvas_read`, `kiwi_canvas_write`.
+  <Card title="Wiki links" icon="link" href="/concepts/wiki-links">
+    The link graph that canvas generation reads.
   </Card>
   <Card title="Web UI" icon="window" href="/guides/web-ui">
-    Toolbar views including Canvas and Whiteboard.
+    Toolbar views, including Canvas and Whiteboard.
   </Card>
 </CardGroup>

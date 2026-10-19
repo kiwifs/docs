@@ -1,152 +1,306 @@
 ---
 title: "DQL"
-description: "A SQL-like query language for frontmatter metadata across your knowledge base."
+description: "Query frontmatter, kiwi-data records, and claims across your knowledge base with a Dataview-style language."
 icon: "database"
 ---
 
-DQL (DataView Query Language) lets you query frontmatter metadata across your entire knowledge base. It is inspired by Obsidian Dataview but runs server-side against the SQLite metadata index.
+DQL (Dataview Query Language) treats your frontmatter as a table. You ask for pages by folder, tag, or field value and get rows back. It is modeled on Obsidian Dataview but runs on the server against the SQLite index, so agents, scripts, and the web UI all get the same answer.
 
-## Query modes
-
-DQL supports four output modes.
-
-<CodeGroup>
-
-```sql TABLE
-TABLE title, status, priority FROM "concepts" WHERE status = "draft" SORT priority DESC
+```sql
+TABLE title, status, priority
+FROM "projects/"
+WHERE status = "active" AND priority >= 2
+SORT priority DESC
+LIMIT 20
 ```
 
-```sql LIST
-LIST FROM "reports"
-```
+<Note>
+DQL needs the default `sqlite` search engine. With `--search grep`, query endpoints return `501`.
+</Note>
 
-```sql COUNT
-COUNT FROM "entities"
-```
+## Run a query
 
-```sql DISTINCT
-DISTINCT author FROM "documents"
-```
+<Tabs>
+  <Tab title="CLI">
+    ```bash Terminal
+    kiwifs query 'TABLE title, status FROM "concepts/" WHERE status = "draft"'
+    kiwifs query 'LIST FROM #security' --format json
+    ```
 
-</CodeGroup>
+    Flags: `--format` (`table`, `list`, `json`, `count`), `--limit`, `--sort`, `--order`, `--root`.
+  </Tab>
+  <Tab title="REST">
+    ```bash Terminal
+    curl -G 'http://localhost:3333/api/kiwi/query' \
+      --data-urlencode 'q=TABLE title, status FROM "concepts/" WHERE status = "draft"'
+    ```
 
-- **TABLE** returns tabular results with the fields you specify.
-- **LIST** returns a flat list of matching page paths.
-- **COUNT** returns the number of matching pages.
-- **DISTINCT** returns unique values for a single field.
+    Returns `columns`, `rows`, `total`, and `has_more` as JSON. Add `format=table`, `list`, `count`, or `distinct` for rendered text, and `limit` or `offset` to page.
+  </Tab>
+  <Tab title="MCP">
+    Call `kiwi_query` with `query`, and optionally `format` (`table`, `list`, `json`) and `limit`.
+  </Tab>
+  <Tab title="In a page">
+    Embed a live table in any page with a `kiwi-query` fence:
+
+    ````markdown
+    ```kiwi-query
+    TABLE title, status FROM "concepts/" SORT _updated DESC
+    ```
+    ````
+  </Tab>
+</Tabs>
+
+## Query types
+
+The first word picks the shape of the result.
+
+| Type | Returns |
+| --- | --- |
+| `TABLE f1, f2 AS alias, ...` | One row per page with the listed columns |
+| `LIST [field]` | Page paths, optionally with one value each |
+| `COUNT` | The number of matching pages |
+| `DISTINCT field` | Each unique value of one field |
+| `CALENDAR date_field` | Pages keyed by a date field, for calendar views |
+| `TASK` | Markdown task items (`- [ ]`) from matching pages, with `text`, `completed`, `line`, `tags`, and `due` |
+| `JSON f1, f2, ...` | Like `TABLE`, shaped for programmatic use |
+
+Add `WITHOUT ID` after `TABLE` or `LIST` to drop the page path column.
 
 ## Clauses
 
+Clauses can appear in any order after the type. `WHERE` and `SORT` can repeat; repeated `WHERE` clauses are joined with `AND`.
+
 | Clause | Description |
-|---|---|
-| `FROM "path/"` | Scope the query to a directory. |
-| `WHERE` | Filter with boolean logic (`AND`, `OR`, `NOT`), comparison operators (`=`, `!=`, `>`, `<`, `>=`, `<=`), `CONTAINS`, and `MATCHES` (regex). |
-| `SORT field ASC\|DESC` | Sort results by a field. |
-| `GROUP BY field` | Group results by a field. |
-| `FLATTEN field` | Expand array fields into multiple rows. |
-| `LIMIT n` | Cap the number of results. |
-
-## Implicit fields
-
-Every page exposes these fields without any frontmatter:
-
-| Field | Description |
-|---|---|
-| `_path` | File path relative to the knowledge base root. |
-| `_updated` | Last modified timestamp. |
-| `_size` | File size in bytes. |
-| `_words` | Word count of the page body. |
+| --- | --- |
+| `FROM "folder/"` | Only pages under a folder |
+| `FROM #tag` | Only pages with a tag. Combine with `AND`, `OR`, and `-#tag` to exclude. |
+| `FROM RECORDS "kind" [IN "folder/"]` | One row per `kiwi-data` record instead of per page. See [Records](#records-and-claims). |
+| `FROM CLAIMS ["evidence"] [IN "folder/"]` | One row per claim directive. See [Records](#records-and-claims). |
+| `WHERE expr` | Filter rows |
+| `SORT field [ASC\|DESC]` | Order rows. Repeat for tie-breakers. |
+| `GROUP BY field` | Group rows by a field value |
+| `FLATTEN field` | Expand an array field into one row per element |
+| `LIMIT n` | Cap rows. Default `50`, maximum `200`. |
+| `OFFSET n` | Skip rows, for paging |
 
 ```sql
-TABLE _path, _words FROM "concepts" WHERE _words > 1000 SORT _words DESC
+LIST FROM #runbook AND -#deprecated SORT _updated DESC
+```
+
+## Fields
+
+A bare name reads a frontmatter key: `status` reads `status:`. Use dots for nested keys (`owner.team`) and backticks for names with spaces or other characters (`` `due date` ``). Hyphens are allowed in bare names, so `source-of-truth` and `missing-rate` work as written.
+
+### Implicit fields
+
+Every page has these, with or without frontmatter:
+
+| Field | Value |
+| --- | --- |
+| `_path` | Path from the knowledge base root, such as `concepts/auth.md` |
+| `_name` | File name, such as `auth.md` |
+| `_folder` | Containing folder, such as `concepts/` |
+| `_ext` | Extension, such as `.md` |
+| `_updated` | Last-modified timestamp |
+
+### Computed fields
+
+At index time, KiwiFS adds these keys to each page's indexed frontmatter. They are queryable like any other field and never written to your files.
+
+| Field | Value |
+| --- | --- |
+| `_word_count` | Words in the body |
+| `_link_count` | Outbound wiki links |
+| `_heading_count` | Headings |
+| `_backlink_count` | Pages that link here |
+| `_has_frontmatter` | Whether the page has frontmatter |
+| `_quality_score` | A page health score from `0` to `1` |
+| `_blocked` | `true` when a page in `blocked-by` is not `done` or `cancelled` |
+
+```sql
+TABLE _word_count, _backlink_count FROM "concepts/" WHERE _backlink_count = 0 SORT _word_count DESC
 ```
 
 ## Expressions
 
-DQL supports arithmetic, function calls, string interpolation, comparisons, and boolean logic inside `WHERE` and computed field definitions.
+`WHERE` clauses and `TABLE` columns accept expressions.
+
+| Kind | Syntax |
+| --- | --- |
+| Comparison | `=` or `==`, `!=` or `<>`, `<`, `>`, `<=`, `>=` |
+| Boolean | `AND` or `&&`, `OR` or `\|\|`, `NOT`, parentheses |
+| Pattern | `LIKE "auth%"`, `NOT LIKE` |
+| Set | `IN ("a", "b")`, `NOT IN (...)` |
+| Range | `BETWEEN 1 AND 5`, `NOT BETWEEN` |
+| Null | `IS NULL`, `IS NOT NULL` |
+| Literals | `"text"` or `'text'`, numbers, `true`, `false`, `null` |
+
+Keywords are case-insensitive. DQL has no arithmetic operators; use [custom computed fields](#custom-computed-fields) when you need a derived number.
 
 ```sql
-TABLE title, $.priority * 10 + len($.tags) AS score FROM "concepts" SORT score DESC
+TABLE title, owner FROM "incidents/"
+WHERE severity IN ("sev1", "sev2") AND resolved IS NULL AND opened >= days_ago(30)
 ```
 
-## Built-in functions
+## Functions
 
-DQL ships with 27 functions:
+Function names are case-insensitive.
 
 <AccordionGroup>
+  <Accordion title="Text">
+    | Function | Result |
+    | --- | --- |
+    | `lower(s)`, `upper(s)` | Case conversion |
+    | `length(field)` | Array length, or string length for scalars |
+    | `substring(s, start[, len])` | Part of a string (1-based) |
+    | `replace(s, from, to)` | Literal replace |
+    | `startswith(s, prefix)`, `endswith(s, suffix)` | Prefix and suffix tests |
+    | `matches(s, pattern)` | SQL `LIKE` pattern test with `%` and `_` wildcards |
+    | `regextest(pattern, s)` | Regular expression test |
+    | `regexreplace(s, pattern, replacement)` | Regular expression replace |
+  </Accordion>
+  <Accordion title="Dates">
+    | Function | Result |
+    | --- | --- |
+    | `now()` | The current UTC time |
+    | `date(s)` | Normalize to `YYYY-MM-DD` |
+    | `striptime(s)` | Drop the time part |
+    | `days_ago(n)` | The timestamp `n` days before now |
+    | `days_since(d)` | Days between `d` and now |
+    | `dateformat(d, format)` | Format with `strftime` codes such as `%Y-%m` |
+  </Accordion>
+  <Accordion title="Values and logic">
+    | Function | Result |
+    | --- | --- |
+    | `contains(field, value)` | `true` when an array field contains `value` |
+    | `default(v, fallback)` | `fallback` when `v` is null |
+    | `nonnull(v)` | `true` when `v` is not null |
+    | `choice(cond, a, b)` | `a` if `cond` is true, else `b` |
+    | `number(v)`, `string(v)` | Type conversion |
+    | `typeof(v)` | The value's type |
+    | `round(n[, digits])` | Rounding |
+  </Accordion>
+  <Accordion title="Aggregates">
+    `sum(f)`, `average(f)`, `min(f)`, `max(f)`, and `join(f, separator)` combine values across rows.
+  </Accordion>
+  <Accordion title="Linked pages">
+    `rollup(link_field, expr)` evaluates `expr` on every page the row links to and returns the results as an array.
 
-<Accordion title="Date and time">
-`now()`, `date()`, `duration()`, `days_since()`, `format()`
-</Accordion>
+    ```sql
+    TABLE title, rollup(related-notes, title) AS notes FROM "datasets/"
+    ```
 
-<Accordion title="String">
-`lower()`, `upper()`, `trim()`, `split()`, `join()`, `contains()`, `regextest()`
-</Accordion>
-
-<Accordion title="Math">
-`round()`, `floor()`, `ceil()`, `abs()`, `min()`, `max()`
-</Accordion>
-
-<Accordion title="Collection">
-`len()`, `sum()`, `avg()`, `first()`, `last()`, `sort()`, `reverse()`, `unique()`
-</Accordion>
-
-<Accordion title="Metadata">
-`meta()` — access implicit fields programmatically.
-</Accordion>
-
+    The first argument names a typed link field listed in `[links] typed_fields`. Use `links` or `outlinks` to follow every outbound wiki link instead. Traversal is one hop, and a page with no matching links gets an empty array.
+  </Accordion>
 </AccordionGroup>
 
-## CLI usage
+## Records and claims
 
-Run a DQL query from the command line:
+Frontmatter holds one set of values per page. When a page holds a table of values, put it in a `kiwi-data` block and query each record as its own row.
 
-```bash
-kiwifs query "TABLE title, status FROM 'concepts' WHERE status = 'draft'"
+````markdown datasets/housing.md
+```kiwi-data
+kind: dataset-schema
+records:
+  - name: price
+    dtype: float
+    missing-rate: 0.116
+  - name: id
+    dtype: int
+    missing-rate: 0
+```
+````
+
+```sql
+TABLE dataset, name, dtype, missing-rate
+FROM RECORDS "dataset-schema" IN "datasets/"
+WHERE missing-rate > 0.1
+SORT missing-rate DESC
 ```
 
-## REST API
+Field names resolve against the record first, then fall back to the page's frontmatter. Force one side with `record.field` or `page.field`. Record rows add `_kind`, `_block` (which block on the page), and `_record` (position in the block).
 
-Run a DQL query over HTTP:
+`FROM CLAIMS` works the same way over `:::claim` directives, one row per claim, with fields such as `text`, `evidence`, `confidence`, and `source`. The evidence class is optional:
 
+```sql
+TABLE text, confidence FROM CLAIMS "inferred" WHERE confidence < 0.7
+TABLE text FROM CLAIMS WHERE source IS NULL
 ```
-GET /api/kiwi/query?q=TABLE title, status FROM "concepts" WHERE status = "draft"
-```
+
+See [Widgets](/concepts/widgets) for the `kiwi-data` and `:::claim` syntax.
 
 ## Aggregation
 
-Use the `aggregate` command to group and summarize metadata:
+Group pages by a field and compute summaries without writing a query.
 
-```bash
-kiwifs aggregate --group status --calc count,avg:priority
+<CodeGroup>
+
+```bash CLI
+kiwifs aggregate --group status --calc count,avg:priority --path projects/
 ```
 
-Supported aggregation functions: `count`, `avg`, `sum`, `min`, `max`. You can group by any frontmatter field.
+```bash REST
+curl 'http://localhost:3333/api/kiwi/query/aggregate?group_by=status&calc=count,avg:priority&path_prefix=projects/'
+```
+
+</CodeGroup>
+
+Calculations are `count`, `avg:field`, `sum:field`, `min:field`, and `max:field`. Narrow the input with a DQL `where` filter. Over MCP, call `kiwi_aggregate`.
 
 ## Computed views
 
-A markdown file with `kiwi-view: true` in its frontmatter becomes a computed view. KiwiFS auto-refreshes the file body from a DQL query embedded in the frontmatter.
+A computed view is a markdown file whose body is generated from a query. Set `kiwi-view: true` and `kiwi-query` in its frontmatter:
 
-```yaml
+```markdown reports/drafts.md
 ---
+title: Open drafts
 kiwi-view: true
-query: "TABLE title, status FROM 'concepts' WHERE status = 'draft' SORT _updated DESC"
+kiwi-query: 'TABLE title, owner FROM "concepts/" WHERE status = "draft" SORT _updated DESC'
+kiwi-format: table
 ---
+
+Notes above the generated block are kept.
 ```
 
-The body of this file is overwritten with live query results on every index update. Think of it as a saved query that always shows current data.
+KiwiFS renders the results between `<!-- kiwi:auto -->` and `<!-- /kiwi-view -->` markers and leaves the rest of the body alone. The file is rewritten only when the output changes. `kiwi-format` accepts `table` (default), `list`, `count`, `distinct`, `json`, and `task`.
 
-## Computed frontmatter fields
+Views regenerate when you read them through the API, and on demand:
 
-You can define virtual fields in `.kiwi/config.toml` that are evaluated at index time. These fields are queryable like any other frontmatter field.
-
-```toml
-[dataview]
-computed_fields.age_days = "days_since(updated)"
-computed_fields.is_long = "len(body) > 5000"
-computed_fields.priority_score = "priority * 10 + len(tags)"
+```bash Terminal
+kiwifs view create --name drafts --query 'TABLE title FROM "concepts/" WHERE status = "draft"'
+kiwifs view refresh reports/drafts.md
+kiwifs view list
 ```
 
-<Info>
-Computed fields are recalculated on every reindex. They do not modify your source files.
-</Info>
+Over REST, use `POST /api/kiwi/view/refresh` with `{"path": "reports/drafts.md"}`. Over MCP, call `kiwi_view_refresh`.
+
+## Custom computed fields
+
+Define your own derived fields in config. They are evaluated at index time from frontmatter, stored in the index alongside it, and queryable in DQL.
+
+```toml .kiwi/config.toml
+[dataview.custom_fields]
+age_days = "days_since(updated)"
+priority_score = "priority * 10 + len(tags)"
+is_long = "_word_count > 2000"
+```
+
+Expressions support `+`, `-`, `*`, `/`, comparisons, `&&`, `||`, and the functions `len`, `days_since`, `min`, `max`, and `abs`. Run `kiwifs reindex` after you change them. Your source files are never modified.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Metadata API" icon="code" href="/api/metadata">
+    Query, aggregate, and view refresh endpoints.
+  </Card>
+  <Card title="Bases views" icon="table" href="/concepts/bases-views">
+    Saved table and board views built on queries.
+  </Card>
+  <Card title="Search" icon="magnifying-glass" href="/concepts/search">
+    Find pages by text instead of fields.
+  </Card>
+  <Card title="Schemas" icon="shield-check" href="/concepts/schemas">
+    Keep the frontmatter you query consistent.
+  </Card>
+</CardGroup>

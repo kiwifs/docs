@@ -1,180 +1,234 @@
 ---
 title: "Versioning"
-description: "Git history, diff, and blame endpoints for tracking changes to your knowledge base."
+description: "File history, past versions, diffs, blame, and the workspace change feed."
 icon: "code-branch"
 ---
 
-Every write in KiwiFS creates a git commit. The versioning API exposes the full git history for any file, letting you view past versions, compare changes, and trace authorship.
+Every write in KiwiFS becomes a git commit, authored by the request's actor. These endpoints read that history: list a file's commits, fetch an old version, diff two versions, see who wrote each line, or follow every change across the workspace.
 
-## Version history
+All paths are relative to `http://localhost:3333/api/kiwi`. Blame and some diff modes depend on the versioning strategy; see [Versioning](/concepts/versioning).
 
-Get the git log for a specific file.
+## List file versions
+
+Returns the commits that touched a file, newest first.
+
+**`GET /versions`**
 
 <ParamField query="path" type="string" required>
-  File path relative to the knowledge root.
+  File path.
 </ParamField>
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/versions?path=concepts/auth.md'
 ```
 
-```json
-[
-  {
-    "hash": "e4f5g6h",
-    "author": "agent:docs-writer",
-    "message": "update concepts/auth.md",
-    "timestamp": "2026-04-25T14:30:00Z"
-  },
-  {
-    "hash": "a1b2c3d",
-    "author": "agent:importer",
-    "message": "create concepts/auth.md",
-    "timestamp": "2026-04-24T09:15:00Z"
-  }
-]
+<ResponseField name="path" type="string">The requested path.</ResponseField>
+<ResponseField name="versions" type="object[]">
+  <Expandable title="version">
+    <ResponseField name="hash" type="string">Full commit hash.</ResponseField>
+    <ResponseField name="date" type="string">Commit time, for example `2026-10-19 09:30:00 +0000`.</ResponseField>
+    <ResponseField name="author" type="string">The actor that made the write.</ResponseField>
+    <ResponseField name="message" type="string">Commit subject.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json Response
+{
+  "path": "concepts/auth.md",
+  "versions": [
+    {
+      "hash": "e4f5a6b7c8d9e4f5a6b7c8d9e4f5a6b7c8d9e4f5",
+      "date": "2026-10-19 09:30:00 +0000",
+      "author": "agent:docs-writer",
+      "message": "agent:docs-writer: concepts/auth.md"
+    },
+    {
+      "hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+      "date": "2026-10-12 14:05:11 +0000",
+      "author": "agent:importer",
+      "message": "agent:importer: bulk write — 3 files"
+    }
+  ]
+}
 ```
 
-## Read a specific version
+A file with no history returns an empty `versions` array.
 
-Retrieve the file content at a specific commit.
+## Read a past version
+
+Returns a file's content as it was at a given commit.
+
+**`GET /version`**
 
 <ParamField query="path" type="string" required>
-  File path relative to the knowledge root.
+  File path.
 </ParamField>
 <ParamField query="version" type="string" required>
-  Git commit hash (full or abbreviated).
+  Commit hash, full or abbreviated.
 </ParamField>
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/version?path=concepts/auth.md&version=a1b2c3d'
 ```
 
-```
+```markdown Response
 # Authentication
 
-Original content from the first commit...
+Original content from the first commit.
 ```
 
-## Diff between versions
+The body is `text/markdown`. Returns `404` if the file did not exist at that commit.
 
-Get a unified diff between two commits for a file.
+## Diff two versions
+
+Returns a unified diff of one file between two commits, as plain text.
+
+**`GET /diff`**
 
 <ParamField query="path" type="string" required>
-  File path relative to the knowledge root.
+  File path.
 </ParamField>
 <ParamField query="from" type="string" required>
-  Starting commit hash.
+  Older commit hash.
 </ParamField>
 <ParamField query="to" type="string" required>
-  Ending commit hash.
+  Newer commit hash.
+</ParamField>
+<ParamField query="granularity" type="string" default="line">
+  `line` for a unified diff or `word` for a word-level diff (`[-removed-]{+added+}` markers).
 </ParamField>
 
-```bash
-curl 'http://localhost:3333/api/kiwi/diff?path=concepts/auth.md&from=a1b2c3d&to=e4f5g6h'
+<CodeGroup>
+```bash Line diff
+curl 'http://localhost:3333/api/kiwi/diff?path=concepts/auth.md&from=a1b2c3d&to=e4f5a6b'
 ```
 
-```diff
+```bash Word diff
+curl 'http://localhost:3333/api/kiwi/diff?path=concepts/auth.md&from=a1b2c3d&to=e4f5a6b&granularity=word'
+```
+</CodeGroup>
+
+```diff Response
+diff --git a/concepts/auth.md b/concepts/auth.md
 --- a/concepts/auth.md
 +++ b/concepts/auth.md
 @@ -1,3 +1,5 @@
  # Authentication
 
--Original content from the first commit...
+-Original content from the first commit.
 +OAuth2 + JWT based authentication system.
 +
 +Supports refresh token rotation.
 ```
 
+Returns `400` for any other `granularity` and `501` when the versioning strategy cannot produce a word diff.
+
 ## Blame
 
-Get per-line git blame attribution for a file. Each line maps to the commit that last modified it.
+Returns the commit, author, and date that last changed each line of a file.
+
+**`GET /blame`**
 
 <ParamField query="path" type="string" required>
-  File path relative to the knowledge root.
+  File path.
 </ParamField>
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/blame?path=concepts/auth.md'
 ```
 
-```json
-[
-  {
-    "line": 1,
-    "content": "# Authentication",
-    "hash": "a1b2c3d",
-    "author": "agent:importer",
-    "timestamp": "2026-04-24T09:15:00Z"
-  },
-  {
-    "line": 3,
-    "content": "OAuth2 + JWT based authentication system.",
-    "hash": "e4f5g6h",
-    "author": "agent:docs-writer",
-    "timestamp": "2026-04-25T14:30:00Z"
-  }
-]
+<ResponseField name="path" type="string">The requested path.</ResponseField>
+<ResponseField name="lines" type="object[]">
+  <Expandable title="line">
+    <ResponseField name="line" type="integer">1-based line number.</ResponseField>
+    <ResponseField name="text" type="string">Line content.</ResponseField>
+    <ResponseField name="hash" type="string">Commit that last changed the line.</ResponseField>
+    <ResponseField name="author" type="string">Actor of that commit.</ResponseField>
+    <ResponseField name="date" type="string">Commit time (RFC 3339).</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json Response
+{
+  "path": "concepts/auth.md",
+  "lines": [
+    {"line": 1, "author": "agent:importer", "date": "2026-10-12T14:05:11Z", "hash": "a1b2c3d4...", "text": "# Authentication"},
+    {"line": 3, "author": "agent:docs-writer", "date": "2026-10-19T09:30:00Z", "hash": "e4f5a6b7...", "text": "OAuth2 + JWT based authentication system."}
+  ]
+}
 ```
 
+Blame needs the `git` strategy. Copy-on-write and `noop` strategies return `501`. An uncommitted file returns an empty `lines` array.
+
 <Tip>
-Use blame to trace which agent or user wrote each section. The `author` field corresponds to the `X-Actor` header set during the write.
+`author` is the `X-Actor` (or the key's actor) from the original write, so blame shows which agent wrote each section.
 </Tip>
 
 ## Change feed
 
-Get a paginated feed of all changes across the knowledge base since a given commit. Useful for syncing external systems or building audit logs.
+Lists recent commits across the whole workspace, newest first. Use it to sync external systems: poll with the last hash you saw, or long-poll to wait for the next change.
 
-```http
-GET /api/kiwi/changes
-```
+**`GET /changes`**
 
 <ParamField query="since" type="string">
-  Git commit hash to start from. Omit to get the most recent changes.
+  Commit hash. Returns only commits after it. Omit to get the latest commits.
 </ParamField>
 <ParamField query="limit" type="integer" default="50">
-  Max changes to return (capped at 500).
+  Maximum changes to return, up to 500.
+</ParamField>
+<ParamField query="feed" type="string">
+  Set to `longpoll` to hold the request open until a change arrives when there are none yet.
+</ParamField>
+<ParamField query="timeout" type="string" default="30s">
+  How long a long-poll waits, as a Go duration. Capped at `120s`. Returns an empty list on timeout.
 </ParamField>
 
-```bash
+<CodeGroup>
+```bash Latest changes
 curl 'http://localhost:3333/api/kiwi/changes?limit=10'
 ```
 
-```json
+```bash Wait for the next change
+curl 'http://localhost:3333/api/kiwi/changes?since=e4f5a6b7c8d9&feed=longpoll&timeout=60s'
+```
+</CodeGroup>
+
+<ResponseField name="changes" type="object[]">
+  <Expandable title="change">
+    <ResponseField name="seq" type="string">Commit hash.</ResponseField>
+    <ResponseField name="path" type="string">Path changed. Empty for bulk writes.</ResponseField>
+    <ResponseField name="action" type="string">`write`, `delete`, or `rename`.</ResponseField>
+    <ResponseField name="actor" type="string">Commit author.</ResponseField>
+    <ResponseField name="timestamp" type="string">Commit time (RFC 3339).</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="last_seq" type="string">Hash of the newest change in this response. Pass it as `since` next time. Empty when there are no changes.</ResponseField>
+
+```json Response
 {
   "changes": [
-    {"seq": 1, "path": "concepts/auth.md", "action": "write", "actor": "agent:docs-writer", "timestamp": "2026-05-04T12:00:00Z"},
-    {"seq": 2, "path": "concepts/billing.md", "action": "delete", "actor": "agent:cleanup", "timestamp": "2026-05-04T12:01:00Z"}
+    {"seq": "e4f5a6b7...", "path": "concepts/billing.md", "action": "delete", "actor": "agent:cleanup", "timestamp": "2026-10-19T12:01:00Z"},
+    {"seq": "d3e4f5a6...", "path": "concepts/auth.md", "action": "write", "actor": "agent:docs-writer", "timestamp": "2026-10-19T12:00:00Z"}
   ],
-  "last_seq": "e4f5g6h..."
+  "last_seq": "e4f5a6b7..."
 }
 ```
 
-Pass `last_seq` as the `since` parameter on the next request to paginate forward.
+Returns `400` with `unknown sequence` when `since` is not a known commit, and `503` if the long-poll subscriber limit is reached. For a push stream instead of polling, use [Server-Sent Events](/concepts/real-time-events).
 
----
+## Related
 
-## Optimistic locking with ETag
-
-The versioning system powers optimistic locking. When you read a file, the response includes an `ETag` header with the current git blob SHA. Pass this value in the `If-Match` header on writes to detect concurrent modifications.
-
-```bash
-# 1. Read the file and capture the ETag
-ETAG=$(curl -sI 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
-  | grep -i etag | awk '{print $2}' | tr -d '\r"')
-
-# 2. Write with If-Match to prevent conflicts
-curl -X PUT 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
-  -H "Content-Type: text/markdown" \
-  -H "X-Actor: agent:updater" \
-  -H "If-Match: $ETAG" \
-  -d '# Authentication (updated)
-
-Revised content.'
-```
-
-If another write occurred between your read and write, you receive a `409 Conflict` response:
-
-```json
-{"error": "conflict: file was modified since your last read"}
-```
+<CardGroup cols={2}>
+  <Card title="Optimistic concurrency" icon="lock" href="/api/overview#optimistic-concurrency">
+    Use ETags and `If-Match` to avoid lost updates.
+  </Card>
+  <Card title="Versioning concepts" icon="code-branch" href="/concepts/versioning">
+    Git, copy-on-write, and noop strategies.
+  </Card>
+  <Card title="Real-time events" icon="bolt" href="/concepts/real-time-events">
+    Subscribe to changes over SSE.
+  </Card>
+  <Card title="Drafts" icon="code-pull-request" href="/api/drafts">
+    Stage changes on a branch.
+  </Card>
+</CardGroup>

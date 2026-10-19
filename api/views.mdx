@@ -1,54 +1,206 @@
 ---
 title: "Views (Bases)"
-description: "List, save, delete, and execute saved DQL views stored in .kiwi/views."
+description: "List, save, delete, and run saved DQL views stored in .kiwi/views."
 icon: "table"
 ---
 
-Base path: `http://localhost:3333/api/kiwi`.
+A view (shown as a Base in the web UI) is a saved DQL query plus display settings: layout, columns, filters, sort, and grouping. Each view is a JSON file at `.kiwi/views/{name}.json`, so you can edit it on disk or through these endpoints.
+
+All paths are relative to `http://localhost:3333/api/kiwi`. See [Bases and views](/concepts/bases-views) for how the web UI renders them and [DQL](/concepts/dql) for query syntax.
+
+View names must start with a letter or digit and contain only letters, digits, spaces, hyphens, and underscores.
+
+## The view object
+
+<ResponseField name="name" type="string">View name. Always matches the file name and URL.</ResponseField>
+<ResponseField name="query" type="string">DQL query, for example `TABLE status, owner FROM "tasks" WHERE status != "done"`.</ResponseField>
+<ResponseField name="layout" type="string">`table`, `list`, `calendar`, or `kanban`.</ResponseField>
+<ResponseField name="columns" type="object[]">
+  Optional column settings.
+  <Expandable title="column">
+    <ResponseField name="property" type="string">Field shown in this column.</ResponseField>
+    <ResponseField name="label" type="string">Header text.</ResponseField>
+    <ResponseField name="formula" type="string">Computed value, using `+ - * /`, `length()`, `round()`, and `if()` over row fields. The result is written into `property`.</ResponseField>
+    <ResponseField name="summary" type="string">Footer aggregate: `sum`, `avg`, `count`, `min`, or `max`.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="filters" type="object[]">
+  Optional UI filters, each with `field`, `operator` (`=`, `!=`, `>`, `<`, `contains`, `in`), and `value`.
+</ResponseField>
+<ResponseField name="sort" type="object[]">
+  Optional sort keys, each with `field` and `order` (`asc` or `desc`).
+</ResponseField>
+<ResponseField name="group_by" type="string">Optional field to group rows by.</ResponseField>
 
 ## List views
 
-```http
-GET /views
+Returns every view in `.kiwi/views/`.
+
+**`GET /views`**
+
+```bash
+curl 'http://localhost:3333/api/kiwi/views'
 ```
 
-```json
-{ "views": [{ "name": "open-tasks", "query": "...", "layout": "table" }] }
+```json Response
+{
+  "views": [
+    {
+      "name": "open-tasks",
+      "query": "TABLE status, owner, due FROM \"tasks\" WHERE status != \"done\"",
+      "layout": "table",
+      "sort": [{"field": "due", "order": "asc"}]
+    }
+  ]
+}
 ```
 
-## Get or save a view
+## Get a view
 
-```http
-GET /views/:name
+Returns one view object.
+
+**`GET /views/:name`**
+
+<ParamField path="name" type="string" required>
+  View name.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/views/open-tasks'
 ```
 
-Returns the full `View` object (`name`, `query`, `layout`, optional `columns`, `filters`, `sort`, `group_by`).
+Returns `404` if the view does not exist or the name is invalid.
 
-```http
-PUT /views/:name
-Content-Type: application/json
+## Save a view
+
+Creates or replaces a view. The body is a view object; `name` is taken from the URL.
+
+**`PUT /views/:name`**
+
+<ParamField path="name" type="string" required>
+  View name.
+</ParamField>
+<ParamField body="query" type="string" required>
+  DQL query.
+</ParamField>
+<ParamField body="layout" type="string">
+  `table`, `list`, `calendar`, or `kanban`.
+</ParamField>
+<ParamField body="columns" type="object[]">
+  Column settings. See [the view object](#the-view-object).
+</ParamField>
+<ParamField body="filters" type="object[]">
+  UI filters.
+</ParamField>
+<ParamField body="sort" type="object[]">
+  Sort keys.
+</ParamField>
+<ParamField body="group_by" type="string">
+  Grouping field.
+</ParamField>
+
+```bash
+curl -X PUT 'http://localhost:3333/api/kiwi/views/open-tasks' \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "TABLE status, owner, estimate, spent FROM \"tasks\" WHERE status != \"done\"",
+    "layout": "table",
+    "columns": [
+      {"property": "remaining", "label": "Remaining", "formula": "estimate - spent"}
+    ],
+    "sort": [{"field": "status", "order": "asc"}]
+  }'
 ```
 
-Body is a `View` JSON object. The server forces `name` to match the URL parameter.
+```json Response
+{
+  "status": "saved",
+  "view": {
+    "name": "open-tasks",
+    "query": "TABLE status, owner, estimate, spent FROM \"tasks\" WHERE status != \"done\"",
+    "layout": "table",
+    "columns": [{"property": "remaining", "label": "Remaining", "formula": "estimate - spent"}],
+    "sort": [{"field": "status", "order": "asc"}]
+  }
+}
+```
+
+<Note>
+Views are config, not pages. Saving or deleting a view writes `.kiwi/views/` directly and does not create a git commit.
+</Note>
 
 ## Delete a view
 
-```http
-DELETE /views/:name
+Removes a view. Deleting a view that does not exist still succeeds.
+
+**`DELETE /views/:name`**
+
+<ParamField path="name" type="string" required>
+  View name.
+</ParamField>
+
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/views/open-tasks'
 ```
 
-Returns `{ "status": "deleted" }`.
+```json Response
+{"status": "deleted"}
+```
 
 ## Execute a view
 
-```http
-GET /views/:name/execute?limit=50&offset=0
+Runs the view's DQL query, fills in formula columns, and returns the rows.
+
+**`GET /views/:name/execute`**
+
+<ParamField path="name" type="string" required>
+  View name.
+</ParamField>
+<ParamField query="limit" type="integer" default="50">
+  Maximum rows.
+</ParamField>
+<ParamField query="offset" type="integer" default="0">
+  Rows to skip.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/views/open-tasks/execute?limit=50&offset=0'
 ```
 
-Runs the view's DQL query through the Dataview executor, applies optional column formulas, and returns the query result payload (rows plus metadata from the executor).
+<ResponseField name="columns" type="string[]">`_path` followed by the queried fields (no `_path` with `WITHOUT ID`).</ResponseField>
+<ResponseField name="rows" type="object[]">One object per page, keyed by column. Includes `_path`, `path`, and any formula columns.</ResponseField>
+<ResponseField name="total" type="integer">Rows in this response, or `-1` when `has_more` is `true`.</ResponseField>
+<ResponseField name="has_more" type="boolean">Whether more rows exist past this page.</ResponseField>
+<ResponseField name="groups" type="object[]">Present for `GROUP BY` queries: `key`, `count`, and `rows` per group.</ResponseField>
 
-Returns **`503`** if the Dataview executor is unavailable.
+```json Response
+{
+  "columns": ["_path", "status", "owner", "estimate", "spent"],
+  "rows": [
+    {"_path": "tasks/login-bug.md", "path": "tasks/login-bug.md", "status": "in-progress", "owner": "alice", "estimate": 5, "spent": 3, "remaining": 2}
+  ],
+  "total": 1,
+  "has_more": false
+}
+```
 
-## MCP parity
+Returns `404` if the view does not exist, `400` if its query fails to parse or run, and `503` when the Dataview executor is unavailable (search engines other than SQLite).
 
-See `kiwi_views_list`, `kiwi_views_get`, `kiwi_views_save`, `kiwi_views_delete`, and `kiwi_views_execute` in [MCP](/concepts/mcp).
+The UI filters, sort, and group settings are not applied by this endpoint; put them in the DQL query if you need them server-side.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Bases and views" icon="table" href="/concepts/bases-views">
+    How views render in the web UI.
+  </Card>
+  <Card title="DQL" icon="code" href="/concepts/dql">
+    Query syntax for the `query` field.
+  </Card>
+  <Card title="Metadata and graph" icon="tags" href="/api/metadata">
+    Run ad-hoc DQL with `GET /query`.
+  </Card>
+  <Card title="MCP tools" icon="robot" href="/concepts/mcp">
+    `kiwi_views_list`, `kiwi_views_get`, `kiwi_views_save`, `kiwi_views_delete`, `kiwi_views_execute`.
+  </Card>
+</CardGroup>

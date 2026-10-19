@@ -1,125 +1,209 @@
 ---
 title: "Webhooks"
-description: "Push real-time notifications to external services when pages change."
+description: "Send signed HTTP POSTs to external services when pages are written, deleted, or change state."
 icon: "webhook"
 ---
 
-Webhooks let you push change events to external services whenever pages are created, updated, or deleted. Each webhook receives a signed HTTP POST with details about the change.
+Webhooks push change events from KiwiFS to your own services. Register a URL with a path glob, and KiwiFS POSTs a signed JSON payload every time a matching page changes. Use them to trigger CI, sync a search index, post to chat, or wake an agent.
 
-## Enabling webhooks
+Webhooks fire for every write that goes through the pipeline: REST, MCP, NFS, S3, WebDAV, FUSE, imports, and edits made directly on disk. For a live stream inside a browser or long-running client, use [real-time events](/concepts/real-time-events) instead.
 
-Add the `[webhooks]` section to your `.kiwi/config.toml`:
+## Enable webhooks
 
-```toml
+Webhooks are off by default.
+
+```toml .kiwi/config.toml
 [webhooks]
 enabled = true
 max_workers = 4
-max_retries = 3
+max_retries = 5
 ```
 
 | Key | Default | Description |
-|-----|---------|-------------|
-| `enabled` | `false` | Enable the webhook subsystem. |
-| `max_workers` | `4` | Concurrent dispatch goroutines. |
-| `max_retries` | `3` | Retries on delivery failure. |
+| --- | --- | --- |
+| `enabled` | `false` | Turn on the webhook subsystem. While off, the webhook endpoints return `503`. |
+| `max_workers` | `4` | Deliveries sent in parallel. |
+| `max_retries` | `5` | Retries after a failed delivery. |
 
-## Creating a webhook
+Restart the server after changing these keys. Registered webhooks are stored in `.kiwi/state/webhooks.db`.
 
-Register a webhook URL with an optional glob pattern to filter which paths trigger it.
+## Register a webhook
 
-```bash
-curl -X POST 'http://localhost:3333/api/kiwi/webhooks' \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com/hook", "path_glob": "concepts/**"}'
-```
+<Tabs>
+  <Tab title="REST">
+    ```bash Terminal
+    curl -X POST 'http://localhost:3333/api/kiwi/webhooks' \
+      -H 'Content-Type: application/json' \
+      -d '{"url": "https://ci.example.com/hooks/kiwi", "path_glob": "runbooks/**", "event_types": ["write", "delete"]}'
+    ```
 
-```json
+    ```json 201 Created
+    {
+      "id": "wh_3f9c2a71b0d4e6a8",
+      "url": "https://ci.example.com/hooks/kiwi",
+      "path_glob": "runbooks/**",
+      "secret": "whsec_6b1f...",
+      "created_at": "2026-10-19T09:00:00Z",
+      "enabled": true,
+      "event_types": ["write", "delete"]
+    }
+    ```
+  </Tab>
+  <Tab title="config.toml">
+    Entries under `[[webhook_entries]]` are registered at startup, once per URL.
+
+    ```toml .kiwi/config.toml
+    [[webhook_entries]]
+    url = "https://ci.example.com/hooks/kiwi"
+    events = ["write", "delete"]
+    path_glob = "runbooks/**"
+    secret = "my-shared-secret"
+    ```
+
+    `events` is required; entries without it are skipped. `path_glob` defaults to `**`. Without `secret`, KiwiFS generates one, which you can only see in the database, so set it yourself.
+  </Tab>
+</Tabs>
+
+<Warning>
+The API returns the `secret` only in the create response. List responses omit it. Store it when you register the webhook.
+</Warning>
+
+`url` and `path_glob` are required. `event_types` is optional; leave it out to receive every event type.
+
+### Path globs
+
+Paths are relative to the knowledge root, with no leading slash.
+
+| Pattern | Matches |
+| --- | --- |
+| `**` | Every path |
+| `runbooks/**` | Everything under `runbooks/`, at any depth |
+| `reports/*.md` | Markdown files directly in `reports/` |
+| `index.md` | That one file |
+
+`**` works on its own or as a trailing `/**`. Any other pattern uses shell-style matching where `*` does not cross `/`.
+
+## Event types
+
+| Type | Fires when |
+| --- | --- |
+| `write` | A file is created or updated. A rename sends `write` for the new path and `delete` for the old one. |
+| `delete` | A file is deleted. |
+| `bulk` | A bulk write commits. KiwiFS sends one `bulk` event per path. |
+| `rollback` | A bulk write fails to commit and is rolled back. One event per path. |
+| `transition` | A page's `status` changes, or its `state` when it has no `status`. Includes `from_state`, `to_state`, and `field`. |
+
+## Payload
+
+Each delivery is a `POST` with a JSON body.
+
+```json write
 {
-  "id": "wh_abc123",
-  "url": "https://example.com/hook",
-  "path_glob": "concepts/**",
-  "secret": "whsec_k9x2m...",
-  "created_at": "2026-05-04T12:00:00Z",
-  "enabled": true
+  "type": "write",
+  "path": "runbooks/deploy.md",
+  "actor": "agent:docs-writer",
+  "timestamp": "2026-10-19T09:05:00Z"
 }
 ```
 
-<Warning>
-The `secret` is only returned once at creation time. Store it securely — you'll need it to verify webhook signatures.
-</Warning>
-
-## Path glob patterns
-
-| Pattern | Matches |
-|---------|---------|
-| `**` | All files (default) |
-| `concepts/**` | All files under `concepts/` |
-| `reports/*.md` | Markdown files directly in `reports/` |
-
-Glob matching uses Go's `filepath.Match` with an added `**` recursive wildcard.
-
-## Payload format
-
-Every webhook receives a JSON POST body:
-
-```json
+```json transition
 {
-  "type": "write",
-  "path": "concepts/auth.md",
-  "actor": "agent:docs-writer",
-  "timestamp": "2026-05-04T12:05:00Z"
+  "type": "transition",
+  "path": "tasks/add-sso.md",
+  "actor": "agent:planner",
+  "timestamp": "2026-10-19T09:06:00Z",
+  "from_state": "todo",
+  "to_state": "in_progress",
+  "field": "status"
 }
 ```
 
 | Field | Description |
-|-------|-------------|
-| `type` | Event type: `write`, `delete`, `bulk`, `import`. |
-| `path` | File path that changed. |
-| `actor` | The `X-Actor` header from the originating request. |
-| `timestamp` | ISO 8601 timestamp of the change. |
+| --- | --- |
+| `type` | One of the event types above. |
+| `path` | The file that changed. |
+| `actor` | Who made the change, from `X-Actor` or the authenticated identity. |
+| `timestamp` | RFC 3339 time the event was dispatched. |
+| `from_state`, `to_state`, `field` | `transition` events only. `field` is the frontmatter field that changed: `status`, or `state` when the page has no `status`. |
 
-## Signature verification
+The payload carries no file content. Fetch the page with `GET /api/kiwi/file` if you need it.
 
-Every webhook POST includes three headers for verification:
+## Verify signatures
 
-| Header | Description |
-|--------|-------------|
-| `webhook-id` | Unique message ID for deduplication. |
-| `webhook-timestamp` | Unix timestamp of the dispatch. |
-| `webhook-signature` | `v1,<base64>` HMAC-SHA256 signature. |
+Every delivery carries [Standard Webhooks](https://www.standardwebhooks.com) headers plus a simpler body signature.
 
-The signature is computed over `{webhook-id}.{webhook-timestamp}.{body}` using the webhook secret as the HMAC key.
+| Header | Value |
+| --- | --- |
+| `webhook-id` | Unique message ID. Use it to drop duplicates. |
+| `webhook-timestamp` | Unix seconds when the delivery was signed. |
+| `webhook-signature` | `v1,` followed by base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`. |
+| `X-Kiwi-Signature-256` | `sha256=` followed by hex HMAC-SHA256 of the raw body. |
 
-```python
-import hmac, hashlib, base64
+The HMAC key is the secret string itself, including the `whsec_` prefix. If a secret you set in config is valid standard base64, KiwiFS decodes it and uses the bytes instead.
 
-def verify(secret, msg_id, timestamp, body, signature):
-    signed_content = f"{msg_id}.{timestamp}.{body}"
-    expected = hmac.new(
-        base64.b64decode(secret),
-        signed_content.encode(),
-        hashlib.sha256
-    ).digest()
-    return hmac.compare_digest(
-        base64.b64encode(expected).decode(),
-        signature.removeprefix("v1,")
-    )
+<Warning>
+Off-the-shelf Standard Webhooks libraries strip `whsec_` and base64-decode the rest, which does not match generated KiwiFS secrets. Verify with your own HMAC, as below.
+</Warning>
+
+<CodeGroup>
+```python verify.py
+import base64, hashlib, hmac
+
+def verify(secret: str, headers: dict, body: bytes) -> bool:
+    signed = f"{headers['webhook-id']}.{headers['webhook-timestamp']}.".encode() + body
+    expected = base64.b64encode(hmac.new(secret.encode(), signed, hashlib.sha256).digest()).decode()
+    received = headers["webhook-signature"].removeprefix("v1,")
+    return hmac.compare_digest(expected, received)
 ```
 
-## Managing webhooks
+```javascript verify.mjs
+import { createHmac, timingSafeEqual } from "node:crypto";
 
-### List all webhooks
+export function verify(secret, headers, body) {
+  const expected = "sha256=" + createHmac("sha256", secret).update(body).digest("hex");
+  const received = headers["x-kiwi-signature-256"] ?? "";
+  return expected.length === received.length &&
+    timingSafeEqual(Buffer.from(expected), Buffer.from(received));
+}
+```
+</CodeGroup>
 
-```bash
+Reject deliveries whose `webhook-timestamp` is more than a few minutes old to block replays.
+
+## Delivery and retries
+
+- Your endpoint must answer with a `2xx` status within 30 seconds. Anything else counts as a failure.
+- Failed deliveries retry after 5 seconds, 30 seconds, 2 minutes, 15 minutes, and 1 hour, then hourly, up to `max_retries`.
+- Deliveries are queued in memory. Up to 256 can wait; when the queue is full, new events are dropped and logged. Pending retries do not survive a restart.
+- Deliveries can arrive out of order and more than once. Key your handler on `webhook-id`, and re-read the file rather than trusting event order.
+
+## Manage webhooks
+
+```bash Terminal
+# List webhooks (secrets omitted)
 curl 'http://localhost:3333/api/kiwi/webhooks'
+
+# Delete a webhook (returns 204)
+curl -X DELETE 'http://localhost:3333/api/kiwi/webhooks/wh_3f9c2a71b0d4e6a8'
 ```
 
 <Note>
-The `secret` field is omitted from list responses for security.
+`kiwifs export --webhook <url>` sends a separate, one-off `export.completed` notification when an export finishes. It is signed the same way when you pass `--webhook-secret` or a matching `[[webhook_entries]]` secret. See [Export](/export/overview).
 </Note>
 
-### Delete a webhook
+## Related
 
-```bash
-curl -X DELETE 'http://localhost:3333/api/kiwi/webhooks/wh_abc123'
-```
+<CardGroup cols={2}>
+  <Card title="Webhooks REST API" icon="webhook" href="/api/webhooks">
+    Register, list, and delete webhooks.
+  </Card>
+  <Card title="Real-time events" icon="bolt" href="/concepts/real-time-events">
+    Live SSE stream of the same changes.
+  </Card>
+  <Card title="Workflows" icon="bars-progress" href="/concepts/workflows">
+    State changes that send `transition` events.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration#webhooks">
+    The `[webhooks]` section.
+  </Card>
+</CardGroup>

@@ -1,36 +1,70 @@
 ---
 title: "MCP (Model Context Protocol)"
-description: "Connect Claude, Cursor, and other AI tools to KiwiFS — stdio, HTTP, and 71 tools."
+sidebarTitle: "MCP"
+description: "Connect Claude Code, Claude Desktop, Cursor, and other MCP clients to KiwiFS over stdio or Streamable HTTP, with 78 tools."
 icon: "plug"
 ---
 
-KiwiFS ships a built-in MCP server so agents can work with the same operations as the REST API and web UI.
+KiwiFS ships a built-in MCP server. Agents get the same operations as the REST API and web UI — read, write, search, query, restructure — as typed tools, and every write goes through the same pipeline (git commit, index update, live events).
 
-## Start the MCP server
+## Choose a mode
 
-```bash
-# In-process (reads files directly, no HTTP server required)
+The MCP server runs with one of two backends and one of two transports.
+
+| | stdio (default) | Streamable HTTP |
+| --- | --- | --- |
+| **In-process** (`--root`) | `kiwifs mcp --root ~/knowledge` | `kiwifs mcp --root ~/knowledge --http` |
+| **Proxy** (`--remote`) | `kiwifs mcp --remote http://localhost:3333` | `kiwifs mcp --remote http://localhost:3333 --http` |
+| **Built into the server** | — | `kiwifs serve` exposes `/mcp` on its own port |
+
+- **In-process** opens the directory directly. Use it for a single local agent.
+- **Proxy** talks to a running KiwiFS server over REST, so the agent shares the server's index, live events, and auth. Use it when the web UI or other agents work on the same knowledge base.
+- **`kiwifs serve`** always mounts Streamable HTTP MCP at `/mcp` on the main port, next to the REST API. No extra process or flag is needed.
+
+```bash Terminal
+# In-process over stdio
 kiwifs mcp --root ~/knowledge
 
-# Proxy mode (forwards to a running KiwiFS server)
-kiwifs mcp --remote http://host:3333 --api-key kiwi_sk_...
+# Proxy to a running server, with an API key
+kiwifs mcp --remote https://kiwi.example.com --api-key $KIWI_API_KEY
 
-# Streamable HTTP transport (remote agents, LAN tools)
+# Proxy to a non-default space
+kiwifs mcp --remote https://kiwi.example.com --api-key $KIWI_API_KEY --space docs
+
+# Standalone Streamable HTTP on port 8181 (endpoint /mcp, health check /health)
 kiwifs mcp --root ~/knowledge --http --port 8181
-
-# Streamable HTTP on the main server port (no separate process)
-kiwifs serve --root ~/knowledge --mcp
 ```
 
-Use `--space <name>` when the knowledge root hosts multiple configured spaces. Remote HTTP MCP should stay behind TLS and reuse the same API keys you trust for REST.
+`--root` and `--remote` are mutually exclusive, and exactly one is required. `--space` only applies with `--remote`. `--port` (default `8181`) requires `--http`. See [`kiwifs mcp`](/cli/commands#mcp) for every flag.
 
-<Tip>
-The `--mcp` flag on `kiwifs serve` mounts the MCP endpoint at `/mcp` on the main HTTP server, so agents can reach both REST and MCP on the same port.
-</Tip>
+### Authentication
 
-## Configure Claude Desktop / Cursor
+- **Proxy mode** sends `--api-key` to the server as `Authorization: Bearer <key>`.
+- **HTTP transport** requires `Authorization: Bearer <key>` when the knowledge base's `.kiwi/config.toml` sets `[auth] type = "apikey"`. The key is `[auth] api_key`. Without API-key auth, the HTTP endpoint is open.
 
-```json
+<Warning>
+Put remote HTTP MCP behind TLS, and enable API-key auth before exposing it beyond localhost. MCP tools can write, delete, and restructure pages.
+</Warning>
+
+## Connect a client
+
+<Tabs>
+<Tab title="Claude Code">
+```bash Terminal
+# Local, in-process
+claude mcp add kiwifs -- kiwifs mcp --root /path/to/knowledge
+
+# Running KiwiFS server, over HTTP
+claude mcp add --transport http kiwifs http://localhost:3333/mcp \
+  --header "Authorization: Bearer $KIWI_API_KEY"
+```
+
+To share the setup with your team, commit a `.mcp.json` at the project root with the same `mcpServers` block shown in the Cursor tab.
+</Tab>
+<Tab title="Claude Desktop">
+Edit `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/`, Windows: `%APPDATA%\Claude\`).
+
+```json claude_desktop_config.json
 {
   "mcpServers": {
     "kiwifs": {
@@ -41,123 +75,222 @@ The `--mcp` flag on `kiwifs serve` mounts the MCP endpoint at `/mcp` on the main
 }
 ```
 
-## Tool inventory
+Use an absolute path to the `kiwifs` binary if Claude Desktop cannot find it on `PATH`.
+</Tab>
+<Tab title="Cursor">
+Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global).
 
-The server currently registers **71** tools (exact count may change release to release). They are grouped below; every name is invoked as listed.
+```json .cursor/mcp.json
+{
+  "mcpServers": {
+    "kiwifs": {
+      "command": "kiwifs",
+      "args": ["mcp", "--remote", "http://localhost:3333", "--api-key", "kiwi_sk_..."]
+    }
+  }
+}
+```
+</Tab>
+<Tab title="Windsurf">
+Add to `~/.codeium/windsurf/mcp_config.json`.
+
+```json mcp_config.json
+{
+  "mcpServers": {
+    "kiwifs": {
+      "command": "kiwifs",
+      "args": ["mcp", "--root", "/path/to/knowledge"]
+    }
+  }
+}
+```
+</Tab>
+<Tab title="Any HTTP client">
+Point the client at the Streamable HTTP endpoint and pass the API key as a bearer token.
+
+```json mcp.json
+{
+  "mcpServers": {
+    "kiwifs": {
+      "url": "http://localhost:3333/mcp",
+      "headers": { "Authorization": "Bearer kiwi_sk_..." }
+    }
+  }
+}
+```
+</Tab>
+</Tabs>
+
+<Tip>
+For KiwiFS Cloud workspaces, `kiwifs connect <workspace>` prints or writes this config for you. See [KiwiFS Cloud](/guides/cloud).
+</Tip>
+
+## First calls
+
+A good session starts with `kiwi_context`. It returns the schema, agent playbook, index, and rules in one call. From there:
+
+1. Find pages with `kiwi_brief` (one token-budgeted context pack) or `kiwi_search_hybrid`.
+2. Skim with `kiwi_peek` before paying for a full `kiwi_read`.
+3. Write with `kiwi_write`, passing `if_match` (the ETag from `kiwi_read`) so you never overwrite someone else's edit.
+4. Verify with `kiwi_lint`.
+
+Write tools accept an optional `actor` (default `mcp-agent`) that is recorded in the git commit.
+
+## Tool reference
+
+The server registers **78 tools**. Every name is invoked exactly as listed. Parameters marked with `*` are required.
 
 <AccordionGroup>
-<Accordion title="Core files and search">
-| Tool | Summary |
-| --- | --- |
-| `kiwi_read` | Read markdown with optional wiki-link resolution, metadata-only mode, and `if_not_etag` caching. |
-| `kiwi_write` | Create/update a page (git-versioned) with optional `actor` and `provenance`. |
-| `kiwi_delete` | Delete a path (history preserved when git versioning is on). |
-| `kiwi_rename` | Move/rename with optional wiki-link rewrites across the tree. |
-| `kiwi_bulk_write` | Atomic multi-file commit. |
-| `kiwi_append` | Append without read-modify-write races. |
-| `kiwi_tree` | Directory listing with depth and optional permalinks. |
-| `kiwi_search` | BM25 full-text search with pagination and `path_prefix`. |
-| `kiwi_search_hybrid` | RRF fusion of FTS and semantic ranks. |
-| `kiwi_search_semantic` | Vector similarity search (requires embeddings). |
-| `kiwi_brief` | Token-budgeted context pack — never summarizes. |
-| `kiwi_similar` | Frontmatter similarity profiles. |
-| `kiwi_changes` | Incremental change list since a checkpoint. |
-| `kiwi_versions` | Git history entries for a path. |
-| `kiwi_view_refresh` | Regenerate a computed `kiwi-view` markdown file. |
+<Accordion title="Files: read, write, and history (13)" icon="file-lines">
+| Tool | Purpose | Key parameters |
+| --- | --- | --- |
+| `kiwi_read` | Read a page, optionally resolving wiki links. | `path`*, `resolve_links`, `metadata_only`, `if_not_etag` |
+| `kiwi_write` | Create or overwrite a page as one git commit. | `path`*, `content`*, `if_match`, `provenance`, `actor` |
+| `kiwi_append` | Append to a page atomically, with no read-modify-write race. | `path`*, `content`*, `separator` |
+| `kiwi_bulk_write` | Write several pages in one atomic commit. A stale `if_match` fails the whole batch. | `files`* (`path`, `content`, `if_match`), `provenance` |
+| `kiwi_patch_frontmatter` | Set or remove frontmatter keys without resending the body. `null` removes a key. Keys you set are owned by you. | `path`*, `fields`*, `if_match`, `force` |
+| `kiwi_delete` | Delete a page. History stays in git. | `path`* |
+| `kiwi_rename` | Move one page and respell every link to it. The destination must not exist. | `from`*, `to`*, `update_links` (default `true`) |
+| `kiwi_tree` | List files and folders with sizes. | `path`, `depth`, `include_permalinks` |
+| `kiwi_peek` | Title, frontmatter, first paragraph, links, backlinks, and outline in about 200 tokens. | `path`* |
+| `kiwi_section` | Read one heading section by name (fuzzy) or 0-based index. | `path`*, `heading`, `index` |
+| `kiwi_versions` | Git history for a page. | `path`* |
+| `kiwi_changes` | Changes since a checkpoint. Store `last_seq` and pass it back as `since`. | `since`, `limit` |
+| `kiwi_view_refresh` | Regenerate a computed view page (`kiwi-view: true`). | `path`* |
 </Accordion>
 
-<Accordion title="Metadata, DQL, and analytics">
-| Tool | Summary |
-| --- | --- |
-| `kiwi_query_meta` | Frontmatter filters with AND/OR groups, sort, pagination. |
-| `kiwi_query` | DQL queries (`TABLE`, `LIST`, `COUNT`, `DISTINCT`, …). |
-| `kiwi_aggregate` | `GROUP BY` style aggregates over metadata. |
-| `kiwi_import` | Pull from databases, CSV/JSON, Notion, Airtable, etc. |
-| `kiwi_export` | Export JSONL/CSV with optional embeddings. |
-| `kiwi_analytics` | Knowledge-base health metrics. |
-| `kiwi_health_check` | Single-page diagnostics. |
-| `kiwi_memory_report` | Episodic memory coverage / merge hints. |
-| `kiwi_velocity` | Change hotspots, cold pages, bursts. |
-| `kiwi_eval` | Search quality benchmark harness. |
-| `kiwi_context` | Schema, playbook, index, and rules in one call — good first tool. |
-| `kiwi_backlinks` | Incoming wiki links for a page. |
-| `kiwi_suggestions` | Semantically similar pages excluding existing links. |
-| `kiwi_embeddings` | Raw chunk embeddings for a page. |
-| `kiwi_graph_analytics` | PageRank-ish graph summary. |
-| `kiwi_graph_centrality` | PageRank and betweenness tables. |
-| `kiwi_graph_communities` | Louvain communities. |
-| `kiwi_graph_path` | Shortest path between two pages. |
-| `kiwi_graph_walk` | Local neighborhood / siblings around a page. |
-| `kiwi_eligible` | Ranked todo-style tasks inferred via metadata heuristics. |
+<Accordion title="Search and retrieval (6)" icon="magnifying-glass">
+| Tool | Purpose | Key parameters |
+| --- | --- | --- |
+| `kiwi_search` | BM25 full-text search with snippets. | `query`*, `limit`, `offset`, `path_prefix`, `scope`, `recency_weight` |
+| `kiwi_search_semantic` | Vector similarity search. Requires a vector index. | `query`*, `limit`, `threshold`, `scope` |
+| `kiwi_search_hybrid` | BM25 and vector results fused by Reciprocal Rank Fusion. Falls back to keyword-only without a vector index. | `query`*, `limit`, `path_prefix` |
+| `kiwi_brief` | Assemble everything relevant to a question into one token-budgeted pack. Never summarizes; lists what did not fit. | `query`*, `budget_tokens`, `max_pages`, `path_prefix` |
+| `kiwi_similar` | Pages structurally similar to a case, using a frontmatter similarity profile. | `path` or `vector`, `profile`, `k` |
+| `kiwi_eval` | Score retrieval quality (Hit Rate, MRR, Precision@K, nDCG@K) for FTS and semantic search. | `set` or `queries`, `exclude_prefix`, `top_k` |
 </Accordion>
 
-<Accordion title="Draft spaces">
-| Tool | Summary |
-| --- | --- |
-| `kiwi_draft_create` | Open a new git-backed draft branch. |
-| `kiwi_draft_list` | List active drafts. |
-| `kiwi_draft_read` / `kiwi_draft_write` | Work inside a draft by `draft_id`. |
-| `kiwi_draft_diff` | Unified diff vs main. |
-| `kiwi_draft_merge` | Merge draft into live knowledge. |
-| `kiwi_draft_discard` | Drop the draft branch. |
+<Accordion title="Context and structured queries (4)" icon="table">
+| Tool | Purpose | Key parameters |
+| --- | --- | --- |
+| `kiwi_context` | Schema, playbook, index, and rules in one call. Call it first. | — |
+| `kiwi_query` | Run a [DQL](/concepts/dql) query (`TABLE`, `LIST`, `COUNT`, `DISTINCT`). | `query`*, `format` (`table`, `list`, `json`), `limit` |
+| `kiwi_query_meta` | Filter pages by frontmatter with `$.field=value` filters. | `filters`, `or`, `paths`, `sort`, `order`, `limit`, `offset` |
+| `kiwi_aggregate` | Group by a frontmatter field and compute `count`, `avg`, `sum`, `min`, `max`. | `group_by`*, `calculate`, `where`, `path_prefix` |
 </Accordion>
 
-<Accordion title="Bases (saved views)">
-| Tool | Summary |
-| --- | --- |
-| `kiwi_views_list` | List `.kiwi/views/*.json` definitions. |
-| `kiwi_views_get` | Fetch a single view definition. |
-| `kiwi_views_save` | Persist columns, filters, sort, layout, and query. |
-| `kiwi_views_delete` | Remove a saved view. |
-| `kiwi_views_execute` | Run the DQL backing a view and return rows. |
+<Accordion title="Links and graph (8)" icon="diagram-project">
+| Tool | Purpose | Key parameters |
+| --- | --- | --- |
+| `kiwi_backlinks` | Pages that link to a page. | `path`* |
+| `kiwi_suggestions` | Semantically similar pages that are not linked yet. | `path`*, `limit` |
+| `kiwi_embeddings` | Chunk texts and embedding vectors for a page. | `path`* |
+| `kiwi_graph_analytics` | PageRank, components, orphans, hubs, topic clusters, and bridge pages. | `limit` (default 20) |
+| `kiwi_graph_centrality` | PageRank and betweenness for every page, with in and out degree. | `limit` |
+| `kiwi_graph_communities` | Louvain communities of topically related pages. | — |
+| `kiwi_graph_path` | Shortest wiki-link path between two pages. | `from`*, `to`* |
+| `kiwi_graph_walk` | One-hop neighborhood: outbound links, backlinks, siblings, hub score. | `path`*, `include_siblings` |
 </Accordion>
 
-<Accordion title="Canvas">
-| Tool | Summary |
-| --- | --- |
-| `kiwi_canvas_list` | Discover `*.canvas.json` files. |
-| `kiwi_canvas_read` / `kiwi_canvas_write` | JSON canvas payloads. |
+<Accordion title="Restructuring (4)" icon="shuffle">
+Move, merge, split, retag, and edit many pages in one reviewed commit without breaking links. See [Restructuring](/concepts/refactor).
 
-Canvas **generate**, **patch**, **query**, and **auto-layout** are REST-only — see [Canvas API](/api/canvas).
+| Tool | Purpose | Key parameters |
+| --- | --- | --- |
+| `kiwi_refactor_plan` | Preview a manifest. Nothing is written. Returns the digest, errors, counts, and a page of moves and link edits. | `manifest`*, `detail` (`summary`, `full`, `diff`), `offset`, `limit` (default 25, max 200) |
+| `kiwi_refactor_apply` | Apply a reviewed plan as one commit. If anything changed, nothing is written and the fresh plan comes back. | `manifest`*, `digest`*, `now` |
+| `kiwi_refactor_script` | Compute a manifest with a read-only Starlark program, then plan it. | `script`* |
+| `kiwi_refactor_revert` | Undo a commit as a new commit. Previews without `digest`; refuses if later edits would be lost. | `commit`*, `digest` |
 </Accordion>
 
-<Accordion title="Workflows and coordination">
-| Tool | Summary |
-| --- | --- |
-| `kiwi_workflow_list` / `kiwi_workflow_get` / `kiwi_workflow_save` | Manage `.kiwi/workflows/*.json`. |
-| `kiwi_workflow_advance` | Validate and apply a frontmatter state transition. |
-| `kiwi_workflow_board` | Kanban-style board grouped by `state`. |
-| `kiwi_claim` / `kiwi_release` | Cooperative leases on paths (requires actor headers in practice). |
-| `kiwi_claims_list` | Inspect active claims. |
+<Accordion title="Analytics, health, and activity (5)" icon="chart-line">
+| Tool | Purpose | Key parameters |
+| --- | --- | --- |
+| `kiwi_analytics` | Totals, health (stale, orphans, broken links, empty, no frontmatter), link coverage, recent updates. | `scope`, `stale_threshold` |
+| `kiwi_health_check` | Diagnostics and quality score for one page. | `path`* |
+| `kiwi_velocity` | Hot spots, cold spots, bursts, and authorship from git history. | `period` (default `30d`), `limit`, `path_prefix` |
+| `kiwi_timeline` | Recent activity across all files. | `limit` (default 50, max 500), `offset`, `actor`, `type`, `path_prefix` |
+| `kiwi_feed` | JSON feed of recently updated pages. | `limit` (default 20) |
 </Accordion>
 
-<Accordion title="Task orchestration">
-| Tool | Summary |
-| --- | --- |
-| `kiwi_task_create` | Create a new task page with structured frontmatter and workflow state. |
-| `kiwi_task_progress` | Append a timestamped progress entry to a task page. |
-| `kiwi_cite` | Generate a citation reference for a source or paper. |
+<Accordion title="Authoring helpers (3)" icon="pen-ruler">
+| Tool | Purpose | Key parameters |
+| --- | --- | --- |
+| `kiwi_lint` | Check a page or raw content for structural issues: tables, fences, frontmatter, headings, Mermaid, and widget fence schemas. | `path` or `content` |
+| `kiwi_widget_reference` | List the [widget fences](/concepts/widgets) a page can draw, or describe one in full. Call it before writing a fence. | `name`, `examples` |
+| `kiwi_quiz` | Format a Kiwi Quiz callout, or check quizzes in markdown. Kinds: `single`, `multi`, `boolean`, `order`, `match`, `short`. | `kind`, `prompt`, `options`, `answer`, `items`, `pairs`, `content`, `path` |
 </Accordion>
 
-<Accordion title="Memory">
-| Tool | Summary |
-| --- | --- |
-| `kiwi_remember` | Save an episodic observation to `episodes/{date}/{uuid}.md`. |
-| `kiwi_forget` | Mark an episode as superseded (`memory_status: superseded`). |
+<Accordion title="Import, capture, and export (6)" icon="right-left">
+| Tool | Purpose | Key parameters |
+| --- | --- | --- |
+| `kiwi_import` | Import records from a database, file, Notion, or Airtable; each record becomes a page. | `from`*, `dsn`, `file`, `table`, `query`, `prefix`, `limit`, `dry_run` |
+| `kiwi_ingest` | Convert a PDF, DOCX, PPTX, Excel, HTML, or EPUB document to markdown via MarkItDown. | `file`*, `split_mode`, `prefix`, `extract_keywords`, `convert_crossrefs` |
+| `kiwi_clip` | Clip a web page as a markdown page. | `url`*, `title`, `tags`, `folder` |
+| `kiwi_cite` | Create a literature note at `papers/{bibtex_key}.md` from a DOI or arXiv ID. | `identifier`, `doi`, `arxiv_id` |
+| `kiwi_export` | Export pages to JSONL, CSV, or Parquet. | `format`*, `path`, `columns`, `include_content`, `include_embeddings`, `limit` |
+| `kiwi_export_document` | Render markdown to PDF, HTML, slides, or a static site. | `format`*, `path`*, `theme`, `bibliography`, `csl_style`, `slide_format` |
 </Accordion>
 
-<Accordion title="Content helpers and feeds">
-| Tool | Summary |
-| --- | --- |
-| `kiwi_peek` | Lightweight summary (title, snippet, links, headings). |
-| `kiwi_section` | Extract a single heading section by name or index. |
-| `kiwi_timeline` | Recent git-backed activity with pagination metadata. |
-| `kiwi_feed` | Serialized activity feed (JSON or Atom depending on mode). |
-| `kiwi_clip` | Fetch a URL and persist clipped markdown. |
-| `kiwi_ingest` | Convert supported binary documents to markdown via MarkItDown. |
-| `kiwi_export_document` | Render markdown to PDF, HTML, slides, or a static site. |
-| `kiwi_lint` | Structural markdown lint for a path or inline content. |
-| `kiwi_eval` | Benchmark full-text and semantic search quality. |
+<Accordion title="Tasks and claims (6)" icon="list-check">
+| Tool | Purpose | Key parameters |
+| --- | --- | --- |
+| `kiwi_eligible` | Unclaimed, unblocked `todo` tasks ranked by priority. | `limit` (default 10), `path_prefix` |
+| `kiwi_task_create` | Create a task page (`workflow: tasks`, `state: backlog`) and optionally claim it. | `title`*, `description`, `assignee`, `priority`, `blocked_by`, `labels`, `claim` |
+| `kiwi_task_progress` | Append a timestamped note under `## Progress`. | `path`*, `message`* |
+| `kiwi_claim` | Claim a page for exclusive work. Fails if another agent holds it. | `path`*, `actor`*, `lease_duration` (default `30m`) |
+| `kiwi_release` | Release a claim. | `path`*, `actor`* |
+| `kiwi_claims_list` | Active claims and when they expire. | — |
+</Accordion>
+
+<Accordion title="Workflows (5)" icon="arrows-spin">
+| Tool | Purpose | Key parameters |
+| --- | --- | --- |
+| `kiwi_workflow_list` | List workflow definitions. | — |
+| `kiwi_workflow_get` | Get one workflow's states and transitions. | `name`* |
+| `kiwi_workflow_save` | Create or update a workflow after validating it. | `name`*, `states`*, `transitions`* |
+| `kiwi_workflow_advance` | Move a page to a new state if the workflow allows the transition. | `path`*, `target_state`* |
+| `kiwi_workflow_board` | Kanban board: pages grouped by state. | `name`* |
+</Accordion>
+
+<Accordion title="Draft spaces (7)" icon="code-branch">
+| Tool | Purpose | Key parameters |
+| --- | --- | --- |
+| `kiwi_draft_create` | Open an isolated draft. Returns a `draft_id`. | `actor` |
+| `kiwi_draft_list` | List active drafts. | — |
+| `kiwi_draft_write` | Write a file inside a draft. | `draft_id`*, `path`*, `content`* |
+| `kiwi_draft_read` | Read a file from a draft. | `draft_id`*, `path`* |
+| `kiwi_draft_diff` | Unified diff of a draft against main. | `draft_id`* |
+| `kiwi_draft_merge` | Fast-forward merge a draft into main. | `draft_id`* |
+| `kiwi_draft_discard` | Delete a draft and its changes. | `draft_id`* |
+</Accordion>
+
+<Accordion title="Saved views (5)" icon="table-columns">
+| Tool | Purpose | Key parameters |
+| --- | --- | --- |
+| `kiwi_views_list` | List saved view definitions. | — |
+| `kiwi_views_get` | Get one view definition. | `name`* |
+| `kiwi_views_save` | Create or update a view's query, layout, columns, filters, sort, and grouping. | `name`*, `query`*, `layout`, `columns`, `group_by` |
+| `kiwi_views_delete` | Delete a view. | `name`* |
+| `kiwi_views_execute` | Run a view's query and return rows. | `name`*, `limit`, `offset` |
+</Accordion>
+
+<Accordion title="Canvas (3)" icon="object-group">
+| Tool | Purpose | Key parameters |
+| --- | --- | --- |
+| `kiwi_canvas_list` | List `*.canvas.json` files. | — |
+| `kiwi_canvas_read` | Read a canvas's nodes and edges. | `path`* |
+| `kiwi_canvas_write` | Write a canvas JSON object. | `path`*, `content`* |
+
+Canvas generate, patch, query, and auto-layout are REST-only. See [Canvas API](/api/canvas).
+</Accordion>
+
+<Accordion title="Memory (3)" icon="brain">
+| Tool | Purpose | Key parameters |
+| --- | --- | --- |
+| `kiwi_remember` | Save an episode to `episodes/{YYYY-MM-DD}/{episode_id}.md`. | `content`*, `scope`, `episode_id`, `tags` |
+| `kiwi_forget` | Mark a memory as superseded without deleting it. | `path`*, `reason` |
+| `kiwi_memory_report` | Episodic files and whether any page cites them under `merged-from`. | `episodes_prefix`, `limit`, `offset` |
 </Accordion>
 </AccordionGroup>
 
@@ -165,15 +298,27 @@ Canvas **generate**, **patch**, **query**, and **auto-layout** are REST-only —
 
 Read-only MCP resources:
 
-| URI pattern | Description |
+| URI | Description |
 | --- | --- |
-| `kiwi://schema` | `SCHEMA.md` (or generated schema) for the knowledge root. |
-| `kiwi://file/{path}` | Markdown bytes for a relative path. |
+| `kiwi://schema` | `SCHEMA.md` (or a generated schema) for the knowledge base. |
+| `kiwi://file/{path}` | Markdown content for a relative path. |
 | `kiwi://tree/{path}` | Directory listing rooted at `{path}`. |
+| `kiwi://refactor/plans/{digest}` | A full restructuring plan built in this session, for reading without paging through tool results. |
+| `kiwi://refactor/raw-moves` | Moves made outside KiwiFS that left links behind, and the `relinks` manifest that repairs them. |
 
-## Further reading
+## Related
 
-- [Agent interface](/concepts/agent-interface) — how MCP fits next to REST and mounts.
-- [Agent playbook](/concepts/agent-playbook) — `kiwi_context` and playbook operations.
-- [Episodic memory](/concepts/episodic-memory) — `kiwi_memory_report`.
-- REST counterparts: [Drafts](/api/drafts), [Views](/api/views), [Canvas](/api/canvas), [Workflows](/api/workflows), [Claims](/api/claims), [Publish](/api/publish), [Utilities](/api/utilities), [Import and export](/api/import-export#import-browse), [Document export](/export/documents).
+<CardGroup cols={2}>
+<Card title="Restructuring" icon="shuffle" href="/concepts/refactor">
+  Move and merge pages without breaking links.
+</Card>
+<Card title="Agent interface" icon="robot" href="/concepts/agent-interface">
+  How MCP fits next to REST and filesystem mounts.
+</Card>
+<Card title="Agent playbook" icon="book" href="/concepts/agent-playbook">
+  What `kiwi_context` returns and how to steer agents.
+</Card>
+<Card title="CLI: kiwifs mcp" icon="terminal" href="/cli/commands#mcp">
+  Every flag for the MCP server command.
+</Card>
+</CardGroup>

@@ -1,110 +1,345 @@
 ---
 title: "Workflows"
-description: "CRUD workflow definitions and advance page state with validation."
+description: "Manage workflow definitions, move pages between states, and read the kanban board."
 icon: "bars-progress"
 ---
 
-Workflow JSON files live in `.kiwi/workflows/`. Pages reference them with frontmatter keys `workflow` and `state`.
+A workflow is a state machine stored as JSON in `.kiwi/workflows/<name>.json`. A page joins a workflow through its `workflow` and `state` frontmatter fields. These endpoints edit definitions, move pages between states with transition checks, and return the kanban board the web UI renders. See [Workflows](/concepts/workflows) for the model.
 
-Base path: `http://localhost:3333/api/kiwi`.
+Page updates (assign, advance, reorder) go through the write pipeline with an internal `If-Match` check, so a page edited between the server's read and write returns `409`. Retry the request.
 
-## List and read
+## List workflows
+
+Return every workflow definition.
 
 ```http
-GET /workflows
+GET /api/kiwi/workflows
 ```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/workflows'
+```
+
+<ResponseField name="workflows" type="object[]">
+  Valid workflow definitions. See [Workflow definition](#workflow-definition) for the shape.
+</ResponseField>
+<ResponseField name="errors" type="string[]">
+  One message per workflow file that failed to parse or validate. Omitted when every file loaded.
+</ResponseField>
 
 ```json
-{ "workflows": [{ "name": "triage", "states": [...], "transitions": [...] }] }
+{
+  "workflows": [
+    {
+      "name": "triage",
+      "states": [
+        { "name": "open", "color": "#6b7280" },
+        { "name": "in_progress", "wip_limit": 3 },
+        { "name": "done", "terminal": true }
+      ],
+      "transitions": [
+        { "from": "open", "to": "in_progress" },
+        { "from": "in_progress", "to": "done" }
+      ]
+    }
+  ],
+  "errors": [".kiwi/workflows/broken.json: invalid character '}' looking for beginning of value"]
+}
 ```
+
+## Get a workflow
+
+Return one workflow definition.
 
 ```http
-GET /workflows/:name
+GET /api/kiwi/workflows/:name
 ```
 
-Returns a single workflow definition.
+<ParamField path="name" type="string" required>
+  Workflow name (the file name without `.json`).
+</ParamField>
 
-## Save definition
+```bash
+curl 'http://localhost:3333/api/kiwi/workflows/triage'
+```
+
+Returns `404` if the workflow does not exist. The response is a [workflow definition](#workflow-definition).
+
+## Save a workflow
+
+Create or replace a workflow definition. The `name` in the URL wins over any `name` in the body.
 
 ```http
-PUT /workflows/:name
-Content-Type: application/json
+PUT /api/kiwi/workflows/:name
 ```
 
-Body is the full workflow JSON. The server sets `name` from the URL segment and validates structure.
+<ParamField path="name" type="string" required>
+  Workflow name. Must not contain `/` or `\`, or leading or trailing spaces.
+</ParamField>
+<ParamField body="states" type="object[]" required>
+  At least one state. Names must be unique.
+</ParamField>
+<ParamField body="transitions" type="object[]" required>
+  Allowed moves. Every `from` and `to` must name a defined state, and terminal states can't have outbound transitions.
+</ParamField>
+
+```bash
+curl -X PUT 'http://localhost:3333/api/kiwi/workflows/triage' \
+  -H "Content-Type: application/json" \
+  -d '{
+    "states": [
+      {"name": "open"},
+      {"name": "in_progress", "wip_limit": 3},
+      {"name": "done", "terminal": true}
+    ],
+    "transitions": [
+      {"from": "open", "to": "in_progress"},
+      {"from": "in_progress", "to": "done"}
+    ]
+  }'
+```
+
+Returns `400` for invalid JSON or a definition that fails validation. The body limit is 1 MB.
+
+<ResponseField name="status" type="string">Always `saved`.</ResponseField>
+<ResponseField name="workflow" type="object">The saved definition.</ResponseField>
+
+```json
+{ "status": "saved", "workflow": { "name": "triage", "states": [/* ... */], "transitions": [/* ... */] } }
+```
+
+### Workflow definition
+
+<ResponseField name="name" type="string">Workflow name.</ResponseField>
+<ResponseField name="states" type="object[]">
+  Board columns, in display order.
+  <Expandable title="properties">
+    <ResponseField name="name" type="string">State name, stored in the page's `state` field.</ResponseField>
+    <ResponseField name="color" type="string">Hex color for the web UI.</ResponseField>
+    <ResponseField name="terminal" type="boolean">Pages in this state can't move out.</ResponseField>
+    <ResponseField name="wip_limit" type="integer">Maximum pages in this state. `0` or omitted means unlimited.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="transitions" type="object[]">
+  Allowed moves.
+  <Expandable title="properties">
+    <ResponseField name="from" type="string">Source state.</ResponseField>
+    <ResponseField name="to" type="string">Target state.</ResponseField>
+    <ResponseField name="required_role" type="string">Optional role label stored with the transition.</ResponseField>
+  </Expandable>
+</ResponseField>
 
 ## Delete a workflow
 
+Delete a workflow definition file.
+
 ```http
-DELETE /workflows/:name
+DELETE /api/kiwi/workflows/:name
 ```
 
-Removes a workflow definition. Pages referencing this workflow keep their current `state` but can no longer be advanced.
+<ParamField path="name" type="string" required>
+  Workflow name.
+</ParamField>
+
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/workflows/triage'
+```
+
+Returns `404` if the workflow does not exist. Pages that reference it keep their `workflow` and `state` fields but can no longer be advanced.
+
+```json
+{ "status": "deleted", "name": "triage" }
+```
 
 ## Assign a page to a workflow
 
+Set a page's `workflow` and `state` frontmatter, either to add it to a workflow or to place it in a column directly. Assignment does not check transitions.
+
 ```http
-POST /workflow/assign
-Content-Type: application/json
+POST /api/kiwi/workflow/assign
 ```
+
+<ParamField body="path" type="string" required>
+  Markdown page path. Must end in `.md`.
+</ParamField>
+<ParamField body="workflow" type="string" required>
+  Workflow name.
+</ParamField>
+<ParamField body="state" type="string" required>
+  Target state. Matched case-insensitively and stored with the workflow's spelling.
+</ParamField>
+<ParamField body="ordinal" type="integer">
+  Position within the column. Lower values sort first.
+</ParamField>
+<ParamField body="actor" type="string">
+  Commit author. Falls back to the `X-Actor` header, then `system`.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/workflow/assign' \
+  -H "Content-Type: application/json" \
+  -d '{"path": "tasks/t-42.md", "workflow": "triage", "state": "open", "actor": "agent:bot"}'
+```
+
+Returns `400` for a missing field, a non-markdown path, or an unknown state, and `404` if the workflow or page does not exist.
+
+<ResponseField name="path" type="string">Page path.</ResponseField>
+<ResponseField name="workflow" type="string">Workflow name.</ResponseField>
+<ResponseField name="state" type="string">Stored state name.</ResponseField>
+<ResponseField name="etag" type="string">Git blob hash of the page after the call.</ResponseField>
+<ResponseField name="noop" type="boolean">`true` when the page already had this workflow and state and no `ordinal` was given, so nothing was written.</ResponseField>
 
 ```json
-{
-  "path": "tasks/t-42.md",
-  "workflow": "triage",
-  "state": "open",
-  "actor": "agent:bot"
-}
+{ "path": "tasks/t-42.md", "workflow": "triage", "state": "open", "etag": "5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f7e6d" }
 ```
-
-Sets the `workflow` and `state` frontmatter fields on the page. Use this to onboard a page into a workflow for the first time.
 
 ## Advance a page
 
+Move a page to another state, enforcing the workflow's rules. The server also sets `modified` to the current UTC time and, if the page has a `status` field that mirrored the old state, updates `status` too.
+
 ```http
-POST /workflow/advance
-Content-Type: application/json
+POST /api/kiwi/workflow/advance
 ```
+
+<ParamField body="path" type="string" required>
+  Markdown page path. The page must have `workflow` and `state` frontmatter.
+</ParamField>
+<ParamField body="target_state" type="string" required>
+  State to move to.
+</ParamField>
+<ParamField body="workflow" type="string">
+  Expected workflow. If set and it differs from the page's `workflow`, the call fails with `409`.
+</ParamField>
+<ParamField body="actor" type="string">
+  Commit author. Falls back to the `X-Actor` header, then `system`.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/workflow/advance' \
+  -H "Content-Type: application/json" \
+  -d '{"path": "tasks/t-42.md", "target_state": "in_progress", "actor": "agent:bot"}'
+```
+
+The call returns `409` when:
+
+- the target state does not exist in the workflow
+- the current state is terminal
+- no transition goes from the current state to the target
+- the target column is at its `wip_limit`
+- the target is `in_progress` and the page is blocked (a `blocked_by` page isn't finished, or `blocked: true`)
+- the page changed during the request
+
+It returns `400` when the page has no frontmatter, `workflow`, or `state`, and `404` when the page or workflow does not exist.
+
+<ResponseField name="path" type="string">Page path.</ResponseField>
+<ResponseField name="from_state" type="string">State before the call.</ResponseField>
+<ResponseField name="to_state" type="string">State after the call.</ResponseField>
+<ResponseField name="etag" type="string">Git blob hash of the page after the call.</ResponseField>
+<ResponseField name="noop" type="boolean">`true` when the page was already in `target_state`.</ResponseField>
+
+```json
+{ "path": "tasks/t-42.md", "from_state": "open", "to_state": "in_progress", "etag": "7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b" }
+```
+
+## Reorder a card
+
+Set a page's `ordinal` frontmatter field, which controls its position within its board column.
+
+```http
+POST /api/kiwi/workflow/reorder
+```
+
+<ParamField body="path" type="string" required>
+  Page path.
+</ParamField>
+<ParamField body="ordinal" type="integer" required>
+  New position. Cards sort by ascending `ordinal`; cards without one sort last. Leave gaps (the web UI uses steps of 1000) so you can insert between cards.
+</ParamField>
+<ParamField body="actor" type="string">
+  Commit author. Falls back to the `X-Actor` header, then `system`.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/workflow/reorder' \
+  -H "Content-Type: application/json" \
+  -d '{"path": "tasks/t-42.md", "ordinal": 1500}'
+```
+
+Returns `404` if the page does not exist.
+
+<ResponseField name="path" type="string">Page path.</ResponseField>
+<ResponseField name="ordinal" type="integer">Stored ordinal.</ResponseField>
+<ResponseField name="etag" type="string">Git blob hash of the page after the call.</ResponseField>
+<ResponseField name="noop" type="boolean">`true` when the page already had this ordinal.</ResponseField>
+
+```json
+{ "path": "tasks/t-42.md", "ordinal": 1500, "etag": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b" }
+```
+
+## Get the kanban board
+
+Return the workflow definition and every markdown page in it, grouped by state.
+
+```http
+GET /api/kiwi/workflow/board/:workflow
+```
+
+<ParamField path="workflow" type="string" required>
+  Workflow name.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/workflow/board/triage'
+```
+
+Returns `404` if the workflow does not exist.
+
+<ResponseField name="workflow" type="object">The [workflow definition](#workflow-definition).</ResponseField>
+<ResponseField name="board" type="object">
+  Map from state name to an array of cards. Every state has a key, even when empty. Pages whose `state` isn't in the workflow appear under `__unmatched__`.
+  <Expandable title="card properties">
+    <ResponseField name="path" type="string">Page path.</ResponseField>
+    <ResponseField name="state" type="string">Page's `state` value.</ResponseField>
+    <ResponseField name="title" type="string">Frontmatter `title`, or the file name.</ResponseField>
+    <ResponseField name="priority" type="any">Frontmatter `priority`, if set.</ResponseField>
+    <ResponseField name="tags" type="string[]">Frontmatter tags, if set.</ResponseField>
+    <ResponseField name="due" type="string">Frontmatter `due`, if set.</ResponseField>
+    <ResponseField name="author" type="string">Frontmatter `author`, if set.</ResponseField>
+    <ResponseField name="ordinal" type="integer">Column position, if set.</ResponseField>
+    <ResponseField name="depends_on" type="string[]">Frontmatter `depends_on`, if set.</ResponseField>
+    <ResponseField name="blocked" type="boolean">`true` if the card is blocked.</ResponseField>
+    <ResponseField name="block_reason" type="string">Why the card is blocked.</ResponseField>
+    <ResponseField name="description" type="string">Short excerpt of the page body.</ResponseField>
+    <ResponseField name="modified" type="string">Frontmatter `modified`, or the file's modification time (RFC 3339).</ResponseField>
+  </Expandable>
+</ResponseField>
 
 ```json
 {
-  "path": "tasks/t-42.md",
-  "target_state": "done",
-  "actor": "agent:bot"
+  "workflow": { "name": "triage", "states": [/* ... */], "transitions": [/* ... */] },
+  "board": {
+    "open": [
+      { "path": "tasks/t-15.md", "state": "open", "title": "Fix login redirect", "priority": "high", "ordinal": 1000 }
+    ],
+    "in_progress": [
+      { "path": "tasks/t-42.md", "state": "in_progress", "title": "Rotate API keys", "modified": "2026-10-18T09:12:00Z" }
+    ],
+    "done": []
+  }
 }
 ```
 
-- Requires the page to have **`workflow`** and **`state`** in frontmatter.
-- Validates `(state → target_state)` against the workflow's `transitions`.
-- Writes the page with updated `state` via the normal pipeline.
+## MCP equivalents
 
-Returns **`409`** when the transition is not allowed.
+`kiwi_workflow_list`, `kiwi_workflow_get`, `kiwi_workflow_save`, `kiwi_workflow_advance`, and `kiwi_workflow_board`. Assign, reorder, and delete are REST-only.
 
-## Reorder items on the board
+## Related
 
-```http
-POST /workflow/reorder
-Content-Type: application/json
-```
-
-```json
-{
-  "workflow": "triage",
-  "state": "in_progress",
-  "paths": ["tasks/t-42.md", "tasks/t-15.md", "tasks/t-99.md"]
-}
-```
-
-Sets the display order of pages within a workflow state column. The `paths` array defines the new order top-to-bottom.
-
-## Kanban board
-
-```http
-GET /workflow/board/:workflow
-```
-
-Returns `{ "workflow": { ... }, "board": { "<state>": [ { "path", "title", ... } ] } }` grouping markdown pages that declare the given workflow name.
-
-## MCP parity
-
-`kiwi_workflow_list`, `kiwi_workflow_get`, `kiwi_workflow_save`, `kiwi_workflow_advance`, `kiwi_workflow_board` — see [MCP](/concepts/mcp).
+<CardGroup cols={2}>
+  <Card title="Workflows concepts" icon="bars-progress" href="/concepts/workflows">
+    States, transitions, WIP limits, and blocked cards.
+  </Card>
+  <Card title="Claims" icon="lock" href="/api/claims">
+    Lease a page before an agent works on it.
+  </Card>
+</CardGroup>

@@ -1,29 +1,31 @@
 ---
 title: "FAQ"
-description: "Frequently asked questions about KiwiFS installation, agents, search, and deployment."
+description: "Answers to common questions about installing, securing, searching, and running KiwiFS."
 icon: "circle-question"
 ---
+
+## General
 
 <AccordionGroup>
 
 <Accordion title="What is KiwiFS?">
-A markdown filesystem for agents and teams — a single Go binary with a web UI, git versioning, full-text and vector search, and access via REST, MCP, NFS, S3, WebDAV, and FUSE.
+A markdown filesystem for agents and teams. It's a single Go binary with a web UI, git versioning, full-text and vector search, and access over REST, MCP, NFS, S3, WebDAV, and FUSE. Your content stays plain markdown files on disk.
 </Accordion>
 
 <Accordion title="How is this different from Obsidian?">
-Obsidian is a desktop app. KiwiFS is a server with a web UI, agent APIs, git audit trail, and server-side search over the same markdown files.
+Obsidian is a desktop app. KiwiFS is a server: it adds a web UI, agent APIs, a git audit trail, and server-side search over the same kind of markdown files. You can [import an Obsidian vault](/import/files) directly.
 </Accordion>
 
 <Accordion title="How is this different from Notion or Confluence?">
-Those tools store content in proprietary databases. KiwiFS stores plain markdown. `cat page.md` and `git clone` always work.
+Those tools keep content in their own databases. KiwiFS stores plain markdown, so `cat page.md` and `git clone` always work.
 </Accordion>
 
-<Accordion title="Do I need to know Git?">
-No. Git runs under the hood; the API and web UI hide it. Git is the audit trail, not the primary interface.
+<Accordion title="Do I need to know git?">
+No. Git runs under the hood and the web UI and API hide it. It is the audit trail, not the interface.
 </Accordion>
 
 <Accordion title="Is KiwiFS production-ready?">
-KiwiFS is in active development (currently v0.19). Core features are stable in internal production use. Public APIs may evolve before v1.0.
+KiwiFS is in active development (v0.19). Core features run in production, but public APIs may change before v1.0. Pin a version and read the changelog before upgrading.
 </Accordion>
 
 </AccordionGroup>
@@ -32,31 +34,41 @@ KiwiFS is in active development (currently v0.19). Core features are stable in i
 
 <AccordionGroup>
 
-<Accordion title="System requirements?">
-A single static Go binary. SQLite is embedded. The web UI is embedded via `go:embed`. Runs on macOS, Linux, and Docker.
+<Accordion title="What are the system requirements?">
+One static binary. SQLite and the web UI are embedded, and there are no CGo dependencies. KiwiFS runs on macOS, Linux, and Docker. `git` must be on the path for git versioning. The FUSE client (`kiwifs mount`) isn't available on Windows.
 </Accordion>
 
-<Accordion title="How do I install?">
-```bash
-brew install kiwifs/tap/kiwifs
-# or
-curl -fsSL https://raw.githubusercontent.com/kiwifs/kiwifs/main/install.sh | sh
-# or
-go install github.com/kiwifs/kiwifs@latest
+<Accordion title="How do I install it?">
+Download a release binary, or run the Docker image:
+
+```bash Terminal
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
+curl -fsSL "https://github.com/kiwifs/kiwifs/releases/latest/download/kiwifs-$OS-$ARCH.tar.gz" | tar -xz
+sudo mv "kiwifs-$OS-$ARCH" /usr/local/bin/kiwifs
+
+# or, with Docker
+docker run -d -p 3333:3333 -v kiwifs-data:/data ameliaanhlam/kiwifs
 ```
+
+The [Quickstart](/quickstart) also covers building from source with `make build`.
 </Accordion>
 
-<Accordion title="What is in .kiwi/?">
-Derived state — not your content. Safe to delete and rebuild with `kiwifs reindex`.
+<Accordion title="What is in .kiwi/, and what can I delete?">
+`.kiwi/` holds configuration and derived state side by side:
 
-```text
-.kiwi/
-├── config.toml
-├── playbook.md
-├── state/search.db
-├── comments/
-└── templates/
-```
+| Path | What it is | Safe to delete? |
+| --- | --- | --- |
+| `config.toml`, `rules.md`, `playbook.md` | Configuration and agent instructions | No |
+| `templates/`, `schemas/`, `workflows/` | Page templates, JSON Schemas, workflow definitions | No |
+| `comments/` | Inline comments, one JSON file per page | No |
+| `state/` | Search index (`search.db`) and other indexes | Yes. Rebuild with `kiwifs reindex` |
+
+Commit everything except `.kiwi/state/`, which `kiwifs init` adds to `.gitignore`.
+</Accordion>
+
+<Accordion title="Which template should I start with?">
+`kiwifs init` defaults to `kb`. Use `wiki` for a team wiki, `memory` for agent memory, or `tasks` for task tracking. See [Init templates](/guides/templates) for all 12.
 </Accordion>
 
 </AccordionGroup>
@@ -65,20 +77,20 @@ Derived state — not your content. Safe to delete and rebuild with `kiwifs rein
 
 <AccordionGroup>
 
-<Accordion title="How do agents write?">
-Three ways:
+<Accordion title="How do agents read and write?">
+Three ways, all through the same write pipeline:
 
-1. **Filesystem** — NFS or FUSE mount: `cat`, `echo`, `grep`
-2. **REST** — `PUT /api/kiwi/file`
-3. **MCP** — `kiwifs mcp --root ~/knowledge` (71 tools)
+1. **MCP**: `kiwifs mcp --root ~/knowledge` over stdio, or the `/mcp` endpoint that `kiwifs serve` always exposes. 78 tools.
+2. **REST**: `PUT /api/kiwi/file` and friends.
+3. **Filesystem**: an NFS or FUSE mount, with `cat`, `echo`, and `grep`.
 </Accordion>
 
 <Accordion title="Can agents use KiwiFS without a running server?">
-Yes. `kiwifs mcp --root ~/knowledge` runs in-process against the directory. No HTTP needed.
+Yes. `kiwifs mcp --root ~/knowledge` works directly on the folder in-process. To share one knowledge base between several agents, run `kiwifs serve` and point them at it with `kiwifs mcp --remote http://host:3333`.
 </Accordion>
 
-<Accordion title="How do I configure Cursor or Claude Desktop?">
-```json
+<Accordion title="How do I configure Cursor, Claude Code, or Claude Desktop?">
+```json mcp.json
 {
   "mcpServers": {
     "kiwifs": {
@@ -89,11 +101,37 @@ Yes. `kiwifs mcp --root ~/knowledge` runs in-process against the directory. No H
 }
 ```
 
-See [MCP](/concepts/mcp).
+For a [KiwiFS Cloud](/guides/cloud) workspace, `kiwifs connect <slug> --write auto` writes the config for you. See [MCP](/concepts/mcp).
 </Accordion>
 
 <Accordion title="How does provenance tracking work?">
-Send `X-Actor` and `X-Provenance` on writes. KiwiFS injects `derived-from` into frontmatter automatically.
+Send `X-Actor` and `X-Provenance` headers on writes. The actor is recorded as the git commit author, and KiwiFS adds a `derived-from` entry to the page's frontmatter.
+</Accordion>
+
+<Accordion title="How do I reorganize pages without breaking links?">
+Use a refactor plan. It moves, renames, and merges pages in one commit and rewrites every link that pointed at them. Use **Restructure** in the [web UI](/guides/web-ui#restructure-pages), `kiwifs refactor plan` and `apply` in the CLI, or `kiwi_refactor_plan` and `kiwi_refactor_apply` over MCP. See [Refactor](/concepts/refactor).
+</Accordion>
+
+</AccordionGroup>
+
+## Security
+
+<AccordionGroup>
+
+<Accordion title="Is my server open by default?">
+Yes. The default auth mode is `none`, which suits a laptop. Before exposing a server, set `[auth] type` to `apikey`, `perspace`, or `oidc`. See [Authentication](/guides/auth-tokens).
+</Accordion>
+
+<Accordion title="Why do /raw/ links or llms.txt return 401 or show fewer pages?">
+When auth is on, `/raw/{path}` needs an `Authorization` header or a signed URL from `GET /api/kiwi/raw-sign`, unless the file is public or published. `/llms.txt` and `/llms-full.txt` list only public or published pages. The web UI signs image and video URLs for you. See [Raw files and llms.txt](/guides/auth-tokens#raw-files-and-llms-txt).
+</Accordion>
+
+<Accordion title="Do NFS, S3, and WebDAV use my API keys?">
+Only the global `api_key` in `apikey` mode. NFS uses an IP allowlist (`--nfs-allow`) and no keys. Keep these protocols on a private network. See [Alternate protocols](/guides/alternate-protocols#authentication).
+</Accordion>
+
+<Accordion title="Can people see quiz answers in search?">
+No. KiwiFS indexes only the question of a [quiz](/guides/web-ui#quizzes), so answers don't appear in search results or snippets. The answers stay in the markdown file itself.
 </Accordion>
 
 </AccordionGroup>
@@ -105,19 +143,43 @@ Send `X-Actor` and `X-Provenance` on writes. KiwiFS injects `derived-from` into 
 <Accordion title="What search backends exist?">
 | Tier | Engine |
 | --- | --- |
-| 1 | `grep` (zero deps) |
-| 2 | `sqlite` (FTS5, BM25 — default) |
-| 3 | Vector (`[search.vector]` — optional) |
+| 1 | `grep` (no dependencies) |
+| 2 | `sqlite`: FTS5 with BM25 ranking (default) |
+| 3 | Vector search with `[search.vector]` (optional) |
+
+The web UI's search runs full-text and vector search together when vector search is on. See [Search](/concepts/search).
 </Accordion>
 
-<Accordion title="Vector search without a cloud API key?">
-Use Ollama as the embedder and `sqlite-vec` as the store for fully local semantic search.
+<Accordion title="Can I run vector search without a cloud API key?">
+Yes. Use Ollama (or the built-in ONNX embedder) as `[search.vector.embedder]` and `sqlite` as `[search.vector.store] provider`. Everything stays on your machine. See [Ollama vector search](/deploy/ollama-vector-search).
 </Accordion>
 
-<Accordion title="Rebuild the index?">
-```bash
+<Accordion title="How do I rebuild the index?">
+```bash Terminal
 kiwifs reindex --root ./knowledge
 ```
+</Accordion>
+
+</AccordionGroup>
+
+## Web UI
+
+<AccordionGroup>
+
+<Accordion title="Can I hide parts of the web UI?">
+Yes. Set keys under `[ui.features]` to `false`, for example `edit = false` for a read-only UI. This only hides buttons; use [auth scopes](/guides/auth-tokens#scopes) to actually block writes. See [Customize the UI](/guides/web-ui#customize-the-ui).
+</Accordion>
+
+<Accordion title="A shortcut doesn't work in my browser. Can I change it?">
+Some defaults, like `Mod+Shift+W` and `Mod+N`, are also browser shortcuts. Rebind them in `.kiwi/keybindings.json` or `[ui.keybindings]`. See [Keyboard shortcuts](/guides/web-ui#customize-shortcuts).
+</Accordion>
+
+<Accordion title="Why is the progress tracker collapsed?">
+Every folder in a progress tracker starts collapsed so long courses stay readable. Click a folder's header to expand it.
+</Accordion>
+
+<Accordion title="Does PDF export work offline?">
+**Export as PDF** in the web UI downloads the Typst compiler from a CDN the first time, so it needs internet access. For offline or automated exports, use `kiwifs export --format pdf` or [`POST /api/kiwi/export/document`](/export/documents).
 </Accordion>
 
 </AccordionGroup>
@@ -126,19 +188,23 @@ kiwifs reindex --root ./knowledge
 
 <AccordionGroup>
 
-<Accordion title="NFS vs S3 vs WebDAV vs FUSE?">
+<Accordion title="NFS, S3, WebDAV, or FUSE?">
 | Protocol | Best for |
 | --- | --- |
-| NFS | Docker / Kubernetes mounts |
-| S3 | Backup tools, pipelines |
-| WebDAV | Desktop sync, mapped drives |
-| FUSE | Developer workstation remote mount |
+| NFS | Docker and Kubernetes mounts |
+| S3 | Backup tools and pipelines |
+| WebDAV | Finder, Explorer, desktop sync |
+| FUSE | Mounting a remote server on a workstation |
 
 See [Alternate protocols](/guides/alternate-protocols).
 </Accordion>
 
 <Accordion title="Do all protocols share one pipeline?">
-Yes. Every write gets git commit, index update, and SSE broadcast regardless of entry protocol.
+Yes. Every write gets a git commit, an index update, and an SSE broadcast, whichever protocol it came in on.
+</Accordion>
+
+<Accordion title="Can one server host several knowledge bases?">
+Yes. Pass `--space name=path` once per extra knowledge base, or list them in `[[spaces]]`. Each space has its own git repo and search index, and its own routes at `/api/kiwi/{name}/...`. See [Multi-space](/concepts/multi-space).
 </Accordion>
 
 </AccordionGroup>
@@ -147,22 +213,27 @@ Yes. Every write gets git commit, index update, and SSE broadcast regardless of 
 
 <AccordionGroup>
 
-<Accordion title="Crash mid-write?">
-Atomic writes (temp → fsync → rename). Git reflog aids recovery.
+<Accordion title="What happens if the server crashes mid-write?">
+Writes are atomic: KiwiFS writes a temp file, calls `fsync`, and renames it into place. You get either the old file or the new one, never half of each.
 </Accordion>
 
-<Accordion title="Backup?">
-- `git push` to any remote
-- `kiwifs backup` / `[backup]` in config
-- `kiwifs restore --from ... --to ...`
-- `rsync` the knowledge root
+<Accordion title="How do I back up?">
+- Set `[backup] remote` to push to a git remote every few minutes, or run `kiwifs backup`.
+- Restore with `kiwifs restore --from <remote> --to <dir>`.
+- Or `rsync` the knowledge root.
+
+See [Backup and sync](/deploy/backup-sync).
 </Accordion>
 
-<Accordion title="Migrate from Obsidian or Notion?">
-```bash
+<Accordion title="How do I migrate from Obsidian or Notion?">
+```bash Terminal
 kiwifs import --from obsidian --path ~/vault --root ./knowledge
-kiwifs import --from notion --api-key $KEY --database-id $ID --root ./knowledge
+
+export NOTION_API_KEY=secret_...
+kiwifs import --from notion --database-id $DATABASE_ID --root ./knowledge
 ```
+
+The web UI's import wizard supports both too. See [Import](/import/overview).
 </Accordion>
 
 </AccordionGroup>
@@ -172,15 +243,15 @@ kiwifs import --from notion --api-key $KEY --database-id $ID --root ./knowledge
 <AccordionGroup>
 
 <Accordion title="Is KiwiFS open source?">
-No. KiwiFS is **Fair Source** under [BSL 1.1](https://github.com/kiwifs/kiwifs/blob/main/LICENSE). The source is public and you can self-host, modify, and embed it. You cannot offer KiwiFS itself as a competing hosted service. Each release converts to Apache 2.0 four years later. See [fair.io](https://fair.io/licenses/).
+KiwiFS is source-available under the [Business Source License 1.1](https://github.com/kiwifs/kiwifs/blob/main/LICENSE). You can self-host, modify, and embed it, including in production. You can't offer KiwiFS itself to third parties as a competing hosted service. Each release converts to Apache 2.0 four years after it ships.
 </Accordion>
 
-<Accordion title="Commercial use?">
-BSL 1.1 — self-host and embed freely. You cannot offer KiwiFS itself as a commercial hosted service. Each release converts to Apache 2.0 after four years.
+<Accordion title="Can I use it commercially?">
+Yes, to build and run your own applications and internal services, and to embed it in your product. The only restriction is offering KiwiFS itself as a commercial hosted service.
 </Accordion>
 
-<Accordion title="Contribute?">
-See [CONTRIBUTING.md](https://github.com/kiwifs/docs/blob/main/CONTRIBUTING.md).
+<Accordion title="How do I contribute?">
+See [CONTRIBUTING.md](https://github.com/kiwifs/kiwifs/blob/main/CONTRIBUTING.md) for the code, or [the docs repo](https://github.com/kiwifs/docs/blob/main/CONTRIBUTING.md) for documentation.
 </Accordion>
 
 </AccordionGroup>

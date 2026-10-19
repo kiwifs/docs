@@ -1,166 +1,184 @@
 ---
-title: "SaaS imports"
-description: "Import data from Notion, Airtable, Google Sheets, Obsidian, and Confluence into KiwiFS."
+title: "App and wiki imports"
+sidebarTitle: "Apps and wikis"
+description: "Import from Notion, Airtable, Google Sheets, Obsidian vaults, and Confluence."
 icon: "cloud-arrow-down"
 ---
 
-KiwiFS can import data from third-party SaaS platforms, converting records into markdown pages.
+These sources pull records or pages from note-taking apps, spreadsheets, and wikis. Every source also accepts the [common flags](/import/overview#common-flags).
 
 ## Notion
 
-Import pages from a Notion database.
+Import the rows of a Notion database. Each row's properties become frontmatter. The page body is not imported.
 
-```bash
-kiwifs import --from notion \
-  --prefix knowledge/ \
-  --root ./knowledge
-```
+<Steps>
+  <Step title="Create an integration">
+    Create a [Notion integration](https://www.notion.so/my-integrations) and copy its secret.
+  </Step>
+  <Step title="Share the database">
+    Open the database in Notion and add the integration as a connection.
+  </Step>
+  <Step title="Run the import">
+    ```bash Terminal
+    export NOTION_API_KEY="ntn_..."
+    kiwifs import --from notion --database-id 1a2b3c4d5e6f --root ./knowledge
+    ```
+  </Step>
+</Steps>
 
 | Flag | Description |
 |------|-------------|
-| `--database-id` | Notion database ID (required for MCP) |
-| `--prefix` | Path prefix in KiwiFS |
-| `--limit` | Max records to import |
-| `--dry-run` | Preview without writing |
+| `--database-id` | Notion database ID (required) |
 
-### Setup
-
-1. Create a [Notion integration](https://www.notion.so/my-integrations) and copy the API key.
-2. Share your database with the integration.
-3. Set the `NOTION_API_KEY` environment variable.
-
-```bash
-export NOTION_API_KEY="ntn_..."
-kiwifs import --from notion --root ./knowledge
-```
-
-### MCP usage
-
-```json
-{
-  "tool": "kiwi_import",
-  "arguments": {
-    "from": "notion",
-    "database_id": "abc123...",
-    "prefix": "notion-pages/"
-  }
-}
-```
+The default prefix is `notion`. A row's `title` or `Name` property becomes its file name.
 
 ## Airtable
 
-Import records from an Airtable base.
+Import the records of one Airtable table.
 
-```bash
-kiwifs import --from airtable \
-  --prefix records/ \
-  --root ./knowledge
+```bash Terminal
+export AIRTABLE_API_KEY="pat..."
+kiwifs import --from airtable --base-id appXXXX --table-id tblYYYY --root ./knowledge
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--base-id` | Airtable base ID (required for MCP) |
-| `--table-id` | Airtable table ID (required for MCP) |
-| `--prefix` | Path prefix in KiwiFS |
-| `--limit` | Max records to import |
+| `--base-id` | Airtable base ID (required) |
+| `--table-id` | Airtable table ID (required) |
 
-### Setup
+Create the token on the [personal access tokens](https://airtable.com/create/tokens) page. A record's `Name` field becomes its file name.
 
-1. Create a [personal access token](https://airtable.com/create/tokens) in Airtable.
-2. Set the `AIRTABLE_API_KEY` environment variable.
+### Notion and Airtable over REST and MCP
 
-```bash
-export AIRTABLE_API_KEY="pat..."
-kiwifs import --from airtable --root ./knowledge
-```
+Both sources work with `POST /api/kiwi/import` and the `kiwi_import` MCP tool. Over REST, pass the token in `api_key` or set the environment variable on the server.
 
-### MCP usage
+<Tabs>
+  <Tab title="REST">
+    ```bash Terminal
+    curl -X POST http://localhost:3333/api/kiwi/import \
+      -H "Content-Type: application/json" \
+      -d '{
+        "from": "notion",
+        "database_id": "1a2b3c4d5e6f",
+        "api_key": "ntn_...",
+        "prefix": "notion-pages"
+      }'
+    ```
+  </Tab>
+  <Tab title="MCP">
+    ```json kiwi_import
+    {
+      "from": "airtable",
+      "base_id": "appXXXX",
+      "table_id": "tblYYYY",
+      "prefix": "airtable"
+    }
+    ```
 
-```json
-{
-  "tool": "kiwi_import",
-  "arguments": {
-    "from": "airtable",
-    "base_id": "app...",
-    "table_id": "tbl...",
-    "prefix": "airtable/"
-  }
-}
-```
+    The MCP tool reads `NOTION_API_KEY` and `AIRTABLE_API_KEY` from its own environment.
+  </Tab>
+</Tabs>
+
+<Note>
+Over REST, KiwiFS routes Notion and Airtable through the [Airbyte](/import/airbyte) connector when Docker or an Airbyte Cloud key is available, and uses the built-in connector otherwise. Add `"via": "builtin"` to always use the built-in connector.
+</Note>
 
 ## Google Sheets
 
-Import rows from a Google Sheets spreadsheet.
+Import the rows of one sheet. The first row is the header.
 
-```bash
+```bash Terminal
 kiwifs import --from gsheets \
   --spreadsheet-id "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms" \
   --sheet "Sheet1" \
-  --prefix gsheets/ \
+  --credentials service-account.json \
   --root ./knowledge
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--spreadsheet-id` | Google Sheets spreadsheet ID (required) |
-| `--sheet` | Sheet name (defaults to first sheet) |
-| `--credentials` | Path to Google service account JSON (or set `GOOGLE_APPLICATION_CREDENTIALS`) |
-| `--id-column` | Column to use as filename |
-| `--prefix` | Path prefix in KiwiFS |
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--spreadsheet-id` | | Spreadsheet ID from the URL (required) |
+| `--sheet` | `Sheet1` | Sheet name. It's also the default prefix. |
+| `--credentials` | | Service account JSON file. Without it, KiwiFS uses Application Default Credentials. |
 
-The first row is treated as column headers.
+Share the spreadsheet with the service account's email address. Google Sheets is CLI-only.
 
 ## Obsidian
 
-Import an Obsidian vault into KiwiFS, preserving wiki-links and frontmatter.
+Import an Obsidian vault and convert its syntax to KiwiFS conventions.
 
-```bash
-kiwifs import --from obsidian \
-  --path ~/my-vault \
-  --prefix vault/ \
-  --root ./knowledge
+```bash Terminal
+kiwifs import --from obsidian --path ~/my-vault --prefix vault --root ./knowledge
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--path` | Path to the Obsidian vault directory (required) |
-| `--prefix` | Path prefix in KiwiFS |
+| `--path` | Vault folder, the one that contains `.obsidian/` (required) |
+
+During the import, KiwiFS:
+
+- Keeps each note's frontmatter and folder structure.
+- Rewrites wiki links to lowercase, hyphenated targets: `[[Page Name|Alias]]` becomes `[[page-name|Alias]]`.
+- Rewrites embeds to markdown images: `![[diagram.png]]` becomes `![diagram](assets/diagram.png)`.
+- Copies images, PDFs, and media into an `assets/` folder.
+- Skips `.obsidian/` and `.trash/`.
+
+The vault path is read on the machine running KiwiFS. The web UI import wizard and `POST /api/kiwi/import` both support Obsidian:
+
+```bash Terminal
+curl -X POST http://localhost:3333/api/kiwi/import \
+  -H "Content-Type: application/json" \
+  -d '{"from": "obsidian", "path": "/srv/vaults/research", "prefix": "research"}'
+```
 
 <Tip>
-Obsidian's `[[wiki-link]]` syntax is preserved — KiwiFS uses the same link format natively.
+Use [`--from markdown`](/import/files#markdown-folders) for plain markdown folders that you want copied without any rewriting.
 </Tip>
 
 ## Confluence
 
-Import pages from a Confluence space.
+Import a space from an HTML export, or fetch it live from Confluence Cloud. Both modes keep the page tree, convert common macros, and import attachments.
 
-```bash
-kiwifs import --from confluence \
-  --url "https://your-domain.atlassian.net" \
-  --prefix confluence/ \
-  --root ./knowledge
-```
+<Tabs>
+  <Tab title="HTML export">
+    Export the space as HTML from Confluence, unzip it, and point `--path` at the folder.
+
+    ```bash Terminal
+    kiwifs import --from confluence --path ./MYSPACE-export --root ./knowledge
+    ```
+
+    The default prefix is the export folder's name.
+  </Tab>
+  <Tab title="Confluence Cloud API">
+    ```bash Terminal
+    export CONFLUENCE_EMAIL="you@example.com"
+    export CONFLUENCE_API_TOKEN="..."
+    kiwifs import --from confluence --api \
+      --space MYSPACE \
+      --url https://your-domain.atlassian.net/wiki \
+      --root ./knowledge
+    ```
+
+    You can set `CONFLUENCE_BASE_URL` instead of passing `--url`. The default prefix is `confluence-<space key>`.
+  </Tab>
+</Tabs>
 
 | Flag | Description |
 |------|-------------|
-| `--url` | Confluence base URL (required) |
-| `--prefix` | Path prefix in KiwiFS |
-| `--limit` | Max pages to import |
+| `--path` | Folder of an unzipped HTML export (export mode) |
+| `--api` | Fetch from the Confluence Cloud REST API |
+| `--space` | Space key (required with `--api`) |
+| `--url` | Confluence base URL (API mode) |
 
-<Note>
-Confluence import uses the Confluence REST API. Authenticate via API token set as environment variable or passed through the Airbyte connector for richer sync. See [Airbyte import](/import/airbyte).
-</Note>
+Confluence import is CLI-only.
 
-## Re-import behavior
+## Related
 
-All SaaS imports are idempotent. KiwiFS uses `_source_id` in frontmatter to track which records have been imported. Re-running an import:
-
-- **Skips** records that haven't changed
-- **Updates** records with new field values
-- **Creates** new records that weren't imported before
-
-Use `--dry-run` to preview changes before writing:
-
-```bash
-kiwifs import --from notion --dry-run
-```
+<CardGroup cols={2}>
+  <Card title="Import overview" icon="download" href="/import/overview">
+    Output format, common flags, and re-import rules.
+  </Card>
+  <Card title="Airbyte import" icon="rotate" href="/import/airbyte">
+    Notion, Airtable, and Firebase through Airbyte connectors.
+  </Card>
+</CardGroup>

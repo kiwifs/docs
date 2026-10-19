@@ -1,156 +1,195 @@
 ---
 title: "File imports"
-description: "Import data from CSV, JSON, JSONL, YAML, and Excel files into KiwiFS."
+description: "Import CSV, JSON, JSONL, YAML, Excel, BibTeX, and markdown folders into KiwiFS."
 icon: "file-csv"
 ---
 
-KiwiFS can import structured data from local files, converting each record into a markdown page with frontmatter.
+File sources read a local file and turn each record into a markdown page. Every source also accepts the [common flags](/import/overview#common-flags): `--prefix`, `--id-column`, `--columns`, `--limit`, and `--dry-run`. The default `--prefix` is the file name without its extension.
 
-## CSV
+## Tabular files
 
-```bash
-kiwifs import --from csv \
-  --file data.csv \
-  --prefix people/ \
-  --root ./knowledge
-```
+<Tabs>
+  <Tab title="CSV">
+    ```bash Terminal
+    kiwifs import --from csv --file people.csv --root ./knowledge
+    ```
+
+    The first row is the header. Each following row becomes a page.
+  </Tab>
+  <Tab title="JSON">
+    ```bash Terminal
+    kiwifs import --from json --file items.json --root ./knowledge
+    ```
+
+    The file holds an array of objects.
+
+    ```json items.json
+    [
+      { "id": "a", "name": "Item A", "status": "active" },
+      { "id": "b", "name": "Item B", "status": "draft" }
+    ]
+    ```
+  </Tab>
+  <Tab title="JSONL">
+    ```bash Terminal
+    kiwifs import --from jsonl --file items.jsonl --root ./knowledge
+    ```
+
+    The file holds one object per line.
+
+    ```json items.jsonl
+    {"id": "a", "name": "Item A", "status": "active"}
+    {"id": "b", "name": "Item B", "status": "draft"}
+    ```
+  </Tab>
+  <Tab title="YAML">
+    ```bash Terminal
+    kiwifs import --from yaml --file items.yaml --root ./knowledge
+    ```
+
+    The file holds a list of mappings.
+
+    ```yaml items.yaml
+    - id: a
+      name: Item A
+      status: active
+    - id: b
+      name: Item B
+      status: draft
+    ```
+  </Tab>
+  <Tab title="Excel">
+    ```bash Terminal
+    kiwifs import --from excel --file records.xlsx --sheet "Sheet1" --root ./knowledge
+    ```
+
+    The first row of the sheet is the header. Without `--sheet`, KiwiFS reads the first sheet.
+  </Tab>
+</Tabs>
 
 | Flag | Description |
 |------|-------------|
-| `--file` | Path to CSV file (required) |
-| `--columns` | Comma-separated fields to include |
-| `--id-column` | Column to use as filename |
-| `--prefix` | Path prefix in KiwiFS |
-| `--limit` | Max records to import |
-| `--dry-run` | Preview without writing |
+| `--file` | Path to the file (required) |
+| `--sheet` | Sheet name, for `excel` only |
 
-The first row of the CSV is treated as column headers. Each subsequent row becomes a markdown file.
+`json` and `jsonl` share one reader that detects the format from the first character, so either value works for either file.
+
+### File names
+
+For JSON, JSONL, YAML, and Excel, an `id` or `_id` field becomes the file name. CSV rows use the row number unless you pass `--id-column`.
 
 ### Example
 
-Given a CSV:
+Given this CSV:
 
-```csv
+```csv people.csv
 name,email,department
 Jane Doe,jane@example.com,Engineering
 Bob Smith,bob@example.com,Product
 ```
 
-After import:
+`kiwifs import --from csv --file people.csv --id-column email` writes `people/jane@example.com.md`:
 
-```markdown
+```markdown people/jane@example.com.md
 ---
-_imported_at: "2026-04-25T18:46:15Z"
-_source: data.csv
-name: Jane Doe
-email: jane@example.com
+_imported_at: "2026-10-19T18:46:15Z"
+_source: people
+_source_id: csv:people:0
 department: Engineering
+email: jane@example.com
+name: Jane Doe
 ---
 
 # Jane Doe
 
-> Auto-imported from data.csv
+| Field | Value |
+|-------|-------|
+| department | Engineering |
+| email | jane@example.com |
+| name | Jane Doe |
 ```
 
-## JSON
+### Keep only some fields
 
-```bash
-kiwifs import --from json \
-  --file data.json \
-  --prefix items/
+```bash Terminal
+kiwifs import --from csv --file people.csv --columns "name,email" --prefix people
 ```
 
-Expects a JSON file containing an array of objects:
+Fields you don't list are left out of the frontmatter.
 
-```json
-[
-  {"name": "Item A", "status": "active"},
-  {"name": "Item B", "status": "draft"}
-]
+## BibTeX
+
+Import a `.bib` reference file. Each entry becomes a page named after its citation key.
+
+```bash Terminal
+kiwifs import --from bibtex --file references.bib --prefix papers
 ```
 
-## JSONL
+KiwiFS maps common BibTeX fields to frontmatter:
 
-```bash
-kiwifs import --from jsonl \
-  --file data.jsonl \
-  --prefix items/
+| Frontmatter | From |
+|-------------|------|
+| `bibtex_key`, `bibtex_type` | Citation key and entry type |
+| `title`, `year` | `title`, `year` |
+| `authors` | `author`, split into a list |
+| `venue` | `journal`, `booktitle`, `publisher`, or `howpublished` |
+| `tags` | `keywords`, split into a list |
+
+Other fields, such as `doi`, `url`, and `abstract`, are copied as-is.
+
+## Markdown folders
+
+Copy an existing folder of markdown files into the knowledge base without rewriting their content.
+
+```bash Terminal
+kiwifs import --from markdown --path ./old-docs --prefix docs
 ```
 
-Each line is a JSON object:
+`--path` can be a single `.md` file or a directory. KiwiFS walks subdirectories, keeps each file's frontmatter and body, and copies non-markdown files such as images next to them. To also convert Obsidian syntax, use [`--from obsidian`](/import/saas#obsidian) instead.
 
-```jsonl
-{"name": "Item A", "status": "active"}
-{"name": "Item B", "status": "draft"}
+## Upload a file over REST
+
+`POST /api/kiwi/import/upload` takes a multipart upload of up to 256 MB, so the file doesn't need to be on the server. It accepts `csv`, `json`, `jsonl`, `bibtex`, and `sqlite`.
+
+```bash Terminal
+curl -X POST http://localhost:3333/api/kiwi/import/upload \
+  -F from=csv \
+  -F file=@people.csv \
+  -F prefix=people \
+  -F id_column=email
 ```
 
-JSONL is ideal for large datasets — KiwiFS streams lines without loading the entire file into memory.
+| Field | Description |
+|-------|-------------|
+| `file` | The file to import (required) |
+| `from` | Source type (required) |
+| `prefix` | Target folder. Defaults to the uploaded file name. |
+| `id_column` | Field to use as the file name |
+| `table`, `query` | Table or query, for `sqlite` uploads |
+| `field_mappings` | JSON array of field mappings, as produced by `infer-fields` |
+| `mode` | `import` (default), `preview` (first 5 records), or `infer-fields` |
 
-## YAML
+The web UI import wizard uses this endpoint for files you pick from your computer.
 
-```bash
-kiwifs import --from yaml \
-  --file data.yaml \
-  --prefix items/
-```
+## From the API or an agent
 
-Expects a YAML file containing a list of mappings:
+CSV, JSON, and JSONL also work with `POST /api/kiwi/import` and the `kiwi_import` MCP tool. Both read the `file` path on the machine running KiwiFS.
 
-```yaml
-- name: Item A
-  status: active
-- name: Item B
-  status: draft
-```
-
-Each mapping becomes a markdown page with its keys as frontmatter fields.
-
-## Excel
-
-```bash
-kiwifs import --from excel \
-  --file data.xlsx \
-  --prefix records/ \
-  --sheet "Sheet1"
-```
-
-| Flag | Description |
-|------|-------------|
-| `--file` | Path to `.xlsx` file (required) |
-| `--sheet` | Sheet name to import (defaults to the first sheet) |
-| `--columns` | Comma-separated columns to include |
-| `--id-column` | Column to use as filename |
-| `--prefix` | Path prefix in KiwiFS |
-| `--limit` | Max rows to import |
-| `--dry-run` | Preview without writing |
-
-The first row is treated as column headers.
-
-## MCP usage
-
-File imports are available via the `kiwi_import` MCP tool:
-
-```json
+```json kiwi_import
 {
-  "tool": "kiwi_import",
-  "arguments": {
-    "from": "csv",
-    "file": "/path/to/data.csv",
-    "prefix": "people/"
-  }
+  "from": "csv",
+  "file": "/srv/exports/people.csv",
+  "prefix": "people"
 }
 ```
 
-<Note>
-MCP file imports require local mode (`kiwifs mcp --root`). The file path must be accessible to the KiwiFS process.
-</Note>
+## Related
 
-## Column filtering
-
-Use `--columns` to import only specific fields:
-
-```bash
-kiwifs import --from csv --file data.csv --columns "name,email,status" --prefix people/
-```
-
-Fields not listed are excluded from the frontmatter.
+<CardGroup cols={2}>
+  <Card title="Import overview" icon="download" href="/import/overview">
+    Output format, common flags, and re-import rules.
+  </Card>
+  <Card title="Ingest documents" icon="file-pdf" href="/import/connections#ingest-documents">
+    Convert PDF, DOCX, and PPTX files into pages.
+  </Card>
+</CardGroup>

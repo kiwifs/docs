@@ -2,7 +2,7 @@
 
 > Markdown filesystem for agents and teams. Searchable. Structured. Versioned.
 
-KiwiFS is a single Go binary that turns markdown files on disk into a searchable, queryable, versioned store accessible via REST, MCP, NFS, S3, WebDAV, and FUSE.
+KiwiFS is a single Go binary that turns markdown files on disk into a searchable, queryable, versioned store accessible via REST, MCP, NFS, S3, WebDAV, and FUSE. Files on disk are the source of truth; every write is a git commit, a search index update, and an SSE event.
 
 ## Docs
 
@@ -13,14 +13,21 @@ KiwiFS is a single Go binary that turns markdown files on disk into a searchable
 
 ## Quickstart
 
-    curl -fsSL https://raw.githubusercontent.com/kiwifs/kiwifs/main/install.sh | sh
-    kiwifs init --template kb --root ./knowledge
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+    ARCH=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
+    curl -fsSL "https://github.com/kiwifs/kiwifs/releases/latest/download/kiwifs-$OS-$ARCH.tar.gz" | tar -xz
+    sudo mv "kiwifs-$OS-$ARCH" /usr/local/bin/kiwifs
+    kiwifs init --root ./knowledge          # default template: kb
     kiwifs serve --root ./knowledge
-    # Server running at http://localhost:3333
+    # Web UI, REST API, and MCP (/mcp) at http://localhost:3333
 
-## MCP Setup
+Docker: docker run -d -p 3333:3333 -v kiwifs-data:/data ameliaanhlam/kiwifs
 
-KiwiFS ships a built-in MCP server with 71 tools.
+Templates (kiwifs init --template <name>): kb (default), wiki, adr, cms, data, log, memory, prompt, research, runbook, tasks, blank
+
+## MCP setup
+
+KiwiFS ships a built-in MCP server with 78 tools. `kiwifs serve` always exposes it over streamable HTTP at /mcp.
 
 ### Claude Desktop / Cursor (stdio)
 
@@ -33,66 +40,74 @@ KiwiFS ships a built-in MCP server with 71 tools.
       }
     }
 
-### Remote proxy mode
+### Proxy to a running server
 
-    kiwifs mcp --remote https://kiwi.example.com --api-key kiwi_sk_...
+    kiwifs mcp --remote https://kiwi.example.com --api-key $KIWI_API_KEY [--space docs]
 
-### Streamable HTTP
+### Standalone streamable HTTP
 
     kiwifs mcp --root ./knowledge --http --port 8181
 
 ## KiwiFS Cloud
 
-Hosted KiwiFS at https://app.kiwifs.com. MCP and REST access via:
+Hosted KiwiFS at https://app.kiwifs.com. Workspace MCP endpoint:
 
-    MCP: https://api.kiwifs.com/api/workspaces/{slug}/mcp
-    REST: https://api.kiwifs.com/api/workspaces/{slug}/file?path=README.md
-
-Authenticate with a workspace API key (Bearer token) or MCP OAuth 2.1.
+    https://api.kiwifs.com/api/workspaces/{slug}/mcp
 
 ## REST API (key endpoints)
 
 Base URL: http://localhost:3333/api/kiwi
 
-    GET  /tree                     List files
-    GET  /file?path=<path>         Read a file
-    PUT  /file?path=<path>         Create or update a file
-    DELETE /file?path=<path>       Delete a file
-    POST /rename                   Move/rename a file
-    POST /bulk                     Atomic multi-file write
-    POST /file/append              Append without read-modify-write
-    GET  /search?q=<query>         Full-text search (BM25)
-    POST /search/semantic          Vector similarity search
-    GET  /query?q=<dql>            DQL query over frontmatter
-    GET  /versions?path=<path>     Git history
-    GET  /diff?path=<p>&from=&to=  Diff between versions
-    GET  /backlinks?path=<path>    Incoming wiki links
-    GET  /graph/analytics          PageRank, connectivity
-    POST /drafts                   Create staging branch
-    GET  /context                  Agent playbook + schema + index
-    GET  /events                   SSE real-time events
+    GET    /tree                      Directory tree
+    GET    /file?path=<path>          Read a file (ETag = git blob hash)
+    PUT    /file?path=<path>          Create or update (If-Match for optimistic locking; 409 on conflict)
+    PATCH  /file/frontmatter          Patch frontmatter fields
+    DELETE /file?path=<path>          Delete a file
+    POST   /rename                    Move or rename a file
+    POST   /bulk                      Atomic multi-file write
+    POST   /file/append               Append without read-modify-write
+    GET    /search?q=<query>          Full-text search (BM25)
+    POST   /search/semantic           Vector similarity search
+    GET    /query?q=<dql>             DQL query over frontmatter
+    GET    /versions?path=<path>      Git history
+    GET    /diff?path=<p>&from=&to=   Diff between versions
+    GET    /backlinks?path=<path>     Incoming wiki links
+    GET    /graph/analytics           PageRank, hubs, orphans
+    POST   /refactor/plan             Plan moves and merges without breaking links
+    POST   /refactor/apply            Apply a reviewed refactor plan
+    POST   /drafts                    Create a draft space (needs [drafts] enabled = true)
+    GET    /context                   Playbook, rules, schema, and index in one call
+    GET    /events                    SSE real-time events
 
-Auth: Bearer token in Authorization header. Set X-Actor on writes for git attribution.
+Auth: Bearer token in the Authorization header when auth is enabled. Set X-Actor on writes for git attribution. Multi-space servers route by the X-Kiwi-Space header.
 
-## MCP Tools (71)
+## MCP tools (78)
 
-Core: kiwi_read, kiwi_write, kiwi_delete, kiwi_rename, kiwi_bulk_write, kiwi_append, kiwi_tree, kiwi_search, kiwi_search_semantic, kiwi_changes, kiwi_versions
-Queries: kiwi_query, kiwi_query_meta, kiwi_aggregate, kiwi_context
-Graph: kiwi_backlinks, kiwi_graph_analytics, kiwi_graph_centrality, kiwi_graph_communities, kiwi_graph_path, kiwi_graph_walk, kiwi_suggestions, kiwi_peek, kiwi_section
-Drafts: kiwi_draft_create, kiwi_draft_list, kiwi_draft_read, kiwi_draft_write, kiwi_draft_diff, kiwi_draft_merge, kiwi_draft_discard
-Views: kiwi_views_list, kiwi_views_get, kiwi_views_save, kiwi_views_delete, kiwi_views_execute
-Canvas: kiwi_canvas_list, kiwi_canvas_read, kiwi_canvas_write
+Files: kiwi_read, kiwi_write, kiwi_append, kiwi_bulk_write, kiwi_patch_frontmatter, kiwi_delete, kiwi_rename, kiwi_tree, kiwi_peek, kiwi_section, kiwi_versions, kiwi_changes, kiwi_view_refresh
+Search: kiwi_search, kiwi_search_semantic, kiwi_search_hybrid, kiwi_brief, kiwi_similar, kiwi_eval
+Context and queries: kiwi_context, kiwi_query, kiwi_query_meta, kiwi_aggregate
+Links and graph: kiwi_backlinks, kiwi_suggestions, kiwi_embeddings, kiwi_graph_analytics, kiwi_graph_centrality, kiwi_graph_communities, kiwi_graph_path, kiwi_graph_walk
+Restructuring: kiwi_refactor_plan, kiwi_refactor_apply, kiwi_refactor_script, kiwi_refactor_revert
+Analytics: kiwi_analytics, kiwi_health_check, kiwi_velocity, kiwi_timeline, kiwi_feed
+Authoring: kiwi_lint, kiwi_widget_reference, kiwi_quiz
+Import and export: kiwi_import, kiwi_ingest, kiwi_clip, kiwi_cite, kiwi_export, kiwi_export_document
+Tasks and claims: kiwi_eligible, kiwi_task_create, kiwi_task_progress, kiwi_claim, kiwi_release, kiwi_claims_list
 Workflows: kiwi_workflow_list, kiwi_workflow_get, kiwi_workflow_save, kiwi_workflow_advance, kiwi_workflow_board
-Import/Export: kiwi_import, kiwi_ingest, kiwi_export, kiwi_export_document
-Analytics: kiwi_analytics, kiwi_health_check, kiwi_memory_report, kiwi_velocity, kiwi_timeline, kiwi_eval, kiwi_embeddings
-Coordination: kiwi_claim, kiwi_release, kiwi_claims_list, kiwi_eligible
-Helpers: kiwi_lint, kiwi_clip, kiwi_feed, kiwi_view_refresh
+Drafts: kiwi_draft_create, kiwi_draft_list, kiwi_draft_write, kiwi_draft_read, kiwi_draft_diff, kiwi_draft_merge, kiwi_draft_discard
+Saved views: kiwi_views_list, kiwi_views_get, kiwi_views_save, kiwi_views_delete, kiwi_views_execute
+Canvas: kiwi_canvas_list, kiwi_canvas_read, kiwi_canvas_write
+Memory: kiwi_remember, kiwi_forget, kiwi_memory_report
 
-## Init Templates
+## Widgets
 
-    kiwifs init --template <name>
+Fenced code blocks render as interactive widgets in the web UI and degrade to plain code elsewhere. Call kiwi_widget_reference for the exact schema of every fence, and kiwi_lint to validate a page.
 
-Templates: knowledge (default), wiki, runbook, research, tasks, blank
+Data structures: array, matrix, table, tree, list, stack, queue, map, bits, memory
+Charts and plots: plot, bars, numberline, plane, timeline, kiwi-chart, kiwi-progress
+Diagrams: graph, sequence, steps, mermaid (steppable), d2 (rendered server-side)
+Interactive: quiz callouts, kiwi-calc, kiwi-playground, kiwi-app, widget:live, widget:code
+Data and queries: kiwi-query, kiwi-data, kiwi-kanban, widget:tracker
+Page structure: callouts, tabs and columns, figures, claims, kiwi-diff, kiwi-color
 
 ## Optional
 

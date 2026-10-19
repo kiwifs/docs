@@ -1,0 +1,413 @@
+---
+title: "Chart and plot widgets"
+sidebarTitle: "Charts and plots"
+description: "Typed fences for x-y plots, bar columns, number lines, coordinate planes, and timelines, plus kiwi-chart and kiwi-progress for dashboards."
+icon: "chart-line"
+---
+
+Two kinds of chart blocks exist:
+
+- **Typed fences** (`plot`, `bars`, `numberline`, `plane`, `timeline`) draw an exact picture you can step through and annotate. They follow the shared rules for [steps, meta strings, playback, and validation](/concepts/widgets#writing-a-typed-fence).
+- **Dashboard blocks** (`kiwi-chart`, `kiwi-progress`) draw a standard chart from rows of data. `kiwi-chart` can pull its rows from a DQL query, so the chart stays current as pages change.
+
+## plot
+
+An x-y plot: complexity curves, latency against load, convergence, the predicate curve of a binary search. A series takes `points`, or an `expr` formula in `x` whose free names come from `bind`, which can change per step to sweep a parameter.
+
+A bare `plot` fence renders when its body has `series`. Also spelled `kiwi-plot`, `widget:plot`, `chart-xy`.
+
+````markdown
+```plot id=predicate caption="Binary search on the answer: the predicate flips once"
+xLabel: capacity
+yLabel: days needed
+series:
+  - label: days(capacity)
+    points: [{x: 10, y: 15}, {x: 15, y: 10}, {x: 20, y: 7}, {x: 25, y: 6}, {x: 30, y: 5}]
+guides:
+  - {y: 7, label: "budget"}
+steps:
+  - note: "Too slow: 15 days exceeds the 7-day budget"
+    marks: [{x: 10, y: 15, label: "lo"}]
+  - note: "Fast enough — search left for a smaller capacity"
+    marks: [{x: 20, y: 7, label: "mid"}]
+  - note: "The smallest capacity that fits the budget is 20"
+    marks: [{x: 20, y: 7, label: "answer"}]
+    breakpoint: true
+```
+````
+
+<Accordion title="All 25 keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `series` | array of object | **Required.** `{id?, label?, points: [{x, y}, …], kind?: "line"\|"area"\|"scatter", color?, baseline?}`, or `{expr: "sin(x) + a", samples?, domain?}` for a curve from a formula. |
+| `activeColor` | string | Primary highlight color. Fixed across steps. |
+| `activeIds` | array or number or string | Series ids drawn in the active color. |
+| `ariaLabel` | string | Accessible name. Defaults to a summary derived from the data. Fixed across steps. |
+| `bind` | object | Values for the free names in an `expr` or a `when`, e.g. `{a: 2}`. Steppable, so a walkthrough can sweep a parameter. |
+| `dimIds` | array or number or string | Dimmed series ids. |
+| `guides` | array of object | Reference lines: `{x?, y?, label?, color?}` — an SLO, a threshold, a crossover. |
+| `height` | number | Canvas height, px. Fixed across steps. |
+| `highlightColor` | string | Secondary highlight color. Fixed across steps. |
+| `highlightIds` | array or number or string | Secondary-highlighted series ids. |
+| `marks` | array of object | Single annotated points: `{x, y?, label?, color?}`. |
+| `props` | any | Escape hatch for a widget prop whose name collides with a reserved key. |
+| `regions` | array of object | Shaded areas from a predicate: `{when: "y < x^2", label?, color?, opacity?, resolution?}`. `x` and `y` are in scope. |
+| `shades` | array of object | Shaded bands: `{from, to, series?, fromY?, toY?, color?, label?}`. |
+| `showAxes` | boolean | Draw the axes and frame. Default true. Fixed across steps. |
+| `showLegend` | boolean | Draw the legend. Default true. Fixed across steps. |
+| `width` | number | Canvas width, px. Fixed across steps. |
+| `xLabel` | string | Caption under the x axis. Fixed across steps. |
+| `xMax` | number | Right edge of the x axis. |
+| `xMin` | number | Left edge of the x axis. Defaults to the data extent. |
+| `xTicks` | array of number | Explicit x tick values. |
+| `yLabel` | string | Caption beside the y axis. Fixed across steps. |
+| `yMax` | number | Top of the y axis. |
+| `yMin` | number | Bottom of the y axis. |
+| `yTicks` | array of number | Explicit y tick values. |
+
+</Accordion>
+
+## bars
+
+Columns in value space: histograms, latency distributions, sorting passes. `guides` draws horizontal reference lines such as an SLO, and `overlays` draws value-space rectangles such as trapped water or a chosen rectangle.
+
+A bare `bars` fence renders when its body has `values`. Also spelled `kiwi-bars`, `widget:bars`, `histogram`, `barchart`.
+
+````markdown
+```bars id=rain caption="Trapping rain water"
+values: [0, 1, 0, 2, 1, 0, 1, 3, 2, 1, 2, 1]
+steps:
+  - note: "Water sits wherever both sides are higher"
+    overlays: [{startIndex: 2, toValue: 1, label: "1"}]
+    activeIndices: [1, 3]
+  - note: "The big basin between 3 and 7 holds four units"
+    overlays:
+      - {startIndex: 2, toValue: 1}
+      - {startIndex: 4, endIndex: 6, toValue: 2, label: "4"}
+    activeIndices: [3, 7]
+  - note: "Total: 6"
+    overlays:
+      - {startIndex: 2, toValue: 1}
+      - {startIndex: 4, endIndex: 6, toValue: 2}
+      - {startIndex: 9, toValue: 2, label: "1"}
+```
+````
+
+<Accordion title="All 19 keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `values` | array of number | **Required.** Bar heights. Negatives draw below a zero baseline. |
+| `activeColor` | string | Primary highlight color. Fixed across steps. |
+| `activeIndices` | array or number or string | Emphasised columns. |
+| `ariaLabel` | string | Accessible name. Defaults to a summary derived from the data. Fixed across steps. |
+| `barColors` | array | Per-bar fill override. |
+| `barWidth` | number | Bar width, px. Default 40. Fixed across steps. |
+| `chartHeight` | number | Plot height, px. Default 220. Fixed across steps. |
+| `dimIndices` | array or number or string | Dimmed or eliminated columns. |
+| `gap` | number | Gap between bars, px. Default 10. Fixed across steps. |
+| `guides` | array of object | Horizontal reference lines: `{value, label?, color?}` — a water level, an SLO. |
+| `highlightColor` | string | Secondary highlight color. Fixed across steps. |
+| `highlightIndices` | array or number or string | Secondary-highlighted columns. |
+| `labels` | array | Labels under each bar. Defaults to the index; `null` hides one. |
+| `maxValue` | number | Top of the value axis. |
+| `minValue` | number | Bottom of the value axis. |
+| `overlays` | array of object | Value-space rectangles: `{startIndex, endIndex?, fromValue?, toValue, label?}` — a water fill, a chosen rectangle. |
+| `pointers` | array of object | Named pointers above columns: `{index, label, color?}`. |
+| `props` | any | Escape hatch for a widget prop whose name collides with a reserved key. |
+| `valueLabels` | boolean or array | Value labels on the bar tips: true (default), false, or custom text per bar. |
+
+</Accordion>
+
+## numberline
+
+A single value axis: inequalities, intervals, thresholds, binary-search buckets. Closed endpoints are filled and open ones hollow. `predicate` shades wherever a formula in `x` is true.
+
+A bare `numberline` fence renders when its body has `min` or `max` or `xRange`. Also spelled `kiwi-numberline`, `widget:numberline`, `number-line`, `kiwi-number-line`.
+
+````markdown
+```numberline id=budget caption="Where this quarter's error budget stands"
+label: "% of error budget spent"
+min: 0
+max: 100
+step: 20
+intervals:
+  - {from: 0, to: 50, label: ship freely}
+  - {from: 50, to: 85, label: ship with review}
+  - {from: 85, to: 100, label: freeze}
+marks: [{at: 85, label: freeze line}]
+pointers: [{at: 62, label: now}]
+```
+````
+
+<Accordion title="All 29 keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `activeColor` | string | Primary highlight color. Fixed across steps. |
+| `activeIds` | array or number or string | Ids drawn in the active color. |
+| `ariaLabel` | string | Accessible name. Defaults to a summary derived from the data. Fixed across steps. |
+| `dimIds` | array or number or string | Dimmed ids. |
+| `highlightColor` | string | Secondary highlight color. Fixed across steps. |
+| `highlightIds` | array or number or string | Secondary-highlighted ids. |
+| `includeNumbers` | boolean | Print the number under each tick. Default true. Fixed across steps. |
+| `intervals` | array of object | `{from, to, fromOpen?, toOpen?, label?, color?, row?, id?}`. Overlapping intervals stack. |
+| `label` | string | Axis caption. Fixed across steps. |
+| `marks` | array of object | Dashed reference lines: `{at, label?, color?}`. |
+| `max` | number | Right end of the axis. A reversed or empty range is repaired rather than rejected. Fixed across steps. |
+| `min` | number | Left end of the axis. Default 0. Fixed across steps. |
+| `pointers` | array of object | Named pointers above the axis: `{at, label, color?}` — `lo`, `hi`, `mid`. |
+| `points` | array of object | `{x, label?, style?: "closed"\|"open"\|"cross", color?, id?}`. |
+| `predicate` | string | Shade the axis wherever this formula in `x` is true, e.g. `"x^2 < 9"`. Sampled at 400 points. |
+| `predicateColor` | string | Color of the shading. Fixed across steps. |
+| `predicateLabel` | string | Caption over the shaded run. |
+| `props` | any | Escape hatch for a widget prop whose name collides with a reserved key. |
+| `rays` | array of object | `{at, dir: "left"\|"right", open?, label?}` — an inequality with no far end. |
+| `scale` | `linear` \| `log` | Axis scale. `"log"` needs a positive `min`, ticks at powers of ten, and drops values ≤ 0. Fixed across steps. |
+| `selected` | array or number or string | Point or interval ids drawn as selected. |
+| `step` | number | Tick spacing. Omit for automatic nice ticks; a step giving more than 200 ticks falls back to them. Fixed across steps. |
+| `sweep` | number | Position of a sweep cursor. |
+| `sweepLabel` | string | Caption beside the sweep cursor. |
+| `ticks` | array of number | Explicit tick values, overriding `step`. |
+| `why` | any | Point or interval id → explanation, revealed when the reader selects it. |
+| `widgetId` | string | Name for the inspect bus. Fixed across steps. |
+| `width` | number | Canvas width, px. Fixed across steps. |
+| `xRange` | array of number | `[min, max]` or `[min, max, step]`, an alias for the three keys. |
+
+</Accordion>
+
+## plane
+
+A coordinate plane in data units: geometry, sweep lines, convex hulls, vectors, tile maps. It draws what you give it, so the algorithm lives in the steps. Segment and polygon ends can name a point `id`.
+
+A bare `plane` fence renders when its body has `points` or `segments` or `polygons` or `circles` or `vectors` or `regions`. Also spelled `kiwi-plane`, `widget:plane`, `geometry`.
+
+````markdown
+```plane id=hull caption="Andrew's monotone chain, lower hull"
+xMin: 0
+xMax: 10
+yMin: 0
+yMax: 8
+points:
+  - {id: a, x: 1, y: 1, label: a}
+  - {id: b, x: 3, y: 4, label: b}
+  - {id: c, x: 5, y: 2, label: c}
+  - {id: d, x: 8, y: 6, label: d}
+  - {id: e, x: 9, y: 2, label: e}
+steps:
+  - note: "Sort by x, start the lower hull with a and b"
+    polygons: [{points: [a, b], open: true, id: hull}]
+    activeIds: [a, b]
+  - note: "a→b→c turns clockwise, so b is not on the hull — pop it"
+    polygons: [{points: [a, b, c], open: true, id: hull}]
+    activeIds: [b]
+  - note: "Lower hull is a, c, e"
+    polygons: [{points: [a, c, e], open: true, id: hull}]
+    highlightIds: [hull]
+    dimIds: [b, d]
+```
+````
+
+<Accordion title="All 31 keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `activeColor` | string | Primary highlight color. Fixed across steps. |
+| `activeIds` | array or number or string | Ids drawn in the active color. |
+| `ariaLabel` | string | Accessible name. Defaults to a summary derived from the data. Fixed across steps. |
+| `aspect` | `equal` \| `auto` | "equal" (default) keeps circles round and right angles right. Fixed across steps. |
+| `axes` | boolean | Draw the axes through the origin. Default true. Fixed across steps. |
+| `circles` | array of object | `{at, r, label?, dashed?}`. |
+| `dimIds` | array or number or string | Dimmed ids. |
+| `grid` | boolean | Draw the unit grid. Default true. Fixed across steps. |
+| `height` | number | Canvas height, px. Fixed across steps. |
+| `highlightColor` | string | Secondary highlight color. Fixed across steps. |
+| `highlightIds` | array or number or string | Secondary-highlighted ids. |
+| `labels` | array of object | Free text at a position: `{at, text, dx?, dy?}`. |
+| `points` | array of object | `{x, y, id?, label?, style?: "dot"\|"open"\|"cross"\|"square", color?}`. `id` defaults to `pt0`, `pt1`, … |
+| `polygons` | array of object | `{points: [...], label?, open?, fill?}` — a triangle, a hull being built. |
+| `props` | any | Escape hatch for a widget prop whose name collides with a reserved key. |
+| `regions` | array of object | Shaded where a formula holds: `{when: "x + y <= 6", label?, color?, opacity?, resolution?}`. `x` and `y` are in scope; sampled on a grid of at most 60×60. |
+| `segments` | array of object | `{from, to, label?, arrow?, dashed?, color?}`. Each end is a point id, a point index, or a literal `[x, y]`. |
+| `selected` | array or number or string | Point ids drawn as selected. |
+| `sweep` | object | `{axis: "x"\|"y"\|"angle", at, origin?, label?}`. |
+| `vectors` | array of object | `{to, from?, label?}`. `from` defaults to the origin. |
+| `why` | any | Point id → explanation, revealed when the reader selects it. |
+| `widgetId` | string | Name for the inspect bus. Fixed across steps. |
+| `width` | number | Canvas width, px. Fixed across steps. |
+| `xLabel` | string | Caption under the x axis. Fixed across steps. |
+| `xMax` | number | Right edge. Default 10. Fixed across steps. |
+| `xMin` | number | Left edge. Default 0. Fixed across steps. |
+| `xRange` | array of number | `[min, max]`, an alias for xMin/xMax. |
+| `yLabel` | string | Caption beside the y axis. Fixed across steps. |
+| `yMax` | number | Top edge. Default 10. Fixed across steps. |
+| `yMin` | number | Bottom edge. Default 0. Fixed across steps. |
+| `yRange` | array of number | `[min, max]`, an alias for yMin/yMax. |
+
+</Accordion>
+
+## timeline
+
+Spans on a shared axis with named lanes and causal arrows: scheduling, lock handoffs, happens-before, incident timelines. A span with `state: blocked` or `state: waiting` draws hatched, so waiting reads differently from working.
+
+A bare `timeline` fence renders when its body has `intervals`. Also spelled `kiwi-timeline`, `widget:timeline`, `gantt`, `schedule`.
+
+````markdown
+```timeline id=lock caption="T2 blocks on the row lock T1 holds"
+lanes: [T1, T2]
+hoverPredecessors: true
+intervals:
+  - {id: t1run, lane: T1, start: 0, end: 4, label: "UPDATE", state: holding}
+  - {id: t1commit, lane: T1, start: 4, end: 5, label: COMMIT, state: running}
+  - {id: t2wait, lane: T2, start: 2, end: 5, label: "waiting for lock", state: blocked}
+  - {id: t2run, lane: T2, start: 5, end: 8, label: "UPDATE", state: holding}
+links:
+  - {from: t1commit, to: t2run, label: "lock released"}
+steps:
+  - note: "T1 takes the row lock"
+    activeIds: [t1run]
+  - note: "T2's UPDATE blocks — hatched, because it is doing no work"
+    activeIds: [t2wait]
+  - note: "T1 commits and T2 is woken"
+    activeIds: [t1commit, t2run]
+```
+````
+
+<Accordion title="All 21 keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `intervals` | array of object | **Required.** `{start, end, id?, label?, lane?, state?, color?}`. `start === end` draws a point event. `state` of "blocked" or "waiting" draws hatched. |
+| `activeColor` | string | Primary highlight color. Fixed across steps. |
+| `activeIds` | array or number or string | Span ids active this step. |
+| `ariaLabel` | string | Accessible name. Defaults to a summary derived from the data. Fixed across steps. |
+| `dimIds` | array or number or string | Dimmed span ids. |
+| `highlightColor` | string | Secondary highlight color. Fixed across steps. |
+| `highlightIds` | array or number or string | Secondary-highlighted span ids. |
+| `hoverPredecessors` | boolean | Hovering a span lights the happens-before cone behind it. Fixed across steps. |
+| `laneHeight` | number | Row height, px. Default 26. Fixed across steps. |
+| `lanes` | array of string | Named lanes in draw order, labelled in the gutter — `thread A` above `thread B`. |
+| `links` | array of object | Causal arrows between spans: `{from, to, label?, dashed?}` — happens-before, woken by, lock handoff. |
+| `marks` | array of object | Extra vertical marks: query points, event coordinates. `{at, label?, color?}`. |
+| `max` | number | Right end of the axis. |
+| `min` | number | Left end of the axis. Defaults to the data extent. |
+| `props` | any | Escape hatch for a widget prop whose name collides with a reserved key. |
+| `showAxis` | boolean | Draw the axis. Default true. Fixed across steps. |
+| `showLegend` | boolean | Draw a legend for the `state` values in use. Fixed across steps. |
+| `sweep` | number | Position of the sweep cursor. |
+| `sweepLabel` | string | Caption beside the sweep cursor — usually the running counter. |
+| `ticks` | array of number | Values to label on the axis. |
+| `width` | number | Canvas width, px. Fixed across steps. |
+
+</Accordion>
+
+## kiwi-chart
+
+Bar, line, area, pie, radar, and scatter charts from inline rows, rendered with Recharts.
+
+````markdown
+```kiwi-chart
+type: bar
+title: Weekly deploys
+xKey: week
+data:
+  - week: W40
+    deploys: 21
+    rollbacks: 2
+  - week: W41
+    deploys: 34
+    rollbacks: 1
+  - week: W42
+    deploys: 28
+    rollbacks: 3
+series:
+  - key: deploys
+    color: "#22c55e"
+  - key: rollbacks
+    color: "#ef4444"
+legend: true
+```
+````
+
+Without `series`, every numeric column in the first row becomes a series. Without `xKey`, bar, line, and area charts draw no category axis, so name it.
+
+To chart live data, give a `query:` instead of `data:`. The first non-numeric result column becomes the x axis and every numeric column becomes a series. Inline `data` still renders if the query fails.
+
+````markdown
+```kiwi-chart
+type: bar
+title: Open incidents by service
+query: |
+  TABLE title, open_incidents FROM "services" SORT open_incidents DESC
+```
+````
+
+<Accordion title="kiwi-chart keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `type` | `bar` \| `line` \| `area` \| `pie` \| `radar` \| `scatter` | Chart type. Default `bar`. |
+| `title` | string | Heading above the chart. |
+| `data` | array of object | Rows. Required unless `query` is set. |
+| `query` | string | DQL query whose result rows replace `data`. Use a `\|` block for multi-line queries. |
+| `xKey` | string | Column for the category axis. Pie and radar charts fall back to the first text column; scatter to `x`. |
+| `yKey` | string | Scatter only: column for y values. |
+| `series` | array of object | `{key, color?, name?, stackId?}` per plotted column. |
+| `stacked` | boolean | Stack the series. |
+| `legend` | boolean | Show a legend. |
+| `grid` | boolean | Show grid lines. |
+| `height` | number | Chart height in px. Default 300. |
+| `colors` | array of string | Palette for inferred series. |
+
+</Accordion>
+
+The body can also be JSON with the same keys.
+
+## kiwi-progress
+
+Progress bars or radial gauges, one per item.
+
+````markdown
+```kiwi-progress
+type: bar
+title: Q4 migration
+items:
+  - label: Backend services
+    value: 85
+  - label: Web UI
+    value: 60
+  - label: Data backfill
+    value: 3
+    max: 12
+```
+````
+
+<Accordion title="kiwi-progress keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `type` | `bar` \| `gauge` | Horizontal bars or radial gauges. Default `bar`. |
+| `title` | string | Heading above the items. |
+| `items` | array of object | `{label, value, max?, color?}`. `max` defaults to 100. Without `color`, the fill goes from red to green as the item nears `max`. |
+| `showPercent` | boolean | Show the percentage. Default true. |
+| `animated` | boolean | Animate the fill. Default true. |
+
+</Accordion>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Widgets overview" icon="puzzle-piece" href="/concepts/widgets">
+    Fence names, steps, playback, and validation.
+  </Card>
+  <Card title="DQL" icon="database" href="/concepts/dql">
+    The query language behind `kiwi-chart` queries.
+  </Card>
+  <Card title="Data and queries" icon="table" href="/widgets/data-and-queries">
+    `kiwi-query`, `kiwi-data`, and `kiwi-kanban`.
+  </Card>
+  <Card title="Diagrams" icon="diagram-project" href="/widgets/diagrams">
+    graph, sequence, steps, Mermaid, and D2.
+  </Card>
+</CardGroup>

@@ -1,46 +1,110 @@
 ---
 title: "Airbyte import"
-description: "Sync data from Airbyte Docker connectors or Airbyte Cloud into markdown pages."
+description: "Run Airbyte source connectors in Docker and write their records into KiwiFS."
 icon: "rotate"
 ---
 
-KiwiFS can drive **Airbyte** connectors for sources easier to configure through Airbyte than native importers.
+KiwiFS speaks the Airbyte protocol, so it can run an Airbyte source connector as a Docker container and turn every record it emits into a markdown page. Use it for sources that have an Airbyte connector but no built-in importer, or when you want a connector's incremental streams.
 
 <Info>
-Native `kiwifs import --from notion` remains the simplest path for one-shot imports. Use Airbyte when you need scheduled sync or Airbyte Cloud connections.
+For one-off imports of supported sources, the built-in importers (`kiwifs import --from notion`, and so on) need no Docker and are simpler.
 </Info>
 
-## Two modes
+## Requirements
 
-<Tabs>
-  <Tab title="Airbyte Docker">
-    Local connector containers. Phase 1 sources routed through Docker today:
+- Docker must be reachable from the KiwiFS process. KiwiFS checks this with `docker info`.
+- Airbyte imports run over REST only, through `POST /api/kiwi/import` and the web UI import wizard. The CLI and MCP tool don't run connectors.
 
-    | Source | Connector |
-    | --- | --- |
-    | `firebase-rtdb` | Firebase Realtime Database |
-    | `notion` | Notion |
-    | `airtable` | Airtable |
+## Built-in connector images
 
-    | Method | Path | Purpose |
-    | --- | --- | --- |
-    | `POST` | `/api/kiwi/import/airbyte/spec` | Connector specification |
-    | `POST` | `/api/kiwi/import/airbyte/check` | Validate connection config |
-    | `POST` | `/api/kiwi/import/airbyte/discover` | List streams for a source |
-  </Tab>
-  <Tab title="Airbyte Cloud">
-    Hosted workspace API with discover/check/sync flows.
+| `from` | Image |
+| --- | --- |
+| `firebase-rtdb` | `airbyte/source-firebase-realtime-database:latest` |
+| `notion` | `airbyte/source-notion:latest` |
+| `airtable` | `airbyte/source-airtable:latest` |
 
-    | Method | Path | Purpose |
-    | --- | --- | --- |
-    | `POST` | `/api/kiwi/import/airbyte-cloud/check` | Check cloud source |
-    | `POST` | `/api/kiwi/import/airbyte-cloud/discover` | Discover streams |
-    | `GET` | `/api/kiwi/import/airbyte-cloud/connections` | List connections |
-    | `POST` | `/api/kiwi/import/airbyte-cloud/sync` | Trigger sync into KiwiFS |
-  </Tab>
-</Tabs>
+To use any other connector, pass its image in `airbyte_image`, or pass the image name as `from` (any value with a `/` is treated as an image).
 
-## Configuration
+## Run an import
+
+<Steps>
+  <Step title="Get the connector spec">
+    The spec is the JSON Schema for the connector's `config`.
+
+    ```bash Terminal
+    curl -X POST http://localhost:3333/api/kiwi/import/airbyte/spec \
+      -H "Content-Type: application/json" \
+      -d '{"from": "firebase-rtdb"}'
+    ```
+  </Step>
+  <Step title="Check the config">
+    ```bash Terminal
+    curl -X POST http://localhost:3333/api/kiwi/import/airbyte/check \
+      -H "Content-Type: application/json" \
+      -d '{"from": "firebase-rtdb", "config": {"database_name": "my-app", "google_application_credentials": "..."}}'
+    ```
+  </Step>
+  <Step title="Discover streams">
+    ```bash Terminal
+    curl -X POST http://localhost:3333/api/kiwi/import/airbyte/discover \
+      -H "Content-Type: application/json" \
+      -d '{"from": "firebase-rtdb", "config": {"database_name": "my-app", "google_application_credentials": "..."}}'
+    ```
+
+    The response is the connector's catalog of streams.
+  </Step>
+  <Step title="Import">
+    ```bash Terminal
+    curl -X POST http://localhost:3333/api/kiwi/import \
+      -H "Content-Type: application/json" \
+      -d '{
+        "from": "firebase-rtdb",
+        "via": "airbyte",
+        "airbyte_config": {"database_name": "my-app", "google_application_credentials": "..."},
+        "streams": ["users"],
+        "prefix": "firebase"
+      }'
+    ```
+
+    Omit `streams` to sync every stream.
+  </Step>
+</Steps>
+
+The spec, check, and discover endpoints all take `from`, an optional `airbyte_image`, and, except for spec, `config`. Each returns `503` when Docker isn't available.
+
+### Import request fields
+
+| Field | Description |
+| --- | --- |
+| `via` | `airbyte` to force a connector. `builtin` to force the built-in importer. Empty picks automatically. |
+| `airbyte_config` | Connector config that matches its spec. Sending it also selects Airbyte. |
+| `airbyte_image` | Override the connector image |
+| `streams` | Streams to sync. Empty means all. |
+
+<Note>
+For `notion` and `airtable` over REST, KiwiFS prefers the Airbyte connector when Docker is available and you send an `api_key`. It translates the key into connector config for you.
+</Note>
+
+## Firebase Realtime Database records
+
+Firebase RTDB emits one record per top-level key. When a key holds a collection, such as `users` mapping user IDs to objects, KiwiFS writes one page per child instead of one page for the whole tree. This keeps large databases searchable and linkable.
+
+## Auto-sync
+
+`firebase-rtdb` is a [syncable source](/import/connections#auto-sync). A successful REST import saves the connection, including its image and streams, and re-runs it every hour by default.
+
+## Airbyte Cloud <Badge color="orange">Experimental</Badge>
+
+These endpoints manage sources and connections in an Airbyte Cloud workspace. They don't import records into KiwiFS. Use Docker mode to get data into your knowledge base.
+
+| Method | Path | Body | Purpose |
+| --- | --- | --- | --- |
+| `POST` | `/api/kiwi/import/airbyte-cloud/check` | `from`, `config` | Create a source in the workspace and test it. Returns `status` and `source_id`. |
+| `POST` | `/api/kiwi/import/airbyte-cloud/discover` | `source_id` | List the source's streams |
+| `GET` | `/api/kiwi/import/airbyte-cloud/connections` | | List the workspace's connections |
+| `POST` | `/api/kiwi/import/airbyte-cloud/sync` | `connection_id` | Start a sync job for an existing Airbyte Cloud connection |
+
+Configure the workspace in `.kiwi/config.toml`. Values support `${VAR}` expansion.
 
 ```toml .kiwi/config.toml
 [import]
@@ -48,36 +112,36 @@ airbyte_api_key = "${AIRBYTE_API_KEY}"
 airbyte_workspace_id = "${AIRBYTE_WORKSPACE_ID}"
 ```
 
-<Note>
-Environment variables expand in TOML via `${VAR}` syntax.
-</Note>
+Without these keys, KiwiFS falls back to the `AIRBYTE_API_KEY` and `AIRBYTE_WORKSPACE_ID` environment variables. Cloud `check` currently supports `firebase-rtdb`, `notion`, and `airtable`.
 
-## Sync status
+<Warning>
+If Docker is missing and `AIRBYTE_API_KEY` is set in the server's environment, REST imports of `notion` and `airtable` that include an `api_key` try Airbyte Cloud and fail. Add `"via": "builtin"` to those requests.
+</Warning>
 
-```bash
-curl 'http://localhost:3333/api/kiwi/import/sync/status'
+## List available sources
+
+```bash Terminal
+curl http://localhost:3333/api/kiwi/import/sources
 ```
 
-Use with saved [import connections](/import/connections) when periodic sync is enabled.
+```json Response
+{
+  "builtin": ["markdown", "obsidian", "csv", "postgres", "..."],
+  "airbyte": ["firebase-rtdb", "notion", "airtable"],
+  "docker_available": true,
+  "cloud_key_present": false
+}
+```
 
-## Firebase RTDB record explosion
+`airbyte` appears only when Docker or an Airbyte Cloud key is available.
 
-When importing Firebase Realtime Database key/value records through Airbyte, KiwiFS **explodes** each record into its own markdown page instead of collapsing the entire snapshot into one file. This makes large RTDB trees searchable and linkable in your knowledge base.
-
-## MCP
-
-Agents can call **`kiwi_import`** with Airbyte-compatible source configuration. Available sources are listed by `GET /api/kiwi/import/sources`.
-
-## Related documentation
+## Related
 
 <CardGroup cols={2}>
-  <Card title="Import overview" icon="download" href="/import/overview">
-    All 18+ import sources.
+  <Card title="Browse, preview, and sync" icon="link" href="/import/connections">
+    Saved connections and auto-sync.
   </Card>
   <Card title="Import API" icon="arrows-rotate" href="/api/import-export">
     REST reference.
-  </Card>
-  <Card title="Connections" icon="plug" href="/import/connections">
-    Saved connections and re-runs.
   </Card>
 </CardGroup>
