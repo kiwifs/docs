@@ -1,204 +1,212 @@
 ---
 title: "Go embed"
-description: "Embed KiwiFS in your Go application."
+description: "Run a KiwiFS server inside your own Go program with the pkg/kiwi package."
 icon: "code"
 ---
 
-You can embed KiwiFS directly in any Go application using the `pkg/kiwi` package. This gives you a fully functional markdown filesystem server without running a separate process.
+The `pkg/kiwi` package runs a full KiwiFS server, with its REST API, web UI, search, and versioning, inside your Go process. Use it to ship a knowledge base as part of your own binary, or to mount KiwiFS next to your application's routes.
 
-## Installation
+## Install
 
-```bash
+```bash Terminal
 go get github.com/kiwifs/kiwifs/pkg/kiwi
 ```
 
 ## Quick start
 
-Create a KiwiFS server, configure it with options, and start serving.
-
-```go
+```go main.go
 package main
 
 import (
-    "log"
+	"log"
 
-    "github.com/kiwifs/kiwifs/pkg/kiwi"
+	"github.com/kiwifs/kiwifs/pkg/kiwi"
 )
 
 func main() {
-    srv, err := kiwi.New("/data/knowledge",
-        kiwi.WithSearch("sqlite"),
-        kiwi.WithVersioning("git"),
-        kiwi.WithAuth("apikey", "my-secret"),
-    )
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer srv.Close()
+	srv, err := kiwi.New("/data/knowledge",
+		kiwi.WithSearch("sqlite"),
+		kiwi.WithVersioning("git"),
+		kiwi.WithAuth("apikey", "my-secret"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer srv.Close()
 
-    log.Println("KiwiFS listening on :3333")
-    log.Fatal(srv.ListenAndServe(":3333"))
+	log.Println("KiwiFS listening on :3333")
+	log.Fatal(srv.ListenAndServe(":3333"))
 }
 ```
+
+`kiwi.New` creates the directory if needed and initializes a git repository there when versioning is `git`. It also watches the directory, so files you edit on disk are committed and indexed.
+
+<Note>
+`kiwi.New` doesn't read `.kiwi/config.toml`. The embedded server uses the options you pass and the defaults below. Features configured only in `config.toml`, such as vector search or backup sync, aren't available when embedding.
+</Note>
 
 ## Options
 
-Configure KiwiFS behavior by passing option functions to `kiwi.New`.
+<AccordionGroup>
+  <Accordion title="WithSearch(engine string)">
+    Search engine: `"sqlite"` (default) for full-text search with BM25 ranking, or `"grep"` for index-free substring matching.
+  </Accordion>
+  <Accordion title="WithVersioning(strategy string)">
+    Versioning strategy: `"git"` (default), `"cow"` for copy-on-write snapshots, or `"none"`.
+  </Accordion>
+  <Accordion title="WithAuth(authType, apiKey string)">
+    Authentication. Use `"apikey"` with a key to require `Authorization: Bearer <key>` on API requests. The default is `"none"`.
+  </Accordion>
+  <Accordion title="WithCORSOrigins(origins ...string)">
+    Origins allowed to call the API from a browser, such as `"https://app.example.com"`.
+  </Accordion>
+</AccordionGroup>
 
-| Option | Description |
-|--------|-------------|
-| `kiwi.WithSearch(engine)` | Search engine. `"sqlite"` for full-text search or `"grep"` for simple string matching. |
-| `kiwi.WithVersioning(strategy)` | Version control strategy. `"git"` for git history, `"cow"` for copy-on-write snapshots, or `"none"` to disable. |
-| `kiwi.WithAuth(authType, key)` | Authentication. Set `authType` to `"apikey"` and provide the key, or `"none"` to disable. |
-| `kiwi.WithCORSOrigins(origins...)` | Allowed CORS origins. Pass one or more origin URLs. |
+## Server methods
 
-```go
-srv, err := kiwi.New("/data/knowledge",
-    kiwi.WithSearch("sqlite"),
-    kiwi.WithVersioning("git"),
-    kiwi.WithAuth("apikey", "my-secret"),
-    kiwi.WithCORSOrigins("https://app.example.com", "http://localhost:3000"),
-)
-```
+<AccordionGroup>
+  <Accordion title="Handler() http.Handler">
+    Returns the HTTP handler for the REST API and web UI. Use it to serve KiwiFS from your own `http.Server` or router. The embedded server doesn't expose the `/mcp` endpoint that `kiwifs serve` adds.
+  </Accordion>
+  <Accordion title="Pipeline() *pipeline.Pipeline">
+    Returns the write pipeline for reading and writing pages from Go. See [Read and write pages from Go](#read-and-write-pages-from-go).
+  </Accordion>
+  <Accordion title="ListenAndServe(addr string) error">
+    Serves `Handler()` on `addr` with `http.ListenAndServe`. It blocks until the listener fails.
+  </Accordion>
+  <Accordion title="Shutdown(ctx context.Context) error">
+    Stops KiwiFS's background schedulers. It doesn't stop a listener started with `ListenAndServe`. For graceful shutdown, run your own `http.Server` as shown below.
+  </Accordion>
+  <Accordion title="Close() error">
+    Stops the file watcher and releases search indexes, vector stores, and git resources. Call it once before your program exits.
+  </Accordion>
+</AccordionGroup>
 
-## Methods
+## Mount next to your own routes
 
-The `kiwi.Server` type provides these methods.
+The web UI loads its assets from absolute paths, so mount KiwiFS at the root and put your own routes on paths it doesn't use. KiwiFS serves its API under `/api/kiwi/`.
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `Handler` | `Handler() http.Handler` | Returns the HTTP handler. Use this to mount KiwiFS alongside other routes. |
-| `Pipeline` | `Pipeline() *pipeline.Pipeline` | Returns the pipeline for programmatic file operations. |
-| `ListenAndServe` | `ListenAndServe(addr string) error` | Start the HTTP server on the given address. |
-| `Shutdown` | `Shutdown(ctx context.Context) error` | Gracefully shut down the server. In-flight requests complete before the method returns. |
-| `Close` | `Close() error` | Release all resources (search indexes, file watchers, git locks). |
-
-## Mount alongside an existing server
-
-Use `srv.Handler()` to mount KiwiFS as a route within your existing HTTP application.
-
-```go
+```go main.go
 package main
 
 import (
-    "log"
-    "net/http"
+	"log"
+	"net/http"
 
-    "github.com/kiwifs/kiwifs/pkg/kiwi"
+	"github.com/kiwifs/kiwifs/pkg/kiwi"
 )
 
 func main() {
-    // Create the KiwiFS server
-    kiwifsSrv, err := kiwi.New("/data/knowledge",
-        kiwi.WithSearch("sqlite"),
-        kiwi.WithVersioning("git"),
-    )
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer kiwifsSrv.Close()
+	kb, err := kiwi.New("/data/knowledge")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer kb.Close()
 
-    // Set up your application router
-    mux := http.NewServeMux()
+	mux := http.NewServeMux()
+	mux.Handle("/", kb.Handler())
+	mux.HandleFunc("/app/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("pong"))
+	})
 
-    // Mount KiwiFS under /knowledge/
-    mux.Handle("/knowledge/", http.StripPrefix("/knowledge", kiwifsSrv.Handler()))
-
-    // Your own routes
-    mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
-        w.WriteHeader(http.StatusOK)
-        w.Write([]byte("ok"))
-    })
-
-    log.Println("App listening on :8080")
-    log.Fatal(http.ListenAndServe(":8080", mux))
+	log.Fatal(http.ListenAndServe(":8080", mux))
 }
 ```
 
-<Note>
-When mounting under a subpath, use `http.StripPrefix` so KiwiFS receives paths relative to its root.
-</Note>
+If you only need the API, you can mount it under a prefix with `http.StripPrefix`. The web UI won't work under a prefix.
 
-## Programmatic file operations
+## Read and write pages from Go
 
-Use `srv.Pipeline()` to read and write files without going through HTTP.
+`Pipeline()` gives you the same write path the REST API uses. Every write is committed to git, indexed for search, and broadcast to connected clients.
 
 ```go
+ctx := context.Background()
 pipe := srv.Pipeline()
 
-// Write a file
-err := pipe.Write("concepts/auth.md", []byte(`---
-title: Authentication
-status: draft
----
-
-# Authentication
-
-Overview of auth mechanisms.
-`))
-
-// Read a file
-content, err := pipe.Read("concepts/auth.md")
-
-// List files
-files, err := pipe.List("concepts/")
-```
-
-<Tip>
-The pipeline respects the same versioning and indexing rules as the HTTP API. Writes trigger git commits (if versioning is enabled) and update the search index automatically.
-</Tip>
-
-## Graceful shutdown
-
-Handle OS signals to shut down KiwiFS cleanly. This flushes pending async commits and releases file locks.
-
-```go
-package main
-
-import (
-    "context"
-    "log"
-    "os"
-    "os/signal"
-    "syscall"
-    "time"
-
-    "github.com/kiwifs/kiwifs/pkg/kiwi"
-)
-
-func main() {
-    srv, err := kiwi.New("/data/knowledge",
-        kiwi.WithSearch("sqlite"),
-        kiwi.WithVersioning("git"),
-    )
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Start server in a goroutine
-    go func() {
-        if err := srv.ListenAndServe(":3333"); err != nil {
-            log.Printf("server stopped: %v", err)
-        }
-    }()
-
-    // Wait for interrupt signal
-    quit := make(chan os.Signal, 1)
-    signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-    <-quit
-
-    // Graceful shutdown with timeout
-    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-    defer cancel()
-
-    if err := srv.Shutdown(ctx); err != nil {
-        log.Printf("shutdown error: %v", err)
-    }
-    srv.Close()
-    log.Println("server stopped")
+// Create or replace a page. The last argument is the actor recorded in the commit.
+res, err := pipe.Write(ctx, "concepts/auth.md", []byte("---\ntitle: Authentication\nstatus: draft\n---\n\n# Authentication\n"), "my-app")
+if err != nil {
+	log.Fatal(err)
 }
+log.Println("ETag:", res.ETag)
+
+// Merge frontmatter fields. Pass the ETag to fail on concurrent edits, or "" to skip the check.
+_, err = pipe.PatchFrontmatter(ctx, "concepts/auth.md", map[string]any{"status": "published"}, res.ETag, "my-app")
+
+// Read a page and list a folder through the underlying storage.
+content, err := pipe.Store.Read(ctx, "concepts/auth.md")
+log.Println(string(content))
+
+entries, err := pipe.Store.List(ctx, "concepts")
+for _, e := range entries {
+	log.Println(e.Path, e.IsDir)
+}
+
+// Delete a page.
+err = pipe.Delete(ctx, "concepts/auth.md", "my-app")
 ```
 
 <Warning>
-Always call `srv.Close()` or `srv.Shutdown(ctx)` before your program exits. Skipping this can leave stale git lock files or incomplete search indexes.
+Write through `pipe.Write`, `pipe.PatchFrontmatter`, `pipe.Append`, `pipe.Rename`, and `pipe.Delete`. Writing through `pipe.Store` directly skips the commit, the index update, and the event broadcast.
 </Warning>
+
+## Graceful shutdown
+
+Serve `Handler()` from an `http.Server` you control, shut that down first, then close KiwiFS.
+
+```go main.go
+package main
+
+import (
+	"context"
+	"errors"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/kiwifs/kiwifs/pkg/kiwi"
+)
+
+func main() {
+	kb, err := kiwi.New("/data/knowledge")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	httpSrv := &http.Server{Addr: ":3333", Handler: kb.Handler()}
+	go func() {
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("shutdown: %v", err)
+	}
+	if err := kb.Close(); err != nil {
+		log.Printf("close: %v", err)
+	}
+}
+```
+
+Always call `Close()` before exiting. Skipping it can leave pending commits unflushed and search indexes in an inconsistent state, which `kiwifs reindex` can repair.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="REST API" icon="code" href="/api/overview">
+    The endpoints `Handler()` serves.
+  </Card>
+  <Card title="Files as truth" icon="file-lines" href="/concepts/files-as-truth">
+    Why every write goes through the pipeline.
+  </Card>
+</CardGroup>

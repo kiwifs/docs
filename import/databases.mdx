@@ -1,74 +1,67 @@
 ---
 title: "Database imports"
-description: "Import data from PostgreSQL, MySQL, SQLite, MongoDB, Firestore, DynamoDB, Redis, and Elasticsearch into KiwiFS."
+description: "Import rows and documents from PostgreSQL, MySQL, SQLite, MongoDB, Firestore, DynamoDB, Redis, and Elasticsearch."
 icon: "database"
 ---
 
-KiwiFS can import rows from relational and document databases, converting each record into a markdown page with structured frontmatter.
+Each row or document becomes a markdown page with its fields in frontmatter. Every source also accepts the [common flags](/import/overview#common-flags): `--prefix`, `--id-column`, `--columns`, `--limit`, and `--dry-run`.
 
-## PostgreSQL
+## SQL databases
 
-```bash
-kiwifs import --from postgres \
-  --dsn "postgres://user:pass@localhost:5432/mydb" \
-  --table users \
-  --prefix people/ \
-  --root ./knowledge
-```
+<Tabs>
+  <Tab title="PostgreSQL">
+    ```bash Terminal
+    kiwifs import --from postgres \
+      --dsn "postgres://user:pass@localhost:5432/mydb" \
+      --table users \
+      --prefix people \
+      --root ./knowledge
+    ```
+  </Tab>
+  <Tab title="MySQL">
+    ```bash Terminal
+    kiwifs import --from mysql \
+      --dsn "user:pass@tcp(localhost:3306)/mydb" \
+      --table articles \
+      --root ./knowledge
+    ```
 
-### Options
+    The DSN uses the Go MySQL driver format.
+  </Tab>
+  <Tab title="SQLite">
+    ```bash Terminal
+    kiwifs import --from sqlite \
+      --db ./data.db \
+      --table entries \
+      --root ./knowledge
+    ```
+  </Tab>
+</Tabs>
 
 | Flag | Description |
 |------|-------------|
-| `--dsn` | PostgreSQL connection string (required) |
-| `--table` | Table name |
-| `--query` | Custom SQL query (overrides `--table`) |
-| `--columns` | Comma-separated fields to include |
-| `--prefix` | Path prefix in KiwiFS (default: table name) |
-| `--limit` | Max rows to import |
-| `--dry-run` | Preview without writing |
+| `--dsn` | Connection string. Required for `postgres` and `mysql`. |
+| `--db` | Path to the database file. Required for `sqlite`. |
+| `--table` | Table to import. Required unless you pass `--query`. |
+| `--query` | Custom `SELECT` that replaces the table scan. |
 
-```bash
+When you pass `--table`, KiwiFS detects the table's primary key and uses it as the file name. With `--query`, set `--prefix` and `--id-column` yourself, because there is no table name or key to fall back on.
+
+```bash Terminal
 kiwifs import --from postgres \
   --dsn "postgres://user:pass@localhost/mydb" \
   --query "SELECT id, name, email FROM users WHERE active = true" \
-  --prefix active-users/
+  --id-column id \
+  --prefix active-users
 ```
-
-## MySQL
-
-```bash
-kiwifs import --from mysql \
-  --dsn "user:pass@tcp(localhost:3306)/mydb" \
-  --table articles \
-  --prefix articles/
-```
-
-Same flags as PostgreSQL. The DSN format follows Go's `mysql` driver convention.
-
-## SQLite
-
-```bash
-kiwifs import --from sqlite \
-  --db ./data.db \
-  --table entries \
-  --prefix entries/
-```
-
-| Flag | Description |
-|------|-------------|
-| `--db` | Path to SQLite database file (required) |
-| `--table` | Table name |
-| `--query` | Custom SQL query (overrides `--table`) |
 
 ## MongoDB
 
-```bash
+```bash Terminal
 kiwifs import --from mongodb \
   --uri "mongodb://localhost:27017" \
   --database myapp \
-  --collection articles \
-  --prefix articles/
+  --collection articles
 ```
 
 | Flag | Description |
@@ -77,118 +70,127 @@ kiwifs import --from mongodb \
 | `--database` | Database name (required) |
 | `--collection` | Collection name (required) |
 
+The document `_id` becomes the file name.
+
 ## Firestore
 
-```bash
+```bash Terminal
 kiwifs import --from firestore \
   --project my-gcp-project \
-  --collection users \
-  --prefix users/
+  --collection users
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--project` | GCP project ID (required) |
-| `--collection` | Firestore collection name (required) |
+| `--collection` | Collection name (required) |
 
-<Note>
-Firestore requires Google Cloud credentials. Set `GOOGLE_APPLICATION_CREDENTIALS` or run within a GCP environment.
-</Note>
+The CLI uses Application Default Credentials. Set `GOOGLE_APPLICATION_CREDENTIALS` or run inside GCP. Over REST you can instead send the service account JSON in the `credentials` field.
 
 ## DynamoDB
 
-```bash
+```bash Terminal
 kiwifs import --from dynamodb \
-  --table my-table \
   --region us-east-1 \
-  --prefix dynamo/
+  --table my-table
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--table` | DynamoDB table name (required) |
 | `--region` | AWS region (required) |
-| `--prefix` | Path prefix in KiwiFS |
-| `--limit` | Max items to import |
+| `--table` | Table name (required) |
 
-<Note>
-Uses your default AWS credentials (`~/.aws/credentials`, `AWS_PROFILE`, or IAM role).
-</Note>
+KiwiFS uses the default AWS credential chain (`AWS_PROFILE`, `~/.aws/credentials`, or an IAM role). Set `AWS_ENDPOINT_URL` to point at DynamoDB Local or another compatible endpoint.
 
 ## Redis
 
-```bash
+```bash Terminal
 kiwifs import --from redis \
-  --addr "localhost:6379" \
-  --pattern "article:*" \
-  --prefix redis/
+  --addr localhost:6379 \
+  --pattern "article:*"
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--addr` | Redis address (default: `localhost:6379`) |
-| `--password` | Redis password |
-| `--redis-db` | Redis database number (default: `0`) |
-| `--pattern` | Key glob pattern to import (default: `*`) |
-| `--prefix` | Path prefix in KiwiFS |
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--addr` | | Redis address (required) |
+| `--password` | | Redis password |
+| `--redis-db` | `0` | Database number |
+| `--pattern` | `*` | Key glob to scan |
 
-Each matching key becomes a markdown page. Hash keys become frontmatter fields; string values become the page body.
+Each matching key becomes one page, and the default prefix is `redis`. How the value maps to frontmatter depends on the key type:
+
+| Key type | Frontmatter |
+|----------|-------------|
+| Hash | One field per hash field |
+| String holding a JSON object | One field per JSON key |
+| Other string | `value` |
+| List | `items` |
+| Set | `members` |
+| Sorted set | `items`, each with `member` and `score` |
+
+The key becomes the file name, with `:`, `/`, and spaces replaced by `_`. For example, `article:42` becomes `redis/article_42.md`.
 
 ## Elasticsearch
 
-```bash
+```bash Terminal
 kiwifs import --from elasticsearch \
-  --url "http://localhost:9200" \
-  --table my-index \
-  --prefix search/
+  --url http://localhost:9200 \
+  --index articles
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--url` | Elasticsearch URL (required) |
-| `--table` | Index name (required) |
-| `--query` | Elasticsearch query JSON (optional, defaults to match-all) |
-| `--prefix` | Path prefix in KiwiFS |
-| `--limit` | Max documents to import |
+| `--url` | Cluster URL (required). Put credentials in the URL if the cluster needs them. |
+| `--index` | Index to import (required) |
 
-## MCP usage
+KiwiFS scrolls through every document in the index with a `match_all` query. The document `_id` becomes the file name.
 
-All database imports are also available via the `kiwi_import` MCP tool:
+## From the API or an agent
 
-```json
-{
-  "tool": "kiwi_import",
-  "arguments": {
-    "from": "postgres",
-    "dsn": "postgres://user:pass@localhost/mydb",
-    "table": "users",
-    "prefix": "people/",
-    "dry_run": true
-  }
-}
-```
+PostgreSQL, MySQL, SQLite, MongoDB, and Firestore are also available over REST and MCP. The request fields match the CLI flags in snake case.
+
+<Tabs>
+  <Tab title="REST">
+    ```bash Terminal
+    curl -X POST http://localhost:3333/api/kiwi/import \
+      -H "Content-Type: application/json" \
+      -d '{
+        "from": "postgres",
+        "dsn": "postgres://user:pass@db:5432/mydb",
+        "table": "users",
+        "prefix": "people",
+        "dry_run": true
+      }'
+    ```
+
+    ```json Response
+    { "imported": 120, "skipped": 0, "errors": [] }
+    ```
+  </Tab>
+  <Tab title="MCP">
+    ```json kiwi_import
+    {
+      "from": "postgres",
+      "dsn": "postgres://user:pass@localhost/mydb",
+      "table": "users",
+      "prefix": "people",
+      "dry_run": true
+    }
+    ```
+  </Tab>
+</Tabs>
 
 <Tip>
-Use `dry_run: true` to preview what would be imported before writing any files.
+A successful REST import of PostgreSQL, MySQL, MongoDB, or Firestore saves the connection and turns on hourly auto-sync. See [Saved connections](/import/connections#saved-connections) to change or pause it.
 </Tip>
 
-## Output format
+## Related
 
-Each imported record becomes a markdown file:
-
-```markdown
----
-_imported_at: "2026-04-25T18:46:15Z"
-_source: users
-_source_id: pg:users:42
-name: Jane Doe
-email: jane@example.com
-role: admin
----
-
-# Jane Doe
-
-> Auto-imported from users (row pg:users:42)
-```
-
-Re-importing the same data is idempotent — KiwiFS compares `_source_id` and field values, skipping unchanged records.
+<CardGroup cols={2}>
+  <Card title="Import overview" icon="download" href="/import/overview">
+    Output format, common flags, and re-import rules.
+  </Card>
+  <Card title="Browse, preview, and sync" icon="link" href="/import/connections">
+    List tables and preview rows before importing.
+  </Card>
+</CardGroup>

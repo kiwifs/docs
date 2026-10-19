@@ -67,6 +67,7 @@
               "concepts/versioning",
               "concepts/dql",
               "concepts/wiki-links",
+              "concepts/refactor",
               "concepts/mcp",
               "concepts/episodic-memory",
               "concepts/draft-spaces",
@@ -78,11 +79,22 @@
               "concepts/webhooks",
               "concepts/schemas",
               "concepts/multi-space",
-              "concepts/widgets",
               "concepts/publishing",
               "concepts/audit-log",
               "concepts/real-time-events",
               "concepts/optional-features"
+            ]
+          },
+          {
+            "group": "Widgets",
+            "pages": [
+              "concepts/widgets",
+              "widgets/data-structures",
+              "widgets/charts",
+              "widgets/diagrams",
+              "widgets/interactive",
+              "widgets/data-and-queries",
+              "widgets/page-structure"
             ]
           },
           {
@@ -138,6 +150,7 @@
               "api/overview",
               "api/spaces",
               "api/files",
+              "api/refactor",
               "api/search",
               "api/versioning",
               "api/metadata",

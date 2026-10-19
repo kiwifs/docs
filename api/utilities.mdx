@@ -1,262 +1,1053 @@
 ---
-title: "Utilities and agent helpers"
-description: "Symlinks, linting, peek and section reads, timeline and feeds, clipping, extended graph APIs, rules, space settings, audit logs, and public share URLs."
+title: "Utilities"
+description: "Content helpers, feeds, raw files, web UI settings, D2 rendering, comments, real-time events, and admin endpoints."
 icon: "screwdriver-wrench"
 ---
 
-These endpoints share the usual prefix `http://localhost:3333/api/kiwi` and authentication rules from [API overview](/api/overview).
+These endpoints support agents and the web UI around the core file API: reading a page in pieces, linting and rendering, following activity, storing per-user settings, and running admin checks. They use the `/api/kiwi` prefix and the authentication rules in the [API overview](/api/overview), except `/raw/*` and `/llms.txt`, which have their own rules described below.
 
-## Read symlink target
+Symlink targets (`GET /api/kiwi/readlink`) and page templates (`GET /api/kiwi/templates`, `GET /api/kiwi/template`) are documented with the [Files API](/api/files).
 
-```http
-GET /readlink?path=link/to/page.md
-```
+## Content helpers
 
-Returns **plain text** target path. **`404`** if the path is missing; **`400`** if the path is not a symlink.
+### Lint markdown
 
-## Lint markdown
+Check a page, or markdown you haven't saved yet, for structural problems the editor can't fix automatically.
 
 ```http
-POST /lint
-Content-Type: application/json
+POST /api/kiwi/lint
 ```
 
-Lint an existing file:
+<ParamField body="path" type="string">
+  File to lint. Ignored when `content` is set.
+</ParamField>
+<ParamField body="content" type="string">
+  Markdown to lint inline.
+</ParamField>
 
-```json
-{ "path": "concepts/auth.md" }
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/lint' \
+  -H "Content-Type: application/json" \
+  -d '{"path": "concepts/auth.md"}'
 ```
 
-Or inline content:
+Returns `400` when neither `path` nor `content` is set and `404` when `path` does not exist.
 
-```json
-{ "content": "# Title\n\nBody..." }
-```
-
-**Response:** `{ "issues": [ /* structured lint records */ ] }` (always an array, possibly empty).
-
-## Peek summary
-
-```http
-GET /peek?path=concepts/auth.md
-```
-
-Returns JSON with `title`, `snippet`, `frontmatter`, `links_out`, `links_in`, `headings`, `word_count`, and other lightweight fields without returning the full body.
-
-## Read one section
-
-```http
-GET /section?path=concepts/auth.md&heading=OAuth2%20flow
-```
-
-or
-
-```http
-GET /section?path=concepts/auth.md&index=2
-```
-
-Returns `{ "path", "heading", "level", "content", "line_start", "line_end" }`.
-
-## Activity timeline
-
-```http
-GET /timeline?limit=50&offset=0&actor=agent:bot&type=write&path_prefix=runbooks/
-```
-
-- `type` filter: `write`, `delete`, or omit for both.
-- `limit` defaults to **50**, max **500**.
-
-**Response:** `{ "events": [...], "total": <number> }` — `total` is a hint for pagination (see server implementation).
-
-## Feeds
-
-```http
-GET /feed.xml
-GET /feed.json
-```
-
-Atom and JSON Feed built from recent timeline events (titles include updated vs deleted paths).
-
-## Clip a web page
-
-```http
-POST /clip
-Content-Type: application/json
-```
+<ResponseField name="issues" type="object[]">
+  Problems found. Always an array, empty when the page is clean.
+  <Expandable title="properties">
+    <ResponseField name="rule" type="string">Rule ID, such as `frontmatter-yaml-invalid`, `table-column-mismatch`, `fence-unclosed`, `fence-mermaid-invalid`, `fence-widget-invalid`, `quiz-invalid`, `heading-skip-level`, or `link-image-broken`.</ResponseField>
+    <ResponseField name="line" type="integer">1-based line. `0` means the whole file.</ResponseField>
+    <ResponseField name="column" type="integer">1-based column. `0` means not applicable.</ResponseField>
+    <ResponseField name="message" type="string">Human-readable description.</ResponseField>
+    <ResponseField name="severity" type="string">`error`, `warning`, or `info`.</ResponseField>
+  </Expandable>
+</ResponseField>
 
 ```json
 {
-  "url": "https://example.com/article",
-  "title": "Optional override",
-  "tags": ["research", "web"],
-  "folder": "clips/"
+  "issues": [
+    { "rule": "heading-skip-level", "line": 12, "column": 0, "message": "heading jumps from h2 to h4", "severity": "warning" }
+  ]
 }
 ```
 
-Fetches the article, converts to markdown, writes through the pipeline using `X-Actor` (default `clipper`), and returns `{ "path", "title", "excerpt" }`.
+### Peek at a page
 
-## Extended graph APIs
-
-All of the following return **`503`** when link indexing is unavailable.
-
-### Centrality
+Return a page's title, frontmatter, opening paragraph, links, and headings without the full body. Use it to decide whether a page is worth reading.
 
 ```http
-GET /graph/centrality?limit=50
+GET /api/kiwi/peek
 ```
 
-Returns `{ "pages": [ { "path", "pagerank", "betweenness", ... } ] }` (truncated to `limit`).
+<ParamField query="path" type="string" required>
+  File path.
+</ParamField>
 
-### Communities
-
-```http
-GET /graph/communities
+```bash
+curl 'http://localhost:3333/api/kiwi/peek?path=concepts/auth.md'
 ```
 
-Louvain communities over wiki-link edges: `{ "communities": ... }`.
+Returns `404` if the file does not exist.
 
-### Shortest path
-
-```http
-GET /graph/path?from=concepts/a.md&to=runbooks/b.md
-```
-
-Returns `{ "path": ["concepts/a.md", "..."] }`. **`404`** when no path exists.
-
-### Local neighborhood
-
-```http
-GET /graph/walk?path=concepts/a.md&include_siblings=true
-```
-
-Returns outbound wiki links, backlinks, and optional same-directory neighbors.
-
-## Page templates
-
-Slash-command templates in `.kiwi/templates/`:
-
-```http
-GET /templates
-GET /template?name=meeting-notes
-```
-
-`GET /templates` lists available template names. `GET /template` returns the template body for insertion into new pages.
-
-## Search evaluation
-
-Benchmark search quality against expected paths:
-
-```http
-POST /eval
-Content-Type: application/json
-```
+<ResponseField name="path" type="string">File path.</ResponseField>
+<ResponseField name="title" type="string">First heading, or the file name.</ResponseField>
+<ResponseField name="frontmatter" type="object">Parsed frontmatter.</ResponseField>
+<ResponseField name="snippet" type="string">First paragraph, up to 300 characters.</ResponseField>
+<ResponseField name="links_out" type="string[]">Wiki link targets in the page, as written.</ResponseField>
+<ResponseField name="links_in" type="string[]">Pages that link to this one.</ResponseField>
+<ResponseField name="word_count" type="integer">Words in the body.</ResponseField>
+<ResponseField name="headings" type="string[]">Heading text, in order.</ResponseField>
 
 ```json
 {
-  "queries": [
+  "path": "concepts/auth.md",
+  "title": "Authentication",
+  "frontmatter": { "status": "published", "tags": ["security"] },
+  "snippet": "KiwiFS supports API keys, per-space keys, and OIDC...",
+  "links_out": ["concepts/oidc", "guides/auth-tokens"],
+  "links_in": ["index.md"],
+  "word_count": 812,
+  "headings": ["Authentication", "API keys", "OIDC"]
+}
+```
+
+### Read one section
+
+Return a single heading section of a page.
+
+```http
+GET /api/kiwi/section
+```
+
+<ParamField query="path" type="string" required>
+  File path.
+</ParamField>
+<ParamField query="heading" type="string">
+  Heading text, matched case-insensitively. Use `Parent > Child` to pick a nested heading.
+</ParamField>
+<ParamField query="index" type="integer">
+  0-based section index. Used when `heading` is not set.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/section?path=concepts/auth.md&heading=OIDC'
+```
+
+Returns `400` when neither `heading` nor `index` is set or `index` isn't a number, and `404` when the file or section does not exist.
+
+<ResponseField name="path" type="string">File path.</ResponseField>
+<ResponseField name="heading" type="string">Matched heading text.</ResponseField>
+<ResponseField name="level" type="integer">Heading level (1–6).</ResponseField>
+<ResponseField name="content" type="string">Section markdown, from the heading to the next heading of the same or higher level.</ResponseField>
+<ResponseField name="line_start" type="integer">First line of the section in the body.</ResponseField>
+<ResponseField name="line_end" type="integer">Last line of the section in the body.</ResponseField>
+
+```json
+{
+  "path": "concepts/auth.md",
+  "heading": "OIDC",
+  "level": 2,
+  "content": "## OIDC\n\nSet `auth.type = \"oidc\"`...",
+  "line_start": 40,
+  "line_end": 58
+}
+```
+
+### Clip a web page
+
+Fetch a URL, convert the article to markdown, and save it as a page.
+
+```http
+POST /api/kiwi/clip
+```
+
+<ParamField header="X-Actor" type="string" default="clipper">
+  Git commit author attribution.
+</ParamField>
+<ParamField body="url" type="string" required>
+  Page to clip.
+</ParamField>
+<ParamField body="title" type="string">
+  Title override. Defaults to the article title.
+</ParamField>
+<ParamField body="tags" type="string[]">
+  Tags to add to the frontmatter.
+</ParamField>
+<ParamField body="folder" type="string" default="clips/">
+  Folder for the new page. The file name is the slugified title.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/clip' \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/article", "tags": ["research"]}'
+```
+
+Returns `400` if `url` is missing and `500` if the fetch, conversion, or write fails.
+
+<ResponseField name="path" type="string">Path of the new page.</ResponseField>
+<ResponseField name="title" type="string">Page title.</ResponseField>
+<ResponseField name="excerpt" type="string">Short excerpt of the article.</ResponseField>
+
+```json
+{ "path": "clips/designing-data-intensive-apps.md", "title": "Designing Data-Intensive Apps", "excerpt": "Reliability, scalability, and maintainability..." }
+```
+
+### Ingest a document
+
+Convert a document on the server's filesystem (PDF, Office, HTML, images, audio, and more) to markdown and write it into the knowledge base. Requires the [`markitdown`](https://github.com/microsoft/markitdown) CLI on the server's `PATH`.
+
+```http
+POST /api/kiwi/ingest
+```
+
+<ParamField body="file" type="string" required>
+  Path to the source file on the server. Supported extensions: `pdf`, `docx`, `pptx`, `xlsx`, `html`, `htm`, `csv`, `json`, `xml`, `epub`, `jpg`, `jpeg`, `png`, `gif`, `bmp`, `tiff`, `mp3`, `wav`, `m4a`, `zip`.
+</ParamField>
+<ParamField body="split_mode" type="string" default="single">
+  `single` writes one page. `sections` writes one page per heading.
+</ParamField>
+<ParamField body="prefix" type="string" default="imports/<file-name>/">
+  Folder for the output pages.
+</ParamField>
+<ParamField body="extract_keywords" type="boolean" default="false">
+  Add TF-IDF keywords to each page.
+</ParamField>
+<ParamField body="max_keywords" type="integer" default="10">
+  Keywords per section when `extract_keywords` is on.
+</ParamField>
+<ParamField body="convert_crossrefs" type="boolean" default="false">
+  Turn references between sections into wiki links.
+</ParamField>
+<ParamField body="actor" type="string" default="kiwi-ingest">
+  Git commit author attribution.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/ingest' \
+  -H "Content-Type: application/json" \
+  -d '{"file": "/data/inbox/q3-report.pdf", "split_mode": "sections", "extract_keywords": true}'
+```
+
+Returns `400` for a missing `file` or unsupported extension and `500` if conversion or writing fails (including when `markitdown` is not installed).
+
+<ResponseField name="source_file" type="string">Source path.</ResponseField>
+<ResponseField name="format" type="string">Source extension.</ResponseField>
+<ResponseField name="total_sections" type="integer">Sections found in the converted document.</ResponseField>
+<ResponseField name="output_files" type="string[]">Pages written.</ResponseField>
+<ResponseField name="top_keywords" type="string[]">Extracted keywords, if enabled.</ResponseField>
+
+```json
+{
+  "source_file": "/data/inbox/q3-report.pdf",
+  "format": ".pdf",
+  "total_sections": 3,
+  "output_files": ["imports/q3-report/summary.md", "imports/q3-report/revenue.md", "imports/q3-report/outlook.md"],
+  "top_keywords": ["revenue", "churn", "pipeline"]
+}
+```
+
+## Agent context
+
+### Workspace context
+
+Return the files agents read at the start of a session.
+
+```http
+GET /api/kiwi/context
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/context'
+```
+
+Each field is an empty string when its file does not exist.
+
+<ResponseField name="playbook" type="string">Contents of `.kiwi/playbook.md`.</ResponseField>
+<ResponseField name="schema" type="string">Contents of `SCHEMA.md` at the knowledge root.</ResponseField>
+<ResponseField name="index" type="string">Contents of `index.md` at the knowledge root.</ResponseField>
+<ResponseField name="rules" type="string">Contents of `.kiwi/rules.md`.</ResponseField>
+
+```json
+{
+  "playbook": "# Playbook\n\nSearch before you write...",
+  "schema": "# Schema\n\nEvery page has `status` and `owner`...",
+  "index": "# Index\n\n- [[concepts/auth]]...",
+  "rules": "Always cite the source page."
+}
+```
+
+### Rules file
+
+Read or replace `.kiwi/rules.md`, the team's instructions for agents. `GET` can also wrap the rules in a ready-made file for a specific agent harness.
+
+```http
+GET /api/kiwi/rules
+PUT /api/kiwi/rules
+```
+
+<ParamField query="format" type="string">
+  `GET` only. One of `cursor`, `claude`, `agents`, `openclaw`, or `skill`. Omit it to get the raw file.
+</ParamField>
+<ParamField header="X-Actor" type="string">
+  `PUT` only. Git commit author attribution.
+</ParamField>
+
+<CodeGroup>
+```bash Read raw rules
+curl 'http://localhost:3333/api/kiwi/rules'
+```
+
+```bash Read as a Cursor rules file
+curl 'http://localhost:3333/api/kiwi/rules?format=cursor'
+```
+
+```bash Replace rules
+curl -X PUT 'http://localhost:3333/api/kiwi/rules' \
+  -H "Content-Type: text/markdown" \
+  --data-binary @rules.md
+```
+</CodeGroup>
+
+`GET` returns plain text, or an empty body when the file doesn't exist. `PUT` takes raw markdown up to 256 KB, returns `413` above that, and commits the file.
+
+```json PUT response
+{ "status": "ok", "path": ".kiwi/rules.md" }
+```
+
+## Feeds and activity
+
+### Activity timeline
+
+List recent file changes from git history, newest first.
+
+```http
+GET /api/kiwi/timeline
+```
+
+<ParamField query="limit" type="integer" default="50">
+  Events to return. Maximum 500.
+</ParamField>
+<ParamField query="offset" type="integer" default="0">
+  Events to skip.
+</ParamField>
+<ParamField query="actor" type="string">
+  Only events whose git author name equals this value.
+</ParamField>
+<ParamField query="type" type="string">
+  `write` or `delete`. Omit for both.
+</ParamField>
+<ParamField query="path_prefix" type="string">
+  Only paths starting with this prefix.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/timeline?limit=20&path_prefix=runbooks/'
+```
+
+Returns `400` for any other `type` value.
+
+<ResponseField name="events" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="type" type="string">`write` or `delete`.</ResponseField>
+    <ResponseField name="path" type="string">File path.</ResponseField>
+    <ResponseField name="actor" type="string">Git author name.</ResponseField>
+    <ResponseField name="timestamp" type="string">Commit time (RFC 3339).</ResponseField>
+    <ResponseField name="message" type="string">Commit subject.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="total" type="integer">
+  `offset` plus the events returned, plus one when the page is full. A value greater than `offset + limit` means more events may exist.
+</ResponseField>
+
+```json
+{
+  "events": [
+    { "type": "write", "path": "runbooks/deploy.md", "actor": "agent:deployer", "timestamp": "2026-10-19T14:02:11Z", "message": "agent:deployer: runbooks/deploy.md" }
+  ],
+  "total": 1
+}
+```
+
+### Atom and JSON feeds
+
+Subscribe to the 50 most recent changes in a feed reader.
+
+```http
+GET /api/kiwi/feed.xml
+GET /api/kiwi/feed.json
+```
+
+<ParamField query="filter" type="string">
+  `published` limits write events to pages with `published: true`.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/feed.xml?filter=published'
+```
+
+`feed.xml` returns Atom (`application/atom+xml`). `feed.json` returns [JSON Feed](https://www.jsonfeed.org) (`application/feed+json`). Item titles read `Updated: <path>` or `Deleted: <path>`, and links use the server's public URL.
+
+### Recently edited pages
+
+Return the markdown pages edited most recently, from git history or file modification times.
+
+```http
+GET /api/kiwi/recent-pages
+```
+
+<ParamField query="limit" type="integer" default="10">
+  Pages to return. Maximum 50.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/recent-pages?limit=5'
+```
+
+<ResponseField name="pages" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="path" type="string">Page path.</ResponseField>
+    <ResponseField name="title" type="string">Page title.</ResponseField>
+    <ResponseField name="actor" type="string">Last editor.</ResponseField>
+    <ResponseField name="timestamp" type="string">Last edit time.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{ "pages": [{ "path": "runbooks/deploy.md", "title": "Deploy", "actor": "agent:deployer", "timestamp": "2026-10-19T14:02:11Z" }] }
+```
+
+## Real-time events
+
+### Subscribe to events
+
+Open a [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) stream that receives an event for every change. See [Real-time events](/concepts/real-time-events) for client patterns.
+
+```http
+GET /api/kiwi/events
+```
+
+```bash
+curl -N 'http://localhost:3333/api/kiwi/events'
+```
+
+Each message has an `event:` line with the event type and a `data:` line with a JSON object. The server sends a `:keep-alive` comment every 15 seconds. It returns `503` when 256 clients are already connected. Events are not replayed, so reconnect and re-read state after a disconnect.
+
+```text
+event: write
+data: {"op":"write","path":"concepts/auth.md","actor":"agent:docs-writer","etag":"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"}
+
+event: delete
+data: {"op":"delete","path":"concepts/old-page.md","actor":"agent:cleanup"}
+
+event: bulk
+data: {"op":"bulk","paths":["a.md","b.md"],"actor":"agent:importer"}
+```
+
+<ResponseField name="op" type="string">Event type. Same as the `event:` line.</ResponseField>
+<ResponseField name="path" type="string">File path, for single-file events.</ResponseField>
+<ResponseField name="paths" type="string[]">File paths, for `bulk` and `rollback`.</ResponseField>
+<ResponseField name="actor" type="string">Who made the change.</ResponseField>
+<ResponseField name="etag" type="string">New git blob hash, on most `write` events.</ResponseField>
+<ResponseField name="extra" type="object">Event-specific details, such as the janitor scan summary.</ResponseField>
+
+| Event | Sent when |
+| --- | --- |
+| `write` | A file is created or updated, including the new path of a rename |
+| `delete` | A file is deleted, including the old path of a rename |
+| `bulk` | A bulk write commits |
+| `rollback` | A bulk write fails and its files are restored |
+| `comment.add` | A comment is added |
+| `comment.resolve` | A comment is resolved or reopened |
+| `comment.delete` | A comment is deleted |
+| `janitor` | A scheduled janitor scan finishes or fails |
+
+## Comments
+
+Comments are inline annotations anchored to a quoted span of a page. They are stored in `.kiwi/comments/<path>.json`, and every change is committed to git and broadcast as an SSE event.
+
+### List comments
+
+Return every comment on a page, resolved or not.
+
+```http
+GET /api/kiwi/comments
+```
+
+<ParamField query="path" type="string" required>
+  Page path.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/comments?path=concepts/auth.md'
+```
+
+<ResponseField name="path" type="string">Page path.</ResponseField>
+<ResponseField name="comments" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="id" type="string">Comment ID.</ResponseField>
+    <ResponseField name="path" type="string">Page path.</ResponseField>
+    <ResponseField name="anchor" type="object">Where the comment attaches: `quote`, plus optional `prefix`, `suffix`, and `offset`.</ResponseField>
+    <ResponseField name="body" type="string">Comment text.</ResponseField>
+    <ResponseField name="author" type="string">Who wrote it.</ResponseField>
+    <ResponseField name="createdAt" type="string">Creation time (RFC 3339).</ResponseField>
+    <ResponseField name="resolved" type="boolean">Present and `true` once resolved.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{
+  "path": "concepts/auth.md",
+  "comments": [
     {
-      "question": "authentication flow",
-      "expected_paths": ["pages/auth.md", "concepts/oauth.md"]
+      "id": "c7f3a9e2b1d84c6f",
+      "path": "concepts/auth.md",
+      "anchor": { "quote": "tokens expire after 24 hours", "prefix": "By default, ", "offset": 412 },
+      "body": "Is this still true after the session change?",
+      "author": "agent:reviewer",
+      "createdAt": "2026-10-19T13:40:00Z"
     }
   ]
 }
 ```
 
-Returns per-query FTS and semantic ranks plus aggregate `hit_rate`, `mrr`, and `precision_at_5`. MCP: **`kiwi_eval`**.
+### Add a comment
 
-## Backup status
-
-When `[backup]` is configured:
+Attach a comment to a span of text in a page.
 
 ```http
-GET /backup/status
-GET /sync/status
+POST /api/kiwi/comments
 ```
 
-Returns last push time, remote URL, and error state for the background backup goroutine.
+<ParamField query="path" type="string" required>
+  Page path.
+</ParamField>
+<ParamField header="X-Actor" type="string">
+  Author, used when `author` is not set.
+</ParamField>
+<ParamField body="anchor" type="object" required>
+  <Expandable title="properties">
+    <ParamField body="quote" type="string" required>Exact text the comment refers to.</ParamField>
+    <ParamField body="prefix" type="string">Text just before the quote, to disambiguate repeats.</ParamField>
+    <ParamField body="suffix" type="string">Text just after the quote.</ParamField>
+    <ParamField body="offset" type="integer">Character offset hint.</ParamField>
+  </Expandable>
+</ParamField>
+<ParamField body="body" type="string" required>
+  Comment text.
+</ParamField>
+<ParamField body="author" type="string">
+  Author. Falls back to `X-Actor`, then the server's default actor.
+</ParamField>
 
-## Rules file
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/comments?path=concepts/auth.md' \
+  -H "Content-Type: application/json" \
+  -H "X-Actor: agent:reviewer" \
+  -d '{"anchor": {"quote": "tokens expire after 24 hours"}, "body": "Is this still true?"}'
+```
+
+Returns `400` when `body` or `anchor.quote` is missing. The response is the new comment.
+
+### Resolve a comment
+
+Mark a comment resolved, or reopen it.
 
 ```http
-GET /rules
-GET /rules?format=cursor
-PUT /rules
+PATCH /api/kiwi/comments/:id
 ```
 
-- Without `format`, returns raw `.kiwi/rules.md` (empty string when missing).
-- `format` may be `cursor`, `claude`, `agents`, or `openclaw` to wrap user rules for a specific harness.
-- `PUT` accepts raw markdown (max **256 KiB**) and commits `.kiwi/rules.md` when git versioning is enabled.
+<ParamField path="id" type="string" required>
+  Comment ID.
+</ParamField>
+<ParamField query="path" type="string" required>
+  Page path.
+</ParamField>
+<ParamField body="resolved" type="boolean" required>
+  `true` to resolve, `false` to reopen.
+</ParamField>
 
-## Space metadata
+```bash
+curl -X PATCH 'http://localhost:3333/api/kiwi/comments/c7f3a9e2b1d84c6f?path=concepts/auth.md' \
+  -H "Content-Type: application/json" \
+  -d '{"resolved": true}'
+```
+
+Returns `404` if the comment does not exist. The response is the updated comment.
+
+### Delete a comment
+
+Remove a comment.
 
 ```http
-GET /space/info
+DELETE /api/kiwi/comments/:id
 ```
+
+<ParamField path="id" type="string" required>
+  Comment ID.
+</ParamField>
+<ParamField query="path" type="string" required>
+  Page path.
+</ParamField>
+
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/comments/c7f3a9e2b1d84c6f?path=concepts/auth.md'
+```
+
+Returns `404` if the comment does not exist.
 
 ```json
-{ "visibility": "private", "root": "/data/knowledge" }
+{ "deleted": "c7f3a9e2b1d84c6f", "path": "concepts/auth.md" }
 ```
 
+## Rendering
+
+### Render a D2 diagram
+
+Render [D2](https://d2lang.com) source to SVG on the server. The web UI uses this for ` ```d2 ` fences. Use `GET` for short sources and `POST` when the source is too long for a URL.
+
 ```http
-PUT /space/visibility
-Content-Type: application/json
+GET /api/kiwi/render/d2
+POST /api/kiwi/render/d2
 ```
+
+<ParamField query="source" type="string">
+  `GET` only. D2 source.
+</ParamField>
+<ParamField query="theme" type="string" default="light">
+  `GET` only. `light` or `dark`.
+</ParamField>
+<ParamField body="source" type="string" required>
+  `POST` only. D2 source, up to 64 KB.
+</ParamField>
+<ParamField body="theme" type="string" default="light">
+  `POST` only. `light` or `dark`.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/render/d2' \
+  -H "Content-Type: application/json" \
+  -d '{"source": "api -> db: query\napi -> cache", "theme": "dark"}' \
+  -o diagram.svg
+```
+
+Returns an `image/svg+xml` body with an `ETag`. Send that ETag back in `If-None-Match` to get `304`. Layout uses dagre by default; set `layout-engine: elk` in the source's `d2-config` to use ELK. Imports are disabled. Error codes:
+
+- `400`: empty source or source over 64 KB
+- `422`: the diagram has a syntax or layout error (the message says where)
+- `501`: the server was built without D2 support
+- `503`: rendering took longer than 10 seconds
+
+### Widget fence reference
+
+Return the schema, description, and example for every widget fence (` ```array `, ` ```tree `, ` ```table `, and so on). The linter, the editor's slash menu, and the `kiwi_widget_reference` MCP tool all use the same catalog. See [Widgets](/concepts/widgets).
+
+```http
+GET /api/kiwi/widgets/reference
+```
+
+<ParamField query="name" type="string">
+  Return only this fence. Accepts the fence tag or an alias.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/widgets/reference?name=array'
+```
+
+Returns `404` for an unknown fence name.
+
+<ResponseField name="version" type="integer">Catalog version. Currently `1`.</ResponseField>
+<ResponseField name="reserved_top_level_keys" type="string[]">Keys every fence accepts at the top level, such as `steps`, `caption`, and `autoplay`.</ResponseField>
+<ResponseField name="reserved_step_keys" type="string[]">Keys every step accepts, such as `note`, `line`, and `breakpoint`.</ResponseField>
+<ResponseField name="fences" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="lang" type="string">Fence tag.</ResponseField>
+    <ResponseField name="aliases" type="string[]">Other tags that select this fence.</ResponseField>
+    <ResponseField name="strictAliases" type="string[]">Aliases, like `kiwi-array`, that always claim the block and report every error.</ResponseField>
+    <ResponseField name="description" type="string">What the widget shows.</ResponseField>
+    <ResponseField name="required" type="string[]">Required keys.</ResponseField>
+    <ResponseField name="requireOneOf" type="string[]">At least one of these keys must be present.</ResponseField>
+    <ResponseField name="example" type="string">A complete example fence.</ResponseField>
+    <ResponseField name="attributes" type="object">Schema for each key.</ResponseField>
+  </Expandable>
+</ResponseField>
 
 ```json
-{ "visibility": "public" }
+{
+  "version": 1,
+  "reserved_top_level_keys": ["steps", "frames", "code", "lang", "props", "link", "caption", "title", "id", "clock", "width", "autoplay", "loop", "why"],
+  "reserved_step_keys": ["note", "line", "next", "label", "breakpoint", "duration", "why", "expect"],
+  "fences": [
+    {
+      "lang": "array",
+      "aliases": ["kiwi-array", "widget:array", "arraystack", "kiwi-arraystack"],
+      "description": "One or more arrays on a shared index axis, with pointers, dependency arrows and span brackets.",
+      "required": ["values", "rows"],
+      "requireOneOf": ["values", "rows"],
+      "example": "```array id=two-sum ...",
+      "attributes": { "values": { "type": "array|string", "description": "Cell values..." } }
+    }
+  ]
+}
 ```
 
-Allowed values: `private`, `unlisted`, `public`. Persists into `.kiwi/config.toml` and updates the live config.
+## Raw files and llms.txt
 
-## Audit log
+### Raw files
+
+Serve a file's bytes directly, for `<img>`, `<video>`, and `<iframe>` tags and downloads. Use [`GET /file`](/api/files#read-a-file) instead when you need an `ETag`.
 
 ```http
-GET /audit?since=2026-05-01T00:00:00Z&limit=100
+GET /raw/:path
+GET /api/kiwi/raw/:path
 ```
 
-Returns JSON array entries `{ "ts", "method", "path", "space", "actor", "token_hash", "ip", "status", "duration_ms" }`.
+<ParamField path="path" type="string" required>
+  File path relative to the knowledge root.
+</ParamField>
+<ParamField query="exp" type="string">
+  Expiry from a [signed URL](#sign-a-raw-url).
+</ParamField>
+<ParamField query="sig" type="string">
+  Signature from a signed URL.
+</ParamField>
 
-**`501`** when audit logging was not enabled for this server. Default `since` is the last 24 hours; `limit` defaults to **100** (max **10000**).
+```bash
+curl -O 'http://localhost:3333/raw/assets/diagram.png' \
+  -H "Authorization: Bearer $KIWI_API_KEY"
+```
 
-## Public routes
+The `/api/kiwi/raw/` alias lets the web UI reach assets in a non-primary space. When auth is on and the space is `private`, a request must have one of:
 
-### Share tokens
+- an `Authorization` header
+- a valid `exp` and `sig` pair (otherwise `403`)
+- a target that is already public: a branding logo or favicon, a page with `published: true` or `visibility: public`, or an asset next to such a page
 
-Create links with [`POST /share`](/api/analytics#sharing). Readers call **without** API authentication:
+Spaces with `public` or `unlisted` visibility serve raw files without credentials. Returns `404` if the file does not exist. SVGs are served with a restrictive `Content-Security-Policy`.
+
+### Sign a raw URL
+
+Get a short-lived `/raw/` URL that works without an `Authorization` header, for embedding private assets in HTML.
 
 ```http
-GET /api/kiwi/public/:token
+GET /api/kiwi/raw-sign
 ```
 
-Optional password: query `password` or header `X-Share-Password`. Wrong or missing passwords return **`401`** with a `WWW-Authenticate` challenge when the link is password protected.
+<ParamField query="path" type="string" required>
+  File path.
+</ParamField>
 
-### Public visibility browsing
+```bash
+curl 'http://localhost:3333/api/kiwi/raw-sign?path=assets/diagram.png' \
+  -H "Authorization: Bearer $KIWI_API_KEY"
+```
 
-These endpoints expose only markdown that declares **`visibility: public`** in frontmatter:
+Returns `400` if `path` is missing or escapes the knowledge root. URLs stay valid for 30 to 60 minutes and stop working when the server restarts.
+
+<ResponseField name="path" type="string">Normalized file path.</ResponseField>
+<ResponseField name="url" type="string">Signed relative URL.</ResponseField>
+<ResponseField name="expires" type="string">Expiry time (RFC 3339, UTC).</ResponseField>
+
+```json
+{
+  "path": "assets/diagram.png",
+  "url": "/raw/assets/diagram.png?exp=1792418400&sig=Zk3x...",
+  "expires": "2026-10-19T15:00:00Z"
+}
+```
+
+### llms.txt
+
+Describe the knowledge base in the [llms.txt](https://llmstxt.org) format, for agents that don't use MCP. These routes sit at the server root, not under `/api/kiwi`.
 
 ```http
-GET /api/kiwi/public/file?path=concepts/open.md
-GET /api/kiwi/public/tree?path=
+GET /llms.txt
+GET /llms-full.txt
 ```
 
-Non-public pages return **`404`** as "not found" to avoid leaking existence.
+```bash
+curl 'http://localhost:3333/llms.txt'
+```
 
-## Raw files
+`/llms.txt` returns a plain-text index: a title, a summary, and every page grouped by top-level folder, with its `description` frontmatter. `/llms-full.txt` returns the full markdown of every page, concatenated, with frontmatter stripped. It stops at 5 MiB and ends with a note saying how many pages were left out.
+
+<Note>
+These routes don't take credentials. When auth is on and the space isn't `public`, they list only pages with `published: true` or `visibility: public`, the same pages `/p/*` would serve.
+</Note>
+
+## Web UI settings
+
+### UI configuration
+
+Return the `[ui]` settings the web UI needs at startup.
 
 ```http
-GET /raw/*
+GET /api/kiwi/ui-config
 ```
 
-Serves raw bytes for static assets and markdown outside the JSON APIs (used by the web UI). Not a substitute for `GET /file` when you need `ETag` semantics.
+```bash
+curl 'http://localhost:3333/api/kiwi/ui-config'
+```
 
-## UI configuration
+<ResponseField name="themeLocked" type="boolean">`true` when theme edits are disabled.</ResponseField>
+<ResponseField name="startPage" type="string">Page the web UI opens first.</ResponseField>
+<ResponseField name="sidebar" type="object">`pinned` and `hidden` path lists, and `sections` (each with `label` and `paths`).</ResponseField>
+<ResponseField name="branding" type="object">`name`, `logoUrl`, `faviconUrl`, `welcomeTitle`, and `welcomeMessage`.</ResponseField>
+<ResponseField name="features" type="object">On or off for `graph`, `kanban`, `canvas`, `whiteboard`, `timeline`, `bases`, `data_sources`, `edit`, `history`, and `publish`.</ResponseField>
+<ResponseField name="toolbarViews" type="string[] | null">Views shown in the page toolbar. `null` means the default set.</ResponseField>
+<ResponseField name="tags" type="object">`banner` and `hide` tag lists, and `colors` (tag to color).</ResponseField>
+<ResponseField name="typedFences" type="boolean">Whether widget fences render as widgets.</ResponseField>
+<ResponseField name="typedFenceTags" type="string[] | null">Fence tags allowed to render. `null` means all of them.</ResponseField>
+
+```json
+{
+  "themeLocked": false,
+  "startPage": "index.md",
+  "sidebar": { "pinned": ["index.md"], "hidden": [], "sections": [] },
+  "branding": { "name": "Acme Wiki", "logoUrl": "", "faviconUrl": "", "welcomeTitle": "", "welcomeMessage": "" },
+  "features": { "graph": true, "kanban": true, "canvas": true, "whiteboard": true, "timeline": true, "bases": true, "data_sources": true, "edit": true, "history": true, "publish": true },
+  "toolbarViews": null,
+  "tags": { "banner": [], "hide": [], "colors": {} },
+  "typedFences": true,
+  "typedFenceTags": null
+}
+```
+
+### Theme
+
+Read or replace `.kiwi/theme.json`, the workspace theme the web UI applies.
 
 ```http
-GET /ui-config
+GET /api/kiwi/theme
+PUT /api/kiwi/theme
 ```
 
-Returns JSON consumed by the embedded web UI (feature flags, layout hints).
+<ParamField header="X-Actor" type="string">
+  `PUT` only. Git commit author attribution.
+</ParamField>
 
-## MCP parity
+<CodeGroup>
+```bash Read
+curl 'http://localhost:3333/api/kiwi/theme'
+```
 
-Many of these flows have MCP tools (`kiwi_lint`, `kiwi_peek`, `kiwi_section`, `kiwi_timeline`, `kiwi_feed`, `kiwi_clip`, `kiwi_graph_*`, and more). See [MCP](/concepts/mcp).
+```bash Replace
+curl -X PUT 'http://localhost:3333/api/kiwi/theme' \
+  -H "Content-Type: application/json" \
+  -d '{"accent": "#7fbc3d", "fontFamily": "Inter"}'
+```
+</CodeGroup>
+
+`GET` returns the stored JSON object, or `{}` when there is none. `PUT` takes any JSON object up to 64 KB, commits it, and returns it. `PUT` returns `400` for invalid JSON, `403` when `ui.theme_locked` is on, and `413` above 64 KB.
+
+### Custom CSS
+
+Return the workspace stylesheet set by `[ui] custom_css` (default `.kiwi/custom.css`), with any `<script>` tags removed.
+
+```http
+GET /api/kiwi/custom.css
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/custom.css'
+```
+
+Returns `text/css`, or an empty body when the file doesn't exist.
+
+### Keybindings
+
+Return the web UI's keyboard shortcuts after merging the defaults, `.kiwi/keybindings.json`, and `[ui.keybindings]` in the config.
+
+```http
+GET /api/kiwi/keybindings
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/keybindings'
+```
+
+<ResponseField name="bindings" type="object">Action name to key chord, after merging.</ResponseField>
+<ResponseField name="defaults" type="object">Built-in action name to key chord.</ResponseField>
+<ResponseField name="conflicts" type="object[]">Chords bound to more than one action, each with `chord` and `actions`.</ResponseField>
+
+```json
+{
+  "bindings": { "focus_tree_filter": "Mod+Alt+F" },
+  "defaults": { "focus_tree_filter": "Mod+Alt+F" },
+  "conflicts": []
+}
+```
+
+### Editor slash commands
+
+Return the custom slash commands defined in `[[ui.editor.slash_commands]]`. Entries without an `id` or `template`, or with an `id` that isn't letters, digits, `_`, or `-`, are skipped.
+
+```http
+GET /api/kiwi/editor/slash-commands
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/editor/slash-commands'
+```
+
+<ResponseField name="commands" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="id" type="string">Command ID.</ResponseField>
+    <ResponseField name="label" type="string">Menu label. Defaults to `id`.</ResponseField>
+    <ResponseField name="icon" type="string">Icon name. Defaults to `FileText`.</ResponseField>
+    <ResponseField name="description" type="string">Menu description.</ResponseField>
+    <ResponseField name="template" type="string">Path of the template file to insert. Fetch its content with the file API.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{ "commands": [{ "id": "incident", "label": "Incident report", "icon": "FileText", "description": "Postmortem skeleton", "template": ".kiwi/templates/incident.md" }] }
+```
+
+### User preferences
+
+Read or update the calling user's web UI preferences, stored in `.kiwi/users/<user-id>/preferences.json`. The user comes from `X-Actor`, which the auth layer sets from your credentials.
+
+```http
+GET /api/kiwi/preferences
+PUT /api/kiwi/preferences
+```
+
+<ParamField body="theme" type="string">Color theme.</ParamField>
+<ParamField body="sidebar_collapsed" type="boolean">Whether the sidebar starts collapsed.</ParamField>
+<ParamField body="default_view" type="string">`editor` or `source`.</ParamField>
+<ParamField body="font_size" type="string">`sm`, `base`, or `lg`.</ParamField>
+<ParamField body="editor_line_numbers" type="boolean">Show line numbers in the source editor.</ParamField>
+<ParamField body="vim_mode" type="boolean">Enable Vim keybindings in the source editor.</ParamField>
+
+```bash
+curl -X PUT 'http://localhost:3333/api/kiwi/preferences' \
+  -H "Authorization: Bearer $KIWI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"font_size": "lg", "vim_mode": true}'
+```
+
+`PUT` merges the fields you send into the stored preferences, commits the file, and returns the merged result. Both methods return `401` for anonymous callers and the built-in web UI actor. `PUT` returns `400` for an invalid `default_view` or `font_size` and `413` above 8 KB.
+
+```json
+{ "theme": "dark", "font_size": "lg", "vim_mode": true }
+```
+
+### Personal state and notes
+
+Store small JSON blobs per user, such as UI state, and read a user's private companion note for a page. Files live in `.kiwi/users/<user-id>/state/` for authenticated users and in `.me/` otherwise. These files are written directly and are not committed to git.
+
+```http
+GET /api/kiwi/me/state
+PUT /api/kiwi/me/state
+GET /api/kiwi/me/note
+```
+
+<ParamField query="name" type="string">
+  `me/state` only, required. State name. Must not contain `/`, `\`, or `.`.
+</ParamField>
+<ParamField query="path" type="string">
+  `me/note` only, required. Page path. The note is the file with the same base name in the user's state folder.
+</ParamField>
+
+<CodeGroup>
+```bash Save state
+curl -X PUT 'http://localhost:3333/api/kiwi/me/state?name=reading-list' \
+  -H "Content-Type: application/json" \
+  -d '{"pages": ["concepts/auth.md"]}'
+```
+
+```bash Read state
+curl 'http://localhost:3333/api/kiwi/me/state?name=reading-list'
+```
+
+```bash Read a note
+curl 'http://localhost:3333/api/kiwi/me/note?path=concepts/auth.md'
+```
+</CodeGroup>
+
+`GET /me/state` returns the stored JSON, or `{}` when nothing is stored. `PUT /me/state` takes any valid JSON up to 512 KB and returns `204`. It returns `400` for a bad `name` or invalid JSON and `413` above 512 KB. `GET /me/note` returns `text/markdown`, or `404` when there is no note.
+
+## Admin
+
+### Backup status
+
+Report the state of the background git push configured in `[backup]`. See [Backup and sync](/deploy/backup-sync).
+
+```http
+GET /api/kiwi/backup/status
+GET /api/kiwi/sync/status
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/backup/status'
+```
+
+`/sync/status` is an alias.
+
+<ResponseField name="enabled" type="boolean">`false` when no backup remote is configured.</ResponseField>
+<ResponseField name="status" type="object">
+  Present when enabled.
+  <Expandable title="properties">
+    <ResponseField name="last_push_at" type="string">Time of the last push attempt (RFC 3339).</ResponseField>
+    <ResponseField name="success" type="boolean">Whether the last push succeeded.</ResponseField>
+    <ResponseField name="error" type="string">Error from the last push, if it failed.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{ "enabled": true, "status": { "last_push_at": "2026-10-19T14:00:00Z", "success": true } }
+```
+
+### Audit log
+
+Read the request audit log. Requires `[audit] enabled = true`; entries are written to `.kiwi/audit/YYYY-MM-DD.jsonl`. See [Audit log](/concepts/audit-log).
+
+```http
+GET /api/kiwi/audit
+```
+
+<ParamField query="since" type="string" default="24 hours ago">
+  RFC 3339 timestamp. Only entries at or after this time.
+</ParamField>
+<ParamField query="limit" type="integer" default="100">
+  Maximum entries, up to 10000. Values outside 1–10000 fall back to 100.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/audit?since=2026-10-19T00:00:00Z&limit=500'
+```
+
+Returns `400` for a malformed `since` and `501` when audit logging is off.
+
+<ResponseField name="response" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="ts" type="string">Request start time (RFC 3339, UTC).</ResponseField>
+    <ResponseField name="method" type="string">HTTP method.</ResponseField>
+    <ResponseField name="path" type="string">Request path.</ResponseField>
+    <ResponseField name="space" type="string">Space, when set.</ResponseField>
+    <ResponseField name="actor" type="string">Actor, or `anonymous`.</ResponseField>
+    <ResponseField name="token_hash" type="string">Short hash of the bearer token, when one was sent.</ResponseField>
+    <ResponseField name="ip" type="string">Client IP.</ResponseField>
+    <ResponseField name="status" type="integer">Response status code.</ResponseField>
+    <ResponseField name="duration_ms" type="integer">Handling time in milliseconds.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+[
+  { "ts": "2026-10-19T14:02:11.482Z", "method": "PUT", "path": "/api/kiwi/file", "actor": "agent:deployer", "token_hash": "9f86d081", "ip": "10.0.0.12", "status": 200, "duration_ms": 18 }
+]
+```
+
+## MCP equivalents
+
+| REST | MCP tool |
+| --- | --- |
+| `POST /lint` | `kiwi_lint` |
+| `GET /peek` | `kiwi_peek` |
+| `GET /section` | `kiwi_section` |
+| `POST /clip` | `kiwi_clip` |
+| `POST /ingest` | `kiwi_ingest` |
+| `GET /context` | `kiwi_context` |
+| `GET /timeline` | `kiwi_timeline` |
+| `GET /feed.xml`, `GET /feed.json` | `kiwi_feed` |
+| `GET /widgets/reference` | `kiwi_widget_reference` |
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Files API" icon="file" href="/api/files">
+    Read, write, and rename pages.
+  </Card>
+  <Card title="Real-time events" icon="bolt" href="/concepts/real-time-events">
+    Build clients on the SSE stream.
+  </Card>
+  <Card title="Widgets" icon="shapes" href="/concepts/widgets">
+    Widget fences and how they render.
+  </Card>
+  <Card title="Audit log" icon="clipboard-list" href="/concepts/audit-log">
+    Turn on and read request auditing.
+  </Card>
+</CardGroup>

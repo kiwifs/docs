@@ -1,81 +1,101 @@
 ---
 title: "POSIX and filesystem semantics"
-description: "POSIX compliance by access path — NFS, FUSE, atomic writes, and concurrency."
+sidebarTitle: "POSIX semantics"
+description: "Which filesystem semantics hold on each access path, and how KiwiFS keeps concurrent writes safe."
 icon: "file-code"
 ---
 
-KiwiFS stores **real files** on disk. POSIX behavior depends on how you access them.
+KiwiFS stores **real files** on a real filesystem, not blobs in a database. How POSIX-like the experience is depends on how you reach those files.
 
 ## Compliance by access path
 
 | Access path | POSIX level | Notes |
 | --- | --- | --- |
-| Direct filesystem | Full | Real files, atomic writes, mmap works |
-| NFS mount | Near-full | Symlinks, open-unlink, stable handles |
-| FUSE mount | Near-full | Remote client; no kernel mmap |
-| WebDAV | Partial | MOVE/COPY/MKCOL; buffered writes |
-| REST / S3 / MCP | N/A | HTTP or tool semantics |
+| Direct filesystem | Full | Real files, crash-safe atomic writes, `mmap` works |
+| NFS mount | Near-full | Userspace NFSv3, symlinks, open-then-delete, stable handles across restarts |
+| FUSE mount | Near-full | Remote client over HTTP. Symlinks, directory rename, sub-second mtime, `O_APPEND`; no kernel `mmap` |
+| WebDAV | Partial | `MOVE`, `COPY`, `MKCOL`, `DELETE`; buffered writes that spill to disk |
+| REST, S3, MCP | N/A | HTTP, object-store, or tool semantics |
 
 ## What works on NFS and FUSE
 
-| Semantic | NFS | FUSE |
-| --- | --- | --- |
-| Atomic writes (tmp → fsync → rename) | Yes | Yes |
-| `rename(2)` | Yes | Yes |
-| Symlinks | Yes | Yes |
-| Open-then-delete (POSIX unlink) | Yes | — |
-| `fsync` | Yes | Yes |
-| Directory rename | Yes | Yes |
-| `readdir` hides `.git`, `.kiwi` | Yes | Yes |
-| 64 MB max file size (`EFBIG`) | Yes | Yes |
+| Semantic | NFS | FUSE | Notes |
+| --- | --- | --- | --- |
+| Atomic writes | Yes | Yes | Write to temp file, `fsync`, rename, `fsync` the directory |
+| `rename(2)` | Yes | Yes | Includes directory renames |
+| `O_APPEND` | Yes | Yes | FUSE fetches the current content first, so appends land at the real end of file |
+| `O_TRUNC`, `ftruncate` | Yes | Yes | |
+| Symlinks and `readlink` | Yes | Yes | Targets that escape the knowledge root are rejected |
+| Open-then-delete | Yes | — | NFS defers deletion until the last handle closes |
+| `fsync` | Yes | Yes | Pushes the write through the pipeline |
+| Sub-second mtime | — | Yes | |
+| Advisory locks | Yes | — | Process-local only |
+| `readdir` hides `.git` and `.kiwi` | Yes | Yes | |
+| Real `stat` values | Yes | Yes | Size, mode, and mtime are not synthetic |
+| 64 MB file size limit | Yes | Yes | Larger files fail with `EFBIG` |
+| Path safety | Yes | Yes | Blocks traversal, null bytes, control characters, and segments over 255 bytes |
+
+## Intentionally not supported
+
+| Semantic | Why |
+| --- | --- |
+| Hard links | One blob at several paths would break git versioning |
+| `chmod`, `chown` | There is no user or group model. Access is controlled by API keys or OIDC |
+| POSIX ACLs | Access control lives at the HTTP and space level |
+| Extended attributes | Frontmatter serves the same purpose |
+| Distributed locks | Locks are process-local. Use `If-Match` for cross-client concurrency |
+| `mmap` over FUSE | FUSE I/O goes over HTTP, so the kernel can't map pages |
 
 ## Concurrency and durability
 
 <AccordionGroup>
   <Accordion title="Optimistic locking">
-    `If-Match` / ETag on REST writes. Returns `409` on conflict.
+    REST writes accept an `If-Match` header with the file's ETag. A stale ETag returns `409 Conflict`. `If-Match: *` follows RFC 7232.
   </Accordion>
 
   <Accordion title="Serialized writes">
-    One mutex across all protocols. Concurrent writers are safely queued.
+    Writes from every protocol share one pipeline and one lock, so concurrent writers queue instead of corrupting each other.
   </Accordion>
 
   <Accordion title="Single-instance guard">
-    `flock` on `.kiwi/server.lock`. Released automatically on process exit (including SIGKILL).
+    The server holds an `flock` on `.kiwi/server.lock`. The kernel releases it on any exit, including `SIGKILL`, so there is no stale lock to clean up. Two servers can't share one knowledge root.
   </Accordion>
 
   <Accordion title="Git lock recovery">
-    A background watcher cleans stale `index.lock` every 10 seconds (60-second threshold). Also cleaned at startup.
+    Every 10 seconds, a background watcher removes `.git/index.lock` if it is older than 60 seconds. Git subprocesses get `SIGTERM` before `SIGKILL`, so they usually release the lock themselves.
   </Accordion>
 
   <Accordion title="Line-ending integrity">
-    `core.autocrlf=false` and `* -text` in `.gitattributes`. ETags always match raw bytes.
+    KiwiFS sets `core.autocrlf=false` and `* -text` in `.gitattributes`, so ETags always match the raw bytes on disk. The API blocks writes to `.gitattributes`.
+  </Accordion>
+
+  <Accordion title="Frontmatter size limit">
+    YAML frontmatter larger than 64 KB is treated as empty. Headings in the body are still indexed.
   </Accordion>
 </AccordionGroup>
 
-## Intentionally limited
+## Symlinks over REST
 
-<Warning>
-- FUSE does not support kernel **mmap** (HTTP-backed I/O).
-- WebDAV is not a full POSIX layer.
-- Two KiwiFS servers must not share one knowledge root — the lock prevents split-brain.
-</Warning>
+Create a symlink by writing its target with `Content-Type: application/x-symlink`, and read the target back with `readlink`:
 
-## Symlinks
+```bash Terminal
+curl -X PUT 'http://localhost:3333/api/kiwi/file?path=latest.md' \
+  -H 'Content-Type: application/x-symlink' \
+  -d 'reports/2026-10.md'
 
-Symlinks work on NFS (real `os.Symlink`) and FUSE/REST (`Content-Type: application/x-symlink`). Targets escaping the knowledge root are rejected.
-
-```bash
-curl 'http://localhost:3333/api/kiwi/readlink?path=link.md'
+curl 'http://localhost:3333/api/kiwi/readlink?path=latest.md'
 ```
 
-## Related documentation
+## Related
 
 <CardGroup cols={2}>
   <Card title="Alternate protocols" icon="network-wired" href="/guides/alternate-protocols">
-    NFS, S3, WebDAV, FUSE setup.
+    Set up NFS, S3, WebDAV, and FUSE.
   </Card>
   <Card title="Files as truth" icon="file" href="/concepts/files-as-truth">
-    Storage philosophy.
+    Why KiwiFS stores plain files.
+  </Card>
+  <Card title="Versioning" icon="code-branch" href="/concepts/versioning">
+    Git commits behind every write.
   </Card>
 </CardGroup>

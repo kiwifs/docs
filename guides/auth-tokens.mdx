@@ -1,16 +1,22 @@
 ---
 title: "Authentication and tokens"
-description: "Configure API authentication — global keys, per-space tokens, and OIDC — and manage tokens via the CLI."
+sidebarTitle: "Auth and tokens"
+description: "Protect a KiwiFS server with a global API key, scoped per-space tokens, or OIDC, and manage tokens from the CLI."
 icon: "key"
 ---
 
-KiwiFS supports four authentication modes. Choose the one that fits your deployment.
+KiwiFS has no authentication by default, which suits a laptop or a trusted network. Before you expose a server, pick an auth mode in `[auth]` of `.kiwi/config.toml`. Every mode uses the same header:
+
+```bash Terminal
+curl http://localhost:3333/api/kiwi/tree \
+  -H "Authorization: Bearer $KIWI_TOKEN"
+```
 
 ## Auth modes
 
 <Tabs>
   <Tab title="none (default)">
-    No authentication. Suitable for local development and trusted networks.
+    No authentication.
 
     ```toml .kiwi/config.toml
     [auth]
@@ -18,51 +24,44 @@ KiwiFS supports four authentication modes. Choose the one that fits your deploym
     ```
   </Tab>
   <Tab title="apikey">
-    A single global API key protects all endpoints.
+    One shared key for every request. Use `${ENV_VAR}` to keep the secret out of the file.
 
     ```toml .kiwi/config.toml
     [auth]
     type = "apikey"
-    api_key = "kiwi_sk_your_secret_here"
+    api_key = "${KIWI_API_KEY}"
     ```
 
-    Pass the key as a Bearer token:
-
-    ```bash
-    curl http://localhost:3333/api/kiwi/tree \
-      -H "Authorization: Bearer kiwi_sk_your_secret_here"
-    ```
+    Or from the command line: `kiwifs serve --auth apikey --api-key "$KIWI_API_KEY"`.
   </Tab>
   <Tab title="perspace">
-    Each space gets its own scoped API key with fine-grained permissions.
+    Many keys, each with its own scope, space, path prefix, and actor name.
 
     ```toml .kiwi/config.toml
     [auth]
     type = "perspace"
 
     [[auth.api_keys]]
-    key = "kiwi_ro_eng_abc123"
-    space = "engineering"
-    actor = "eng-reader"
+    key = "kiwi_ro_..."
+    actor = "ci-reader"
     scope = "read"
-    prefix = ""
 
     [[auth.api_keys]]
-    key = "kiwi_rw_eng_xyz789"
-    space = "engineering"
-    actor = "eng-writer"
+    key = "kiwi_rw_..."
+    actor = "onboarding-bot"
     scope = "write"
-    prefix = "concepts/"
+    prefix = "onboarding/"
 
     [[auth.api_keys]]
-    key = "kiwi_admin_all"
-    space = ""
+    key = "kiwi_adm_..."
     actor = "admin"
     scope = "admin"
     ```
+
+    Create keys with [`kiwifs token create`](#manage-tokens-with-the-cli) instead of writing them by hand.
   </Tab>
   <Tab title="oidc">
-    OpenID Connect for SSO via your identity provider.
+    Accept ID tokens from your identity provider.
 
     ```toml .kiwi/config.toml
     [auth]
@@ -73,121 +72,176 @@ KiwiFS supports four authentication modes. Choose the one that fits your deploym
     client_id = "your-client-id"
     ```
 
-    Clients pass a JWT Bearer token from the identity provider.
+    Clients send the provider's JWT as the bearer token. KiwiFS records the token's `email` claim (or `sub`) as the actor in git commits. Command-line equivalent: `--auth oidc --oidc-issuer ... --oidc-client-id ...`.
   </Tab>
 </Tabs>
 
-<Info>
-Auth configuration is hot-reloadable — send `SIGHUP` to the server process to reload from disk without restarting.
-</Info>
+A request without a valid token returns `401`. A valid token used outside its scope, space, or prefix returns `403`.
 
 ## Per-space token fields
 
-When using `perspace` auth, each `[[auth.api_keys]]` entry supports:
+Each `[[auth.api_keys]]` entry supports:
 
-| Field | Required | Description |
+| Field | Default | Description |
 | --- | --- | --- |
-| `key` | Yes | The API key string (shown once on creation via CLI) |
-| `space` | No | Restrict to a specific space (empty = all spaces) |
-| `actor` | No | Default `X-Actor` value for git attribution |
-| `scope` | Yes | Permission level: `read`, `write`, or `admin` |
-| `prefix` | No | Restrict access to paths under this prefix |
+| `key` | — | The secret the client sends as a bearer token |
+| `scope` | `admin` | `read`, `write`, or `admin` |
+| `space` | all spaces | In [multi-space](/concepts/multi-space) mode, the only space that accepts this key |
+| `prefix` | none | Restrict the key to paths under this prefix |
+| `actor` | — | Name recorded as `X-Actor` in git commits and the audit log |
+
+<Note>
+A key with no `scope` gets `admin`. `kiwifs token create` defaults to `read`, so set `scope` explicitly when you write entries by hand.
+</Note>
 
 ### Scopes
 
-| Scope | Permissions |
+| Scope | Can do |
 | --- | --- |
-| `read` | `GET` endpoints only — tree, file, search, query, analytics |
-| `write` | Read + `PUT`, `POST`, `DELETE` on files, drafts, canvas, workflows |
-| `admin` | Write + space management, webhook CRUD, schema changes, audit log |
+| `read` | `GET` and `HEAD` requests only. Any other method returns `403`. |
+| `write` | All read and write requests |
+| `admin` | Everything |
 
-## Managing tokens via CLI
+### Path prefixes
 
-The `kiwifs token` command creates and manages API keys stored in `.kiwi/config.toml`.
+A `prefix` limits every request that names a `path`, including each file in a `POST /api/kiwi/bulk` body:
 
-### Create a token
-
-```bash
-kiwifs token create --root ./knowledge --space docs --scope read --actor ci-reader
-```
-
-The plaintext key is displayed once. Copy it immediately — it cannot be retrieved later.
-
-```
-Created API key: kiwi_ro_abc1deadbeef...
-Space: docs | Scope: read | Actor: ci-reader
-```
-
-### List tokens
-
-```bash
-kiwifs token list --root ./knowledge
-```
-
-```
-PREFIX          SPACE        SCOPE   ACTOR
-kiwi_ro_abc1   docs         read    ci-reader
-kiwi_rw_xyz7   engineering  write   eng-bot
-kiwi_admin_a   (all)        admin   admin
-```
-
-### Revoke a token
-
-```bash
-kiwifs token revoke kiwi_ro_abc1
-```
-
-Revocation removes the key from `.kiwi/config.toml`. Active requests with the revoked key are rejected on the next config reload.
-
-<Warning>
-Revoking a token does not require a server restart — KiwiFS watches the config file for changes.
-</Warning>
-
-## Path-scoped access
-
-Use the `prefix` field to restrict a token to a specific directory tree:
-
-```toml
+```toml .kiwi/config.toml
 [[auth.api_keys]]
-key = "kiwi_rw_agent_onboarding"
-space = "engineering"
+key = "kiwi_rw_..."
 actor = "onboarding-bot"
 scope = "write"
 prefix = "onboarding/"
 ```
 
-This token can only read and write files under `onboarding/`. Requests to other paths return `401`.
+This key can read and write `onboarding/welcome.md`. A request for `?path=pages/secret.md` returns `403 path outside token prefix scope`.
 
-## Cloud authentication
+## Manage tokens with the CLI
 
-KiwiFS Cloud uses a separate authentication system:
+`kiwifs token` edits `[[auth.api_keys]]` in `.kiwi/config.toml`. If `[auth] type` is unset or `none`, `token create` switches it to `perspace`.
 
-1. **API key** — pass `kiwi_sk_*` as a Bearer token
-2. **MCP OAuth 2.1** — browser-based login via WorkOS (PKCE)
+<Steps>
+  <Step title="Create a token">
+    ```bash Terminal
+    kiwifs token create --root ./knowledge --scope write --prefix docs/ --actor docs-bot
+    ```
 
-```bash
-kiwifs login                          # OAuth device flow
-kiwifs whoami                         # Show current identity
-kiwifs connect my-workspace --write cursor  # Generate MCP config
+    ```text Output
+    Token created successfully. Save this key — it will not be shown again.
+
+      Key:    kiwi_rw_3f9c...
+      Scope:  write
+      Prefix: docs/
+      Actor:  docs-bot
+
+    Use: Authorization: Bearer kiwi_rw_3f9c...
+
+    Reload the server (SIGHUP or restart) for the new token to take effect.
+    ```
+
+    Keys start with `kiwi_ro_`, `kiwi_rw_`, or `kiwi_adm_` depending on scope. Flags: `--space`, `--scope` (default `read`), `--prefix`, `--actor` (default `<scope>-token`), `--root`.
+  </Step>
+  <Step title="Reload the server">
+    ```bash Terminal
+    kill -HUP $(pgrep -f "kiwifs serve")
+    ```
+
+    `SIGHUP` reloads `[auth]` from disk without dropping in-flight requests. Port and storage changes still need a restart.
+  </Step>
+  <Step title="List and revoke">
+    ```bash Terminal
+    kiwifs token list --root ./knowledge
+    kiwifs token revoke kiwi_rw_3f9c --root ./knowledge
+    ```
+
+    `list` shows the first 12 characters of each key with its scope, space, actor, and prefix. `revoke` removes every key that starts with the prefix you give. Send `SIGHUP` again to make the revocation take effect.
+  </Step>
+</Steps>
+
+<Warning>
+KiwiFS doesn't watch `config.toml` for auth changes. Created and revoked tokens only take effect after `SIGHUP` or a restart.
+</Warning>
+
+## Public and unlisted spaces
+
+Set `[space] visibility` to open read access without a token:
+
+| Visibility | Unauthenticated access |
+| --- | --- |
+| `private` (default) | None |
+| `unlisted` | `GET` of a single file by path (`/file`, `/peek`, `/section`). Tree, search, and listings still need a token. |
+| `public` | All `GET` requests |
+
+Writes always need a token. Change visibility at runtime with `PUT /api/kiwi/space/visibility`.
+
+## Raw files and llms.txt
+
+Two routes sit outside `/api/kiwi` so browsers and crawlers can reach them. When auth is on:
+
+- **`/raw/{path}`** serves a file only with an `Authorization` header (checked against the key's space and prefix), a signed URL, or when the file is already public: a page with `visibility: public` or `published: true`, an asset next to such a page, or the configured logo and favicon.
+- **`/llms.txt`** and **`/llms-full.txt`** list only public or published pages, unless the whole space is `public`.
+
+`<img>` and `<video>` tags can't send headers, so get a signed URL instead. The web UI does this automatically.
+
+```bash Terminal
+curl 'http://localhost:3333/api/kiwi/raw-sign?path=assets/diagram.png' \
+  -H "Authorization: Bearer $KIWI_TOKEN"
 ```
 
-Cloud credentials are stored at `~/.kiwifs/credentials.json`.
+```json Response
+{
+  "path": "assets/diagram.png",
+  "url": "/raw/assets/diagram.png?exp=1792400400&sig=...",
+  "expires": "2026-10-19T15:00:00Z"
+}
+```
 
-See [KiwiFS Cloud](/guides/cloud) for details.
+Signed URLs last 30 to 60 minutes and stop working when the server restarts.
 
-## Related documentation
+## Other protocols
+
+REST honors every auth mode. The other surfaces check only the global `api_key`:
+
+| Surface | Auth |
+| --- | --- |
+| REST `/api/kiwi/*` | All modes |
+| MCP over HTTP (`/mcp`, or `kiwifs mcp --http`) | Bearer `api_key` in `apikey` mode |
+| S3, WebDAV | Bearer (WebDAV also Basic) `api_key` in `apikey` mode |
+| NFS | IP allowlist only (`--nfs-allow`) |
+
+<Warning>
+With `perspace` or `oidc`, the MCP HTTP endpoint, S3, and WebDAV don't require a token. Don't enable `--s3` or `--webdav` on a public network in those modes, and keep `/mcp` behind a proxy that authenticates.
+</Warning>
+
+To point the MCP bridge or a FUSE mount at a protected server, pass a token:
+
+```bash Terminal
+kiwifs mcp --remote https://wiki.example.com --api-key "$KIWI_TOKEN"
+kiwifs mount --remote https://wiki.example.com --bearer "$KIWI_TOKEN" ~/wiki
+```
+
+## CORS
+
+With auth off, the API only answers cross-origin browser requests from `localhost`. With auth on, any origin is allowed until you list the ones you trust:
+
+```toml .kiwi/config.toml
+[server.cors]
+allowed_origins = ["https://app.example.com"]
+```
+
+## Related
 
 <CardGroup cols={2}>
-  <Card title="Configuration" icon="gear" href="/configuration#authentication">
-    Full auth config reference.
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Every `config.toml` key.
   </Card>
-  <Card title="API overview" icon="terminal" href="/api/overview#authentication">
-    Auth headers and error codes.
+  <Card title="API overview" icon="terminal" href="/api/overview">
+    Headers and error codes.
   </Card>
   <Card title="Multi-space" icon="layer-group" href="/concepts/multi-space">
-    Per-space routing and access control.
+    Serve several knowledge bases from one server.
   </Card>
-  <Card title="CLI commands" icon="terminal" href="/cli/commands">
-    Token create, list, and revoke commands.
+  <Card title="Publishing" icon="globe" href="/concepts/publishing">
+    Make individual pages public.
   </Card>
 </CardGroup>

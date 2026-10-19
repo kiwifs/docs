@@ -1,91 +1,105 @@
 ---
 title: "Audit log"
-description: "Track every API request with structured audit entries for compliance and debugging."
+description: "Record every HTTP request to a space as JSON lines for access reviews and debugging."
 icon: "scroll"
 ---
 
-When audit logging is enabled, KiwiFS records every API request as a structured entry. Use audit logs for compliance, debugging, and understanding how agents and users interact with your knowledge base.
+The audit log records one entry for each HTTP request a space serves: who made it, what they called, and how it went. Use it to review access, trace what an agent did, or find slow calls. It is off by default.
 
-## Enabling audit logging
+The audit log covers requests. To see what changed inside a file, use [versioning](/concepts/versioning): every write is a git commit with its actor.
+
+## Turn it on
 
 ```toml .kiwi/config.toml
 [audit]
 enabled = true
 ```
 
-Without this setting, the audit endpoint returns `501 Not Implemented`.
+Restart the server. While the log is off, `GET /api/kiwi/audit` returns `501`.
 
-## Querying the audit log
+## File format
 
-```http
-GET /api/kiwi/audit?since=2026-05-01T00:00:00Z&limit=100
+Entries are appended to one JSON Lines file per UTC day:
+
+<Tree>
+  <Tree.Folder name=".kiwi" defaultOpen>
+    <Tree.Folder name="audit" defaultOpen>
+      <Tree.File name="2026-10-18.jsonl" />
+      <Tree.File name="2026-10-19.jsonl" />
+    </Tree.Folder>
+  </Tree.Folder>
+</Tree>
+
+```json .kiwi/audit/2026-10-19.jsonl
+{"ts":"2026-10-19T09:12:03.481Z","method":"PUT","path":"/api/kiwi/file","actor":"agent:docs-writer","token_hash":"9f2c41ab","ip":"10.0.0.5","status":200,"duration_ms":42}
+{"ts":"2026-10-19T09:12:05.022Z","method":"GET","path":"/api/kiwi/search","actor":"anonymous","ip":"10.0.0.7","status":401,"duration_ms":0}
 ```
-
-<ParamField query="since" type="string">
-  ISO 8601 timestamp. Defaults to the last 24 hours.
-</ParamField>
-<ParamField query="limit" type="integer" default="100">
-  Maximum entries to return (max 10,000).
-</ParamField>
-
-```json
-[
-  {
-    "ts": "2026-05-02T14:30:00Z",
-    "method": "PUT",
-    "path": "/api/kiwi/file?path=concepts/auth.md",
-    "space": "default",
-    "actor": "agent:docs-writer",
-    "token_hash": "a1b2c3...",
-    "ip": "10.0.0.5",
-    "status": 200,
-    "duration_ms": 42
-  }
-]
-```
-
-## Entry fields
 
 | Field | Description |
 | --- | --- |
-| `ts` | Timestamp of the request |
-| `method` | HTTP method (`GET`, `PUT`, `POST`, `DELETE`) |
-| `path` | Full request path including query parameters |
-| `space` | Space name (from URL segment or `X-Kiwi-Space` header) |
-| `actor` | Value of `X-Actor` header, if present |
-| `token_hash` | Hash of the Bearer token used for authentication |
-| `ip` | Client IP address |
-| `status` | HTTP response status code |
-| `duration_ms` | Request processing time in milliseconds |
+| `ts` | Request start time, RFC 3339 with nanoseconds. |
+| `method` | HTTP method. |
+| `path` | URL path without the query string, so `?path=...` values are not recorded. In multi-space mode the space prefix is already stripped. |
+| `space` | Value of the `X-Space` request header, when present. |
+| `actor` | Value of `X-Actor` after authentication, or `anonymous`. |
+| `token_hash` | First 8 hex characters of the SHA-256 of the bearer token. Lets you tell keys apart without storing them. |
+| `ip` | Client IP, honoring `X-Forwarded-For` and `X-Real-IP`. |
+| `status` | HTTP status code, including auth failures. |
+| `duration_ms` | Time spent handling the request. |
+
+Every route is logged, including the web UI and static assets, except `/health`, `/healthz`, `/readyz`, and `/metrics`. Each space writes to its own `.kiwi/audit/` folder.
+
+<Note>
+Audit files are plain JSON Lines, not signed or hash-chained. Ship them to write-once storage if you need tamper evidence. KiwiFS does not rotate or delete them, so prune old days yourself.
+</Note>
+
+## Query the log
+
+```bash Terminal
+curl 'http://localhost:3333/api/kiwi/audit?since=2026-10-19T00:00:00Z&limit=500' \
+  -H 'Authorization: Bearer kiwi_sk_...'
+```
+
+<ParamField query="since" type="string">
+  RFC 3339 timestamp. Defaults to 24 hours ago.
+</ParamField>
+<ParamField query="limit" type="integer" default="100">
+  Maximum entries, from 1 to 10000. Values outside that range fall back to 100.
+</ParamField>
+
+The response is a JSON array of entries in the same shape as the file, oldest first. To narrow by actor or status, filter the result yourself or read the files directly:
+
+```bash Terminal
+jq -c 'select(.actor == "agent:docs-writer" and .method != "GET")' .kiwi/audit/2026-10-19.jsonl
+```
 
 ## Use cases
 
 <AccordionGroup>
-  <Accordion title="Compliance and access tracking">
-    Audit logs provide a tamper-evident record of who accessed or modified knowledge. Filter by `actor` or `token_hash` to trace activity by a specific agent or user.
+  <Accordion title="Access reviews">
+    Group entries by `actor` and `token_hash` to see which keys are in use and what each one touched. Look for `401` and `403` statuses to spot misconfigured or probing clients.
   </Accordion>
   <Accordion title="Debugging agent behavior">
-    When an agent writes unexpected content, query the audit log by time range and actor to reconstruct the sequence of API calls.
+    Filter by the agent's actor and a time window to reconstruct its sequence of calls. Pair it with `GET /api/kiwi/versions` to see the exact content each write produced.
   </Accordion>
-  <Accordion title="Performance monitoring">
-    Use `duration_ms` to identify slow requests. Combine with [Prometheus metrics](/api/overview#prometheus-metrics) for dashboards.
+  <Accordion title="Performance">
+    Sort by `duration_ms` to find slow routes. For dashboards, scrape the Prometheus metrics at `/metrics` instead.
   </Accordion>
 </AccordionGroup>
 
-<Tip>
-The `X-Space` header is also recorded when present, allowing you to trace cross-space operations in multi-space deployments.
-</Tip>
-
-## Related documentation
+## Related
 
 <CardGroup cols={2}>
+  <Card title="Audit log API" icon="screwdriver-wrench" href="/api/utilities#audit-log">
+    Endpoint reference.
+  </Card>
   <Card title="Configuration" icon="gear" href="/configuration#audit">
-    Enable audit logging in config.toml.
+    The `[audit]` section.
   </Card>
-  <Card title="Optional features" icon="toggle-on" href="/concepts/optional-features">
-    Feature matrix — audit requires explicit opt-in.
+  <Card title="Versioning" icon="code-branch" href="/concepts/versioning">
+    Content history for every write.
   </Card>
-  <Card title="Utilities API" icon="screwdriver-wrench" href="/api/utilities#audit-log">
-    REST endpoint details.
+  <Card title="Authentication" icon="key" href="/guides/auth-tokens">
+    How actors and tokens are assigned.
   </Card>
 </CardGroup>

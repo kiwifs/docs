@@ -1,0 +1,228 @@
+---
+title: "Interactive and learning widgets"
+sidebarTitle: "Interactive and learning"
+description: "Quiz callouts, back-of-envelope calculators, parameter playgrounds, sandboxed apps, React Live blocks, and runnable code."
+icon: "hand-pointer"
+---
+
+These blocks respond to the reader: answering a question, tuning an assumption, or running code. All of them run in the reader's browser. Nothing a reader does changes the page file.
+
+## Quiz callouts
+
+A quiz is a callout tagged `[!quiz]`. The question goes on the tag line, options or the answer go in the body, and an explanation after a blank `>` line appears once the reader checks an answer.
+
+````markdown
+> [!quiz single shuffle ^dynamo] What does a default DynamoDB read guarantee?
+> - [ ] Strong consistency
+>   It does not wait for the leader, so a recent write can be missing.
+> - [x] Eventual consistency
+>   Any replica may answer, so reads converge after a short delay.
+> - [ ] Linearizability
+>
+> Pass `ConsistentRead: true` when the caller must see its own write.
+````
+
+The tag line is `[!quiz <kind> shuffle ^<id>]`, each part optional:
+
+- **Kind** selects the question type. If you leave it out, one `[x]` makes a single-choice question, several make a multi-select, items that all contain `::` make a match, and plain items make an ordering question.
+- **`shuffle`** randomizes choice order. Order and match questions always shuffle.
+- **`^id`** gives the quiz a stable id, so a reader's saved attempts survive edits to the question.
+
+An indented line under an option is feedback for that option.
+
+<AccordionGroup>
+  <Accordion title="single and multi: choose answers">
+    Mark correct options with `[x]`. Two or more `[x]` marks make it a multi-select automatically.
+
+    ```markdown
+    > [!quiz ^cache-invalidation] Which strategies keep a read-through cache correct after a write?
+    > - [x] Delete the key after the database commit
+    > - [x] Write-through: update the cache in the same code path
+    > - [ ] Rely on a long TTL
+    >   A long TTL widens the stale window instead of closing it.
+    ```
+  </Accordion>
+  <Accordion title="boolean: true or false">
+    Write the answer (`true`, `false`, `yes`, or `no`) on its own line. Also spelled `tf` or `truefalse`.
+
+    ```markdown
+    > [!quiz boolean] A Bloom filter can return a false negative.
+    > false
+    >
+    > Bloom filters may report false positives, never false negatives.
+    ```
+  </Accordion>
+  <Accordion title="order: put items in sequence">
+    List items in the correct order. The reader sees them shuffled. Needs at least two items.
+
+    ```markdown
+    > [!quiz order] Put the system design interview steps in order
+    > - Requirements
+    > - Core entities
+    > - API
+    > - High-level design
+    > - Deep dives
+    ```
+  </Accordion>
+  <Accordion title="match: pair items">
+    Write each correct pair as `left :: right`. Needs at least two pairs.
+
+    ```markdown
+    > [!quiz match] Match each protocol to where it fits best
+    > - REST :: public client APIs
+    > - gRPC :: internal service calls
+    > - SSE :: server-to-client streams
+    ```
+  </Accordion>
+  <Accordion title="short: type an answer">
+    Write the accepted answers on one line, separated by `|`. Matching ignores case, extra whitespace, and trailing punctuation.
+
+    ```markdown
+    > [!quiz short] Roughly how many boxes is too many for a high-level design?
+    > 7 | seven
+    >
+    > Past about seven, the diagram turns into a deep dive.
+    ```
+  </Accordion>
+</AccordionGroup>
+
+Answer keys stay in the page file, but search indexes only the question, so search results and snippets never reveal an answer. Each reader's attempts are saved to their own per-reader state.
+
+Agents can call the `kiwi_quiz` MCP tool to format a quiz callout from structured fields (`kind`, `prompt`, `options`, `items`, `pairs`, `answer`, `accept`, `explanation`), or to check the quizzes in a page (`path` or `content`) for authoring problems without revealing the answers.
+
+## kiwi-calc
+
+Back-of-envelope math that stays in the page. Assumptions go above `---`, derivations below it. Click **Tune** in the web UI to get a slider per assumption and watch the derivations recompute.
+
+````markdown
+```kiwi-calc
+dau:        10 million
+writes:     100          # per user per day
+write_size: 1 KB
+---
+qps:     dau * writes / day
+daily:   dau * writes * write_size
+yearly:  daily * year
+```
+````
+
+Each line is `name: expression`, and `#` starts a comment shown beside the row. Expressions understand magnitude words (`thousand`, `k`, `million`, `billion`), data sizes (`KB` through `PB`, in powers of 1024), and time units (`ms`, `s`, `min`, `hour`, `day`, `week`, `month`, `year`). Unknown words such as `user` are treated as annotations. Agents read the same numbers from the file without the UI.
+
+## kiwi-playground
+
+Interactive controls for documenting a configurable parameter set. Readers adjust the values and copy them out as JSON, YAML, or a filled-in prompt.
+
+````markdown
+```kiwi-playground
+title: Retry policy
+widgets:
+  - type: slider
+    key: base_ms
+    label: Base delay (ms)
+    min: 50
+    max: 2000
+    step: 50
+    default: 200
+  - type: number
+    key: max_retries
+    label: Max retries
+    min: 0
+    max: 10
+    default: 3
+  - type: toggle
+    key: jitter
+    label: Add jitter
+    default: true
+  - type: select
+    key: strategy
+    label: Backoff
+    options: [constant, linear, exponential]
+    default: exponential
+export:
+  format: yaml
+  copyLabel: Copy policy
+```
+````
+
+<Accordion title="kiwi-playground keys">
+
+| Key | Description |
+| --- | --- |
+| `title` | Heading above the controls. |
+| `widgets` | List of controls. Each has `type`, `key` (the output field name), `label`, and `default`. |
+| `widgets[].type` | `slider` (needs `min`, `max`, optional `step`), `number` (optional `min`, `max`, `step`), `toggle`, `select` (needs `options`), `color`, or `text` (optional `placeholder`). |
+| `export.format` | `json` (default), `yaml`, or `prompt`. |
+| `export.copyLabel` | Label for the copy button. |
+| `export.promptTemplate` | With `format: prompt`: text where each `{{key}}` is replaced by the current value. |
+| `preview` | `css` or `svg` to show a live preview. |
+| `previewTemplate` | Template for the preview, filled with the current values. |
+
+</Accordion>
+
+## kiwi-app
+
+Runs HTML, CSS, and JavaScript in a sandboxed iframe. The frame resizes to fit its content and picks up the web UI's theme colors as CSS custom properties. Set a fixed height on the opening line with `height=`.
+
+````markdown
+```kiwi-app height=200
+<style>
+  .counter { font-size: 2em; text-align: center; padding: 1em; }
+</style>
+<div class="counter">
+  <p id="count">0</p>
+  <button onclick="document.getElementById('count').textContent = ++window.n">+1</button>
+</div>
+<script>window.n = 0;</script>
+```
+````
+
+<Warning>
+The iframe runs with `sandbox="allow-scripts"`: scripts run, but the app can't read the parent page or its cookies, submit forms, open popups, or navigate the page. Treat a `kiwi-app` block like any script you paste into a page.
+</Warning>
+
+## Live React blocks
+
+A ` ```widget:live ` block is React Live code that runs in the browser, with React hooks and every widget view component in scope (`ArrayView`, `MatrixView`, `TreeView`, `GraphView`, `PlotView`, `TableView`, `PlaybackControls`, `usePlayback`, and more). End the block by calling `render()` with the element to show.
+
+````markdown
+```widget:live
+function Counter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount((c) => c + 1)}>Count: {count}</button>;
+}
+
+render(<Counter />);
+```
+````
+
+Use it as an escape hatch for something a typed fence can't express. A typed fence is validated, searchable, and readable as text, and a `widget:live` block is none of those. `kiwifs widgets suggest` finds `widget:live` blocks that only draw a static view, and prints the typed fence each one could become.
+
+`widget:<name>` with any typed fence name, such as `widget:array`, is the strict spelling of that fence, not a live block. See [fence names](/concepts/widgets#fence-names).
+
+## Runnable code
+
+A ` ```widget:code ` block shows runnable code with an editable listing, a **Run** button, and output below. Python runs in the browser through Pyodide, which loads on the first run. Set the language on the opening line: `lang=python` (the default), `py`, `javascript`, or `js`.
+
+````markdown
+```widget:code lang=python
+import math
+print(f"Pi is approximately {math.pi:.4f}")
+```
+````
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Widgets overview" icon="puzzle-piece" href="/concepts/widgets">
+    Fence names, steps, playback, and validation.
+  </Card>
+  <Card title="Data and queries" icon="database" href="/widgets/data-and-queries">
+    `widget:tracker` for per-reader progress through a curriculum.
+  </Card>
+  <Card title="MCP" icon="plug" href="/concepts/mcp">
+    `kiwi_quiz`, `kiwi_widget_reference`, and `kiwi_lint`.
+  </Card>
+  <Card title="Page structure" icon="table-columns" href="/widgets/page-structure">
+    Callouts, tabs, columns, and figures.
+  </Card>
+</CardGroup>

@@ -1,500 +1,352 @@
 ---
-title: "Widgets and block types"
-description: "Charts, kanban boards, playgrounds, diffs, and other rich blocks you can embed in markdown pages."
+title: "Widgets"
+description: "Fenced blocks that render as interactive diagrams, data structures, charts, quizzes, and queries in the web UI, and stay readable as plain markdown."
 icon: "puzzle-piece"
 ---
 
-KiwiFS extends standard markdown with fenced code blocks that render as interactive widgets in the web UI. These blocks are portable — they degrade gracefully to plain code blocks in any markdown viewer.
+A widget is a fenced code block whose body describes a picture or a behavior. The web UI renders it interactively. Everywhere else (`cat`, git diffs, PDF export, search) it stays readable text, because the file holds data, not a program.
 
-## Block types
+Most widgets are **typed fences**: a YAML body checked against a schema. KiwiFS rejects a broken one on write, renders it in the web UI, and steps through it on a playback clock that a reader can link to.
 
-<CardGroup cols={2}>
-  <Card title="Charts" icon="chart-bar">
-    Bar, line, area, pie, radar, and scatter charts from YAML data.
+````markdown
+```array id=two-sum caption="Two-pointer sweep on a sorted array"
+values: [2, 7, 11, 15, 19]
+pointers:
+  - {index: 0, label: lo}
+  - {index: 4, label: hi}
+steps:
+  - note: "2 + 19 = 21 > 9, so move hi left"
+    activeIndices: [0, 4]
+  - note: "2 + 15 = 17 > 9, so move hi left"
+    pointers: [{index: 0, label: lo}, {index: 3, label: hi}]
+  - note: "2 + 7 = 9, found it"
+    pointers: [{index: 0, label: lo}, {index: 1, label: hi}]
+    activeIndices: [0, 1]
+```
+````
+
+## Catalog
+
+### Data structures
+
+<CardGroup cols={3}>
+  <Card title="array" icon="grip" href="/widgets/data-structures#array">
+    Arrays with pointers, spans, and dependency arrows.
   </Card>
-  <Card title="DQL queries" icon="table">
-    Inline tables and lists driven by DQL queries over frontmatter.
+  <Card title="matrix" icon="table-cells" href="/widgets/data-structures#matrix">
+    DP tables, grids, heatmaps, adjacency matrices.
   </Card>
-  <Card title="Kanban" icon="bars-progress">
-    Inline kanban boards from YAML column definitions.
+  <Card title="table" icon="table" href="/widgets/data-structures#table">
+    Named-column rows: schemas, lock tables, decision tables.
   </Card>
-  <Card title="Playground" icon="sliders">
-    Interactive widgets with sliders, toggles, selects, and color pickers.
+  <Card title="tree" icon="sitemap" href="/widgets/data-structures#tree">
+    BSTs, tries, heaps, union-find forests, B-tree pages.
   </Card>
-  <Card title="App" icon="code">
-    Sandboxed HTML/CSS/JS running in an iframe.
+  <Card title="list" icon="link" href="/widgets/data-structures#list">
+    Linked lists, including cycles and random pointers.
   </Card>
-  <Card title="Diff" icon="code-compare">
-    Annotated inline diffs with add/remove highlighting.
+  <Card title="stack" icon="layer-group" href="/widgets/data-structures#stack">
+    LIFO stacks: call stacks, undo histories.
   </Card>
-  <Card title="Progress" icon="battery-half">
-    Progress bars and gauge indicators.
+  <Card title="queue" icon="arrow-right-arrow-left" href="/widgets/data-structures#queue">
+    FIFO queues and ring buffers.
   </Card>
-  <Card title="Color" icon="palette">
-    Color palette swatches for design systems.
+  <Card title="map" icon="hashtag" href="/widgets/data-structures#map">
+    Hash tables, probe paths, plain dictionaries.
   </Card>
-  <Card title="Mermaid" icon="diagram-project">
-    Flowcharts, sequence diagrams, and other Mermaid diagrams.
+  <Card title="bits" icon="microchip" href="/widgets/data-structures#bits">
+    Bitmasks, flag registers, float layouts.
   </Card>
-  <Card title="Live widget" icon="bolt">
-    React Live code blocks that render in the browser.
-  </Card>
-  <Card title="Calc" icon="calculator">
-    Back-of-envelope math with tunable assumptions.
-  </Card>
-  <Card title="Steps" icon="list-ol">
-    Stepped Mermaid walkthroughs with playback.
-  </Card>
-  <Card title="Structured data" icon="table-list">
-    `kiwi-data` records queryable with `FROM RECORDS`.
-  </Card>
-  <Card title="Claims" icon="stamp">
-    Provenance badges for sourced vs inferred assertions.
+  <Card title="memory" icon="memory" href="/widgets/data-structures#memory">
+    Stack frames, heap objects, and the pointers between them.
   </Card>
 </CardGroup>
 
----
+### Charts and plots
 
-## kiwi-chart
+<CardGroup cols={3}>
+  <Card title="plot" icon="chart-line" href="/widgets/charts#plot">
+    x-y curves, formulas, shaded regions.
+  </Card>
+  <Card title="bars" icon="chart-column" href="/widgets/charts#bars">
+    Columns in value space: histograms, distributions.
+  </Card>
+  <Card title="numberline" icon="ruler-horizontal" href="/widgets/charts#numberline">
+    One value axis: intervals, thresholds, SLOs.
+  </Card>
+  <Card title="plane" icon="draw-polygon" href="/widgets/charts#plane">
+    Coordinate geometry: points, polygons, vectors.
+  </Card>
+  <Card title="timeline" icon="timeline" href="/widgets/charts#timeline">
+    Spans in lanes with causal arrows.
+  </Card>
+  <Card title="kiwi-chart" icon="chart-pie" href="/widgets/charts#kiwi-chart">
+    Bar, line, area, pie, radar, and scatter charts from data or DQL.
+  </Card>
+  <Card title="kiwi-progress" icon="battery-half" href="/widgets/charts#kiwi-progress">
+    Progress bars and gauges.
+  </Card>
+</CardGroup>
 
-Renders bar, line, area, pie, radar, or scatter charts from inline YAML data.
+### Diagrams
 
-````markdown
-```kiwi-chart
-type: bar
-title: Sprint velocity
-data:
-  - label: Sprint 1
-    value: 21
-  - label: Sprint 2
-    value: 34
-  - label: Sprint 3
-    value: 28
+<CardGroup cols={3}>
+  <Card title="graph" icon="diagram-project" href="/widgets/diagrams#graph">
+    Nodes and edges: architecture, state machines, DAGs.
+  </Card>
+  <Card title="sequence" icon="arrows-left-right" href="/widgets/diagrams#sequence">
+    Message flows between participants, one hop per step.
+  </Card>
+  <Card title="steps" icon="shoe-prints" href="/widgets/diagrams#steps">
+    A Mermaid diagram walked through one step at a time.
+  </Card>
+  <Card title="mermaid" icon="bezier-curve" href="/widgets/diagrams#mermaid">
+    Standard Mermaid diagrams with clickable nodes.
+  </Card>
+  <Card title="d2" icon="shapes" href="/widgets/diagrams#d2">
+    D2 diagrams rendered to SVG by the server.
+  </Card>
+  <Card title="Drawing embeds" icon="pen-ruler" href="/widgets/diagrams#drawing-embeds">
+    Excalidraw and canvas files embedded inline.
+  </Card>
+</CardGroup>
+
+### Interactive and learning
+
+<CardGroup cols={3}>
+  <Card title="Quiz callouts" icon="circle-question" href="/widgets/interactive#quiz-callouts">
+    Six question types. Answer keys stay out of search.
+  </Card>
+  <Card title="kiwi-calc" icon="calculator" href="/widgets/interactive#kiwi-calc">
+    Back-of-envelope math with tunable assumptions.
+  </Card>
+  <Card title="kiwi-playground" icon="sliders" href="/widgets/interactive#kiwi-playground">
+    Sliders, toggles, and pickers that export a config.
+  </Card>
+  <Card title="kiwi-app" icon="window-maximize" href="/widgets/interactive#kiwi-app">
+    Sandboxed HTML, CSS, and JavaScript.
+  </Card>
+  <Card title="widget:live" icon="code" href="/widgets/interactive#live-react-blocks">
+    React Live code with every widget view in scope.
+  </Card>
+  <Card title="widget:code" icon="play" href="/widgets/interactive#runnable-code">
+    Runnable Python (Pyodide) or JavaScript.
+  </Card>
+</CardGroup>
+
+### Data and queries
+
+<CardGroup cols={3}>
+  <Card title="kiwi-query" icon="magnifying-glass-chart" href="/widgets/data-and-queries#kiwi-query">
+    Live DQL results as a table or list.
+  </Card>
+  <Card title="kiwi-data" icon="database" href="/widgets/data-and-queries#kiwi-data">
+    Structured records you can query with `FROM RECORDS`.
+  </Card>
+  <Card title="kiwi-kanban" icon="table-columns" href="/widgets/data-and-queries#kiwi-kanban">
+    Drag-and-drop boards from YAML or DQL.
+  </Card>
+  <Card title="widget:tracker" icon="list-check" href="/widgets/data-and-queries#progress-tracker">
+    Per-reader progress across a curriculum.
+  </Card>
+</CardGroup>
+
+### Page structure
+
+<CardGroup cols={3}>
+  <Card title="Callouts" icon="circle-info" href="/widgets/page-structure#callouts">
+    `> [!NOTE]` and 26 other types, optionally foldable.
+  </Card>
+  <Card title="Tabs and columns" icon="folder-open" href="/widgets/page-structure#tabs">
+    `:::tabs` and `:::columns` container directives.
+  </Card>
+  <Card title="Figures" icon="image" href="/widgets/page-structure#figures">
+    Wide, full-width, or pinned media with captions.
+  </Card>
+  <Card title="Claims" icon="stamp" href="/widgets/page-structure#claims">
+    Provenance badges, queryable with `FROM CLAIMS`.
+  </Card>
+  <Card title="kiwi-diff" icon="code-compare" href="/widgets/page-structure#kiwi-diff">
+    Annotated side-by-side or unified diffs.
+  </Card>
+  <Card title="kiwi-color" icon="palette" href="/widgets/page-structure#kiwi-color">
+    Color swatches with contrast ratios.
+  </Card>
+</CardGroup>
+
+## Fence names
+
+Each typed fence answers to three spellings, plus any aliases listed in its reference entry:
+
+| Spelling | Example | Behavior |
+| --- | --- | --- |
+| Bare name | `array` | Renders only when the YAML carries one of the fence's marker keys, such as `values` for `array`. Otherwise it stays a code block. |
+| `kiwi-` prefix | `kiwi-array` | Strict: always renders, or shows an error. |
+| `widget:` prefix | `widget:array` | Strict, same as `kiwi-`. Kept for older pages. |
+
+The marker-key rule means a vault that already uses ` ```tree ` for directory listings, or ` ```table ` for pipe tables, keeps its code blocks. To turn bare names off for a workspace, or allow only some:
+
+```toml .kiwi/config.toml
+[ui]
+typed_fences = false
+# or allow only these bare names:
+typed_fence_tags = ["array", "matrix", "table"]
 ```
-````
 
-Supported chart types: `bar`, `line`, `area`, `pie`, `radar`, `scatter`.
+The `kiwi-` and `widget:` spellings keep working either way.
 
-<AccordionGroup>
-  <Accordion title="Multi-series charts">
-    Use named series for grouped or stacked visualizations:
+## Writing a typed fence
 
-    ````markdown
-    ```kiwi-chart
-    type: bar
-    title: Team output
-    series:
-      - name: Frontend
-        data: [12, 19, 8]
-      - name: Backend
-        data: [15, 11, 22]
-    labels: [Jan, Feb, Mar]
-    ```
-    ````
-  </Accordion>
-</AccordionGroup>
+The YAML body's top-level keys are the widget's properties. Each fence's reference entry lists them, for example the [array keys](/widgets/data-structures#array).
 
-## kiwi-query
+### Steps
 
-Renders a DQL query result as an inline table or list. The query runs against frontmatter metadata.
+An optional `steps:` list turns the widget into a walkthrough. Each step is a shallow patch over the **previous step**, so you write only what changes. Use `frames:` instead when you want each entry applied over the base. A fence uses one or the other, not both.
 
-````markdown
-```kiwi-query
-TABLE title, status, priority
-FROM "tasks"
-WHERE status != "done"
-SORT priority DESC
-```
-````
+A step can also carry these keys, which are not widget properties:
 
-The result updates whenever the page is viewed. See [DQL](/concepts/dql) for the full query language.
+| Step key | Meaning |
+| --- | --- |
+| `note` | Prose shown under the picture for this step. |
+| `line` / `next` | 1-based line of the `code:` listing to highlight. |
+| `label` | Name for this step in the playback controls. |
+| `why` | Map of part key to explanation, revealed when the reader selects that part. |
+| `breakpoint` | Autoplay pauses here. |
+| `duration` | Milliseconds this step holds at 1x speed. |
+| `expect` | Pause until the reader selects the right part. |
 
-## kiwi-kanban
+A step can also be a bare string, which is a `note` over unchanged properties. The [`steps` fence](/widgets/diagrams#steps) is the exception to the patch rule: each of its steps stands alone.
 
-Renders an inline kanban board from YAML column and card definitions.
+Other reserved top-level keys:
 
-````markdown
-```kiwi-kanban
-columns:
-  - name: Todo
-    cards:
-      - title: Design API
-        tags: [backend]
-  - name: In Progress
-    cards:
-      - title: Build UI
-        tags: [frontend]
-  - name: Done
-    cards:
-      - title: Write tests
-```
-````
+| Key | Meaning |
+| --- | --- |
+| `code` + `lang` | A code listing that steps in lockstep with the picture. |
+| `why` | Map of part key to explanation, revealed when the reader selects that part. Write the reasoning into the file; nothing is generated at read time. |
+| `link` | `{to: <widget id>, map: index}`. Selecting a part of this widget lights the matching part of another, such as a heap drawn as both a tree and an array. |
+| `props` | Escape hatch for a widget property whose name collides with a reserved key. |
+| `caption`, `title`, `id`, `clock`, `width`, `autoplay`, `loop` | Same as the meta string options below. |
 
-For workflow-driven kanban boards that read from file frontmatter, use the [Kanban toolbar view](/concepts/workflows) instead.
+A property marked **Fixed across steps** in a key table can only be set at the top level. Setting it inside a step is a lint error.
 
-## kiwi-playground
+### Meta string
 
-Interactive widgets with controls that update in real time. Useful for documenting configurable parameters.
+Options after the fence name on the opening line:
 
-````markdown
-```kiwi-playground
-widgets:
-  - type: slider
-    label: Opacity
-    min: 0
-    max: 100
-    value: 75
-  - type: toggle
-    label: Dark mode
-    value: true
-  - type: select
-    label: Theme
-    options: [kiwi, ocean, forest, sunset]
-    value: kiwi
-  - type: color
-    label: Accent
-    value: "#6cbe45"
-  - type: number
-    label: Font size
-    min: 12
-    max: 24
-    value: 16
-  - type: text
-    label: Title
-    value: "My page"
-```
-````
-
-## kiwi-app
-
-Runs sandboxed HTML, CSS, and JavaScript in an iframe.
-
-````markdown
-```kiwi-app
-<style>
-  .counter { font-size: 2em; text-align: center; padding: 2em; }
-  button { font-size: 1.2em; padding: 0.5em 1em; }
-</style>
-<div class="counter">
-  <p id="count">0</p>
-  <button onclick="document.getElementById('count').textContent = ++window.n">+1</button>
-</div>
-<script>window.n = 0;</script>
-```
-````
+| Option | Meaning |
+| --- | --- |
+| `id=name` | Names the widget, its anchor, and its clock. |
+| `clock=name` | Shares one step counter with every other fence naming the same clock. |
+| `caption="..."` | Caption under the figure. |
+| `title="..."` | Heading above it. |
+| `width=wide` or `width=full` | Figure width. |
+| `autoplay`, `loop` | Playback behavior. |
 
 <Warning>
-The iframe is sandboxed. It cannot access the parent page, make network requests, or use cookies.
+Widget properties such as `layout: ring` or `direction: LR` belong in the YAML body. The meta string only reads the options in this table.
 </Warning>
 
-## kiwi-diff
+## Playback
 
-Renders annotated inline diffs with syntax highlighting.
+A widget with steps gets playback controls: play and pause, step back and forward, a speed toggle (1x, 2x, 4x), **Copy link to this step**, and **Download this step as an image**. With the widget focused, <kbd>Space</kbd> plays or pauses, the arrow keys step, and <kbd>R</kbd> resets.
 
-````markdown
-```kiwi-diff
-- const timeout = 5000;
-+ const timeout = 30000;
-  const retries = 3;
-- const backoff = "linear";
-+ const backoff = "exponential";
-```
-````
+The current step lives in the URL fragment, so you can link a reader to one moment:
 
-## kiwi-progress
+- `#?step.<id>=N` targets the widget or clock named `<id>`.
+- `#?step=N` targets the first unnamed widget on the page.
 
-Renders progress bars or gauge indicators.
+Give several fences the same `clock=` and one set of controls drives them all. A shorter member holds its last frame while longer ones keep going.
 
 ````markdown
-```kiwi-progress
-type: bar
-label: Migration progress
-value: 73
-max: 100
-```
-````
-
-Supported types: `bar`, `gauge`.
-
-## kiwi-color
-
-Renders color palette swatches.
-
-````markdown
-```kiwi-color
-colors:
-  - name: Primary
-    value: "#6cbe45"
-  - name: Secondary
-    value: "#4a8a2a"
-  - name: Accent
-    value: "#7dd356"
-```
-````
-
-## Mermaid diagrams
-
-Standard Mermaid fenced blocks render as diagrams.
-
-````markdown
-```mermaid
-graph LR
-    A[Agent] -->|MCP| B[KiwiFS]
-    B --> C[Search]
-    B --> D[Storage]
-    B --> E[Git]
-```
-````
-
-## Live widgets
-
-### widget:live
-
-React Live code blocks that compile and render in the browser.
-
-````markdown
-```widget:live
-function Counter() {
-  const [count, setCount] = React.useState(0);
-  return <button onClick={() => setCount(c => c + 1)}>Count: {count}</button>;
-}
-```
-````
-
-### widget:code
-
-Python code blocks that run via Pyodide in the browser.
-
-````markdown
-```widget:code
-import math
-print(f"Pi is approximately {math.pi:.4f}")
-```
-````
-
----
-
-## kiwi-calc
-
-Interactive back-of-envelope math. Assumptions sit above `---`. Derivations below it recompute live. Click **Tune** in the web UI to adjust sliders.
-
-````markdown
-```kiwi-calc
-dau:        10 million
-writes:     100
-write_size: 1 KB
----
-qps:     dau * writes / day
-daily:   dau * writes * write_size
-yearly:  daily * year
-```
-````
-
-<Tip>
-Units like `KB`, `million`, and `/ day` are parsed as quantities. Derivations stay in the page so agents can read the same numbers without the UI.
-</Tip>
-
-## kiwi-steps
-
-A Mermaid diagram plus a step list. Each step can focus or dim nodes and show a note. Playback controls appear under the diagram.
-
-````markdown
-```kiwi-steps
+```steps clock=probe
 diagram: |
-  graph LR
-    C[Client] --> A[API]
-    A --> DB[(Postgres)]
+  flowchart LR
+    H[hash key] --> S[slot 3]
+    S --> P[probe forward]
 steps:
-  - focus: [C, A]
-    note: write lands on the API
-  - focus: [A, DB]
-    dim: [C]
-    note: then it commits
+  - {focus: [H], note: "h(mango) = 3"}
+  - {focus: [S], note: "Slot 3 is taken"}
+  - {focus: [P], note: "Probe forward to slot 4"}
+```
+
+```map clock=probe
+mode: open
+capacity: 8
+slots: [null, null, null, {key: apple}, null, null, null, null]
+steps:
+  - {activeKey: mango, probePath: [3]}
+  - {activeSlots: [3], probePath: [3]}
+  - {activeSlots: [4], probePath: [3, 4]}
 ```
 ````
 
-Sequence diagrams also work — omit `messages` and KiwiFS reveals one hop per step.
+## Validation
 
-## kiwi-data
+KiwiFS validates typed fences against the same schema the web UI renders from.
 
-Structured records, not code. The server indexes them so DQL can query `FROM RECORDS "<kind>"`.
+- **On write.** Writes through KiwiFS run the markdown linter. With `[lint] reject_errors` on (the default), a page with any error-severity issue is rejected. Errors include broken YAML in a strict fence, a wrong value type, a missing required key, and setting a fixed property inside a step. An unknown key is a warning that suggests the closest valid key.
+- **Nothing to draw.** A strict `kiwi-array`, `kiwi-matrix`, `kiwi-tree`, `kiwi-memory`, `kiwi-numberline`, or `kiwi-table` fence with none of its data keys is an error, for example `kiwi-array fence: needs one of "values", "rows"`. A data key introduced in the first step counts.
+- **Bare names are lenient.** A bare tag whose YAML doesn't parse gets a warning, not an error, and only when the body plainly looks like that widget.
+- **In the web UI.** A fence with errors shows its source with the problems listed, instead of a broken picture.
 
-````markdown
-```kiwi-data
-kind: dataset-schema
-records:
-  - name: target
-    dtype: float
-  - name: id
-    dtype: int
-    nullable: true
-```
-````
+Check pages before you commit them:
 
-```sql
-TABLE name, dtype
-FROM RECORDS "dataset-schema"
-WHERE dtype = "float"
-```
+<Tabs>
+  <Tab title="CLI">
+    ```bash Terminal
+    kiwifs lint --root ./knowledge
+    ```
+  </Tab>
+  <Tab title="REST">
+    ```bash Terminal
+    curl -X POST http://localhost:3333/api/kiwi/lint \
+      -H "Content-Type: application/json" \
+      -d '{"path": "guides/hashing.md"}'
+    ```
 
-<Note>
-A parse error falls back to the raw source plus the parser's complaint — the same mistake the indexer logs.
-</Note>
+    Pass `content` instead of `path` to lint markdown that isn't saved yet.
+  </Tab>
+  <Tab title="MCP">
+    Call `kiwi_lint` with `path` or `content`.
+  </Tab>
+</Tabs>
 
-## Claims
+## Reference for agents and scripts
 
-Mark assertions so sourced claims look different from unsupported ones.
+The fence catalog is available wherever you write pages:
 
-```markdown
-:::claim{evidence=stated confidence=0.9 source=sources/architecture.md}
-A non-linear level-2 stacker wins when the dominant feature is sparse.
-:::
+<Tabs>
+  <Tab title="CLI">
+    ```bash Terminal
+    kiwifs widgets list            # every fence, one line each
+    kiwifs widgets list tree       # one fence, key by key
+    kiwifs widgets list --json
+    ```
 
-Inline: :claim[hill-climbing is worse]{evidence=inferred confidence=0.6}
-```
+    `kiwifs widgets suggest [path]` scans for `widget:live` blocks that only call a view component, and prints the typed fence each could become. It never rewrites files. Without a path it scans `--root` (default `./knowledge`).
+  </Tab>
+  <Tab title="MCP">
+    `kiwi_widget_reference` lists every fence, or describes one in full when you pass `name`. Pass `examples: true` without a name to include each fence's worked example. Write the fence, then verify it with `kiwi_lint`.
+  </Tab>
+</Tabs>
 
-| Attribute | Meaning |
-| --- | --- |
-| `evidence` | `stated`, `inferred`, or similar — changes badge tone |
-| `confidence` | `0`–`1`, shown as a percentage |
-| `source` | Path or citation; omitted claims are marked **unsourced** |
+## Search and export
 
-## Figures and embeds
-
-Wrap media so it can go wide, pin while scrolling, or embed a canvas / Excalidraw file.
-
-```markdown
-:::figure{width=wide pin caption="Architecture overview"}
-![[diagrams/arch.excalidraw.md|wide]]
-:::
-
-![[canvases/flow.canvas.json]]
-```
-
-`![[path]]` embeds `.excalidraw.md` and `.canvas.json` inline. Use `|wide` or `|full` for layout.
-
-## Reading order
-
-Place `_book.yaml` next to a chapter to drive prev/next navigation at the bottom of each page:
-
-```yaml
-title: System Design Primer
-parts:
-  - chapter-01/_index.md
-  - chapter-01/intro.md
-  - chapter-02/_index.md
-```
-
-If the manifest is missing, KiwiFS falls back to frontmatter `order`, then filename.
-
-## Page tracker
-
-Progress widgets for curricula or checklists. Modes switch which frontmatter fields are shown.
-
-````markdown
-```widget:tracker
-state: leetcode-progress
-modes:
-  - id: tags
-    label: Tags
-    fields: [tags]
-  - id: companies
-    label: Companies
-    fields: [companies]
-```
-````
-
-Bookmarks persist per page. Banner chips under the title come from `[ui.tags] banner` in config.
-
----
-
-## Container directives
-
-### Tabs
-
-Wrap content in tab groups using `:::tabs` and `::tab[label]`:
-
-```markdown
-:::tabs
-
-::tab[REST]
-Use `PUT /api/kiwi/file` to create or update a page.
-
-::tab[MCP]
-Call `kiwi_write` with `path` and `content` arguments.
-
-::tab[CLI]
-Write the file directly: `echo "# Title" > page.md`
-
-:::
-```
-
-### Columns
-
-Split content into columns with `:::columns` and `:::col`:
-
-```markdown
-:::columns
-
-:::col
-Left column content here.
-:::
-
-:::col
-Right column content here.
-:::
-
-:::
-```
-
----
-
-## Callouts
-
-KiwiFS supports GitHub-style callouts and foldable variants:
-
-```markdown
-> [!NOTE]
-> Standard informational callout.
-
-> [!TIP]
-> Helpful suggestion.
-
-> [!WARNING]
-> Potential issue to watch for.
-
-> [!CAUTION]
-> Dangerous action that could cause data loss.
-
-> [!IMPORTANT]
-> Critical information.
-```
-
-Add `-` or `+` to make callouts foldable:
-
-```markdown
-> [!NOTE]- Collapsed by default
-> This content is hidden until expanded.
-
-> [!TIP]+ Expanded by default
-> This content is visible but can be collapsed.
-```
-
----
+Search indexes a typed fence's title, caption, step notes, code listing, and short labels such as node names, not its coordinates. Document export (PDF and other formats) replaces each typed fence with its caption and step notes as a blockquote, followed by the YAML, so a printed page stays readable.
 
 ## Related
 
 <CardGroup cols={2}>
   <Card title="DQL" icon="database" href="/concepts/dql">
-    Query language powering kiwi-query blocks.
-  </Card>
-  <Card title="Workflows" icon="bars-progress" href="/concepts/workflows">
-    State machines behind Kanban boards.
+    The query language behind `kiwi-query`, `kiwi-chart`, and `FROM RECORDS`.
   </Card>
   <Card title="Web UI" icon="window" href="/guides/web-ui">
-    Full-screen views and editing features.
+    Where widgets render, and the editor that writes them.
   </Card>
   <Card title="Canvas" icon="object-group" href="/concepts/canvas">
-    Spatial diagrams in .canvas.json files.
+    Spatial diagrams in `.canvas.json` files.
+  </Card>
+  <Card title="MCP" icon="plug" href="/concepts/mcp">
+    `kiwi_widget_reference`, `kiwi_lint`, and `kiwi_quiz` for agents.
   </Card>
 </CardGroup>

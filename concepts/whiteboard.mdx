@@ -1,52 +1,91 @@
 ---
 title: "Whiteboard"
-description: "Excalidraw diagrams stored as markdown files — create, edit, and share freeform drawings in the web UI."
+description: "Freeform Excalidraw drawings stored as markdown files that version, sync, and embed like any other page."
 icon: "pen"
 ---
 
-Whiteboards are freeform diagrams stored as markdown files with an **`.excalidraw.md`** suffix. KiwiFS embeds Excalidraw scene data inside the file so drawings version with the rest of your knowledge base.
+A whiteboard is a freeform Excalidraw drawing saved as a markdown file with an **`.excalidraw.md`** suffix. Because the drawing lives in a plain file, it gets git history, travels over every protocol, and embeds in other pages.
 
-## File location
+Use a whiteboard for sketches, brainstorming, and hand-drawn diagrams. For structured diagrams built from cards and page references, use a [canvas](/concepts/canvas) instead.
 
-New whiteboards are created under `whiteboards/` by default:
+## File format
 
+KiwiFS uses the same layout as the Obsidian Excalidraw plugin, so drawings open in both tools. The scene JSON sits in a fenced block under a `## Drawing` heading.
+
+````markdown whiteboards/architecture.excalidraw.md
+---
+excalidraw-plugin: parsed
+---
+
+# Excalidraw Data
+
+## Drawing
+
+```json
+{"type":"excalidraw","version":2,"source":"kiwifs","elements":[],"appState":{"gridSize":null,"viewBackgroundColor":"#ffffff"},"files":{}}
 ```
-whiteboards/brainstorm.excalidraw.md
-whiteboards/architecture.excalidraw.md
-```
+````
 
-Each file uses YAML frontmatter and a fenced JSON block that Excalidraw can parse. The drawing data lives in a ` ```json ` fence under `## Drawing`.
+The `elements` array holds the shapes, arrows, and text you draw. KiwiFS also reads drawings saved as LZ-string compressed scenes in a ` ```compressed-json ` fence, and keeps them compressed when it saves.
+
+New whiteboards go under `whiteboards/`, named from the title you enter:
+
+<Tree>
+  <Tree.Folder name="whiteboards" defaultOpen>
+    <Tree.File name="architecture.excalidraw.md" />
+    <Tree.File name="brainstorm.excalidraw.md" />
+  </Tree.Folder>
+</Tree>
 
 ## Web UI
 
 <Steps>
   <Step title="Open the whiteboard hub">
-    Click **Whiteboard** in the toolbar. The hub lists all `.excalidraw.md` files in your knowledge base.
+    Click **Whiteboard** in the toolbar. The hub lists every `.excalidraw.md` file and reopens the last one you used. If none exist, it creates `whiteboards/untitled.excalidraw.md`.
   </Step>
-  <Step title="Create or select a board">
-    Use **New whiteboard** to create a file under `whiteboards/`, or pick an existing board from the dropdown.
+  <Step title="Create or pick a board">
+    Click **New whiteboard** and enter a name, or pick a board from the dropdown.
   </Step>
-  <Step title="Draw and save">
-    Use Excalidraw tools to sketch, annotate, and connect shapes. Changes save automatically to the markdown file on disk.
+  <Step title="Draw">
+    Use the Excalidraw tools to sketch and annotate. Changes save about 1.5 seconds after you stop drawing. Saves use the file's ETag, so a conflicting edit from another client is rejected instead of overwritten.
   </Step>
 </Steps>
 
-You can also open a whiteboard from the file tree like any other page. Excalidraw markdown renders inline in page view.
+Opening an `.excalidraw.md` file from the file tree opens it on the whiteboard. Hide the **Whiteboard** toolbar button with `whiteboard = false` under `[ui.features]`.
+
+## Embed a drawing in a page
+
+Embed a whiteboard with wiki link embed syntax. The page shows a read-only preview with a button to open the full board.
+
+```markdown concepts/auth.md
+The login flow is sketched below.
+
+![[whiteboards/architecture.excalidraw.md]]
+```
+
+The same syntax embeds a canvas, for example `![[canvases/auth-flow.canvas.json]]`.
+
+## Agents and whiteboards
+
+Whiteboards need no dedicated API. Agents read and write them with `kiwi_read` and `kiwi_write`, or with `GET` and `PUT /api/kiwi/file`, like any other page. To change a drawing, replace the JSON inside the `## Drawing` fence and keep the rest of the file intact.
 
 <Tip>
-Whiteboards are plain markdown files. Agents can read and write them with `kiwi_read` and `kiwi_write` like any other page — no separate API is required.
+For diagrams that agents generate or edit often, prefer a [canvas](/concepts/canvas). Its typed nodes and `PATCH` endpoint are easier to change precisely than raw Excalidraw elements.
 </Tip>
 
-## Related documentation
+## Related
 
 <CardGroup cols={2}>
-  <Card title="Web UI" icon="window" href="/guides/web-ui">
-    Toolbar views and file tree.
-  </Card>
   <Card title="Canvas" icon="diagram-project" href="/concepts/canvas">
-    Structured JSON canvas diagrams.
+    Structured JSON Canvas diagrams.
+  </Card>
+  <Card title="Wiki links" icon="link" href="/concepts/wiki-links">
+    Link and embed syntax.
   </Card>
   <Card title="Files as truth" icon="file" href="/concepts/files-as-truth">
     How KiwiFS stores everything on disk.
+  </Card>
+  <Card title="Web UI" icon="window" href="/guides/web-ui">
+    Toolbar views and the file tree.
   </Card>
 </CardGroup>

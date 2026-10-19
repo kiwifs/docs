@@ -1,42 +1,50 @@
 ---
 title: "Optional features"
-description: "Which subsystems need configuration and what HTTP status codes mean when they are off."
+description: "What is off by default, how to turn it on, and which status code tells you a feature is off."
 icon: "toggle-on"
 ---
 
-Several KiwiFS features are **optional**. Disabled subsystems return a clear HTTP error instead of failing silently.
+KiwiFS starts with a small, safe default set. Some subsystems are opt-in in `.kiwi/config.toml`, a few depend on the search backend or external tools, and two are chosen when the binary is built. When a feature is off, its endpoints return a clear status code instead of failing silently.
 
-## Feature matrix
+<Info>
+A `501` or `503` from an endpoint listed below usually means the feature is off on this server, not that something is broken.
+</Info>
 
-| Feature | How to enable | Error when disabled |
-| --- | --- | --- |
-| Draft spaces | Git versioning (not `none`) | `501` |
-| Claims | Claim store at bootstrap | `503` |
-| Audit log | `[audit] enabled = true` | `501` |
-| Vector search | `[search.vector] enabled = true` | `503` |
-| Webhooks | `[webhooks] enabled = true` | Empty CRUD |
-| Schema enforcement | `[schema] enforce = true` | Writes pass without validation |
-| Graph analytics | Link index available | `503` |
-| Import connections | Store init success | `[]` from list endpoint |
+## Runtime features
 
-## Enabling subsystems
+| Feature | On by default | How to turn it on | When off |
+| --- | --- | --- | --- |
+| Draft spaces | No | `[drafts] enabled = true` with git versioning | `501` |
+| Audit log | No | `[audit] enabled = true` | `501` |
+| Webhooks | No | `[webhooks] enabled = true` | `503` |
+| Vector search | No | `[search.vector] enabled = true` plus an embedder | `503` |
+| Schema enforcement | No | `[schema] enforce = true` | Writes are not validated |
+| Workflow transition rules | No | `[workflow] enforce_transitions = true` | Any status change is allowed |
+| Rate limiting | No | `[server.rate_limit] requests_per_minute` above `0` | No limit |
+| Backup push | No | `[backup] remote` | No push |
+| Claims | Yes | Nothing to do | `503` if the claim store could not open |
+| DQL, Bases, analytics | Yes | Keep `[search] engine = "sqlite"` | `501` with `engine = "grep"` |
+| Graph analytics | Yes | Needs the link index | `503` |
+| Import connections | Yes | Nothing to do | List returns `[]`; other calls `503` |
+| Airbyte connectors | When Docker is reachable | Start Docker or set `[import] airbyte_api_key` | `503` |
+| S3, WebDAV, NFS | No | `kiwifs serve --s3`, `--webdav`, `--nfs` | Port not open |
+
+## Turning features on
 
 <AccordionGroup>
-  <Accordion title="Drafts" icon="code-branch">
-    Drafts require git-backed branches. Ensure versioning is not `none`:
+  <Accordion title="Draft spaces" icon="code-branch">
+    Drafts are git branches in separate worktrees, so they need git versioning as well as the switch:
 
     ```toml .kiwi/config.toml
     [versioning]
     strategy = "git"
+
+    [drafts]
+    enabled = true
+    max_active = 10
     ```
 
     See [Draft spaces](/concepts/draft-spaces).
-  </Accordion>
-
-  <Accordion title="Claims" icon="lock">
-    Task claims prevent two agents from editing the same path concurrently. The claim store is wired at bootstrap when the server detects the feature is needed.
-
-    See [Claims](/concepts/claims).
   </Accordion>
 
   <Accordion title="Audit log" icon="scroll">
@@ -45,11 +53,20 @@ Several KiwiFS features are **optional**. Disabled subsystems return a clear HTT
     enabled = true
     ```
 
-    ```bash
-    curl 'http://localhost:3333/api/kiwi/audit?since=2026-05-01T00:00:00Z&limit=100'
+    ```bash Terminal
+    curl 'http://localhost:3333/api/kiwi/audit?since=2026-10-01T00:00:00Z&limit=100'
     ```
 
-    See [Utilities API](/api/utilities#audit-log).
+    See [Audit log](/concepts/audit-log).
+  </Accordion>
+
+  <Accordion title="Webhooks" icon="bell">
+    ```toml .kiwi/config.toml
+    [webhooks]
+    enabled = true
+    ```
+
+    Then register webhooks through the API or with `[[webhook_entries]]`. See [Webhooks](/concepts/webhooks).
   </Accordion>
 
   <Accordion title="Vector search" icon="brain">
@@ -61,35 +78,54 @@ Several KiwiFS features are **optional**. Disabled subsystems return a clear HTT
     provider = "openai"
     model = "text-embedding-3-small"
     api_key = "${OPENAI_API_KEY}"
-
-    [search.vector.store]
-    provider = "sqlite-vec"
     ```
 
-    See [Search](/concepts/search) and [Configuration](/configuration#vector-search).
+    The vector store defaults to an embedded SQLite store. Run `kiwifs reindex` to embed existing pages. See [Search](/concepts/search) and [Vector search configuration](/configuration#vector-search).
   </Accordion>
 
   <Accordion title="Schema enforcement" icon="shield-check">
     ```toml .kiwi/config.toml
     [schema]
     enforce = true
+    enforce_level = "warn"
     ```
 
-    When enabled, writes with invalid frontmatter are rejected. Define types under `.kiwi/schemas/`.
+    Start with `warn` on an existing knowledge base to see violations without blocking writes, then switch to the default `reject`. See [Schemas](/concepts/schemas).
+  </Accordion>
 
-    See [Schemas](/concepts/schemas).
+  <Accordion title="Claims" icon="lock">
+    Claims are on by default. Expired claims are released every 30 seconds. You only see `503` if the claim store under `.kiwi/state/` could not be opened; check the server log for `claims disabled`.
+
+    See [Claims](/concepts/claims).
   </Accordion>
 </AccordionGroup>
 
-<Warning>
-If you see `501` or `503` on an endpoint, check the table above. These are not bugs — they mean the subsystem was not configured for this server instance.
-</Warning>
+## Document export tools
 
-## Related documentation
+Exporting to formats such as DOCX, slides, or a static site uses external tools when they are installed: Pandoc, Marp CLI, MkDocs, Typst, XeLaTeX, and pandoc-crossref. The server logs which ones it found at startup, and formats that need a missing tool are unavailable. The Docker image ships with Pandoc, Marp CLI, MkDocs, and Chromium. See [Document export](/export/documents).
+
+## Build-time features
+
+Release binaries and the Docker image use the default build. Two features change with Go build tags when you build from source:
+
+| Feature | Default build | Build tag | Notes |
+| --- | --- | --- | --- |
+| D2 diagrams | Included | `-tags nod2` removes it | Without D2, ` ```d2 ` fences don't render and `/api/kiwi/render/d2` returns `501`. Removing it makes the binary smaller. |
+| ONNX embedder | Not included | `-tags onnx` adds it | Lets `[search.vector.embedder] provider = "onnx"` run a local model. Needs CGo and the ONNX Runtime shared library. Without it, the `onnx` provider fails at startup with a message to rebuild. |
+
+```bash Terminal
+make ui
+go build -tags nod2 -o kiwifs .
+CGO_ENABLED=1 go build -tags onnx -o kiwifs .
+```
+
+On Windows, `kiwifs mount` (FUSE) is not available. Use `kiwifs serve` with WebDAV or the REST API instead.
+
+## Related
 
 <CardGroup cols={2}>
   <Card title="Configuration" icon="gear" href="/configuration">
-    Full config.toml reference.
+    Every config key and its default.
   </Card>
   <Card title="API overview" icon="terminal" href="/api/overview">
     Auth and error conventions.

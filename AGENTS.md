@@ -43,6 +43,7 @@
 | Directory | Use for |
 | --- | --- |
 | `concepts/` | Product concepts and mental models |
+| `widgets/` | Per-category widget fence reference (overview lives at `concepts/widgets.mdx`) |
 | `guides/` | How-to guides (web UI, protocols, FAQ, examples) |
 | `api/` | REST reference with curl examples |
 | `cli/` | CLI reference |

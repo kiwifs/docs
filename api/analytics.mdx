@@ -1,385 +1,609 @@
 ---
 title: "Analytics and health"
-description: "Knowledge health dashboard, per-page health checks, comments, sharing, and real-time events."
+sidebarTitle: "Analytics"
+description: "Measure page views and search success, find content gaps, and check knowledge base health."
 icon: "chart-bar"
 ---
 
+These endpoints answer two questions: what are people and agents reading and failing to find, and which pages need attention. Analytics and health endpoints need the default SQLite search backend and return `501` when KiwiFS runs with `search.engine = "grep"`.
+
+KiwiFS records a page view on every `GET /api/kiwi/file` for a markdown page, except from known bots. Tag views with `?source=` or the `X-Kiwi-Source` header (default `api`) to break them down by client.
+
 ## Health dashboard
 
-Get an overview of your knowledge base health.
+Return page counts, health issues, link coverage, recent updates, and engagement in one call. The web UI's analytics panel uses this.
+
+```http
+GET /api/kiwi/analytics
+```
+
+<ParamField query="scope" type="string">
+  Path prefix. Only pages under it are counted.
+</ParamField>
+<ParamField query="stale_threshold" type="integer" default="30">
+  Days used for the stale check. See [Stale pages](#stale-pages).
+</ParamField>
 
 ```bash
-curl 'http://localhost:3333/api/kiwi/analytics'
+curl 'http://localhost:3333/api/kiwi/analytics?scope=concepts/'
 ```
+
+<ResponseField name="total_pages" type="integer">Indexed pages.</ResponseField>
+<ResponseField name="total_words" type="integer">Sum of word counts.</ResponseField>
+<ResponseField name="health" type="object">
+  Issue groups. Each has `count` and `paths`. Orphans, broken links, and empty pages come from the latest [janitor scan](#janitor-scan).
+  <Expandable title="properties">
+    <ResponseField name="stale" type="object">Pages past review. See [Stale pages](#stale-pages).</ResponseField>
+    <ResponseField name="orphans" type="object">Pages no other page links to.</ResponseField>
+    <ResponseField name="broken_links" type="object">Pages containing a wiki link that doesn't resolve.</ResponseField>
+    <ResponseField name="empty" type="object">Pages with no body.</ResponseField>
+    <ResponseField name="no_frontmatter" type="object">Pages without frontmatter. `paths` is always empty.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="coverage" type="object">
+  <Expandable title="properties">
+    <ResponseField name="pages_with_links" type="integer">Pages with at least one outgoing link.</ResponseField>
+    <ResponseField name="pages_without_links" type="integer">Pages with none.</ResponseField>
+    <ResponseField name="avg_links_per_page" type="number">Mean outgoing links per page.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="top_updated" type="object[]">The 10 most recently updated pages, each with `path` and `updated_at`.</ResponseField>
+<ResponseField name="engagement" type="object">
+  <Expandable title="properties">
+    <ResponseField name="total_views" type="integer">All recorded page views.</ResponseField>
+    <ResponseField name="top_viewed" type="object[]">Most viewed pages. Same shape as [page views](#page-views).</ResponseField>
+    <ResponseField name="failed_searches" type="object[]">Most frequent searches with no results. Same shape as [failed searches](#failed-searches).</ResponseField>
+  </Expandable>
+</ResponseField>
 
 ```json
 {
   "total_pages": 142,
-  "stale_pages": 8,
-  "orphan_pages": 5,
-  "broken_links": 3,
-  "empty_pages": 1,
-  "pages_without_frontmatter": 12,
-  "link_coverage_pct": 96.5,
-  "recently_updated": [
-    {"path": "concepts/auth.md", "updated": "2026-04-25T14:30:00Z"},
-    {"path": "concepts/billing.md", "updated": "2026-04-24T09:15:00Z"}
-  ]
+  "total_words": 58210,
+  "health": {
+    "stale": { "count": 2, "paths": ["concepts/legacy-auth.md", "concepts/sso.md"] },
+    "orphans": { "count": 1, "paths": ["concepts/caching.md"] },
+    "broken_links": { "count": 1, "paths": ["concepts/billing.md"] },
+    "empty": { "count": 0, "paths": [] },
+    "no_frontmatter": { "count": 12, "paths": [] }
+  },
+  "coverage": { "pages_with_links": 120, "pages_without_links": 22, "avg_links_per_page": 3.4 },
+  "top_updated": [
+    { "path": "concepts/auth.md", "updated_at": "2026-10-18T14:30:00Z" }
+  ],
+  "engagement": {
+    "total_views": 3120,
+    "top_viewed": [
+      { "path": "concepts/auth.md", "count": 412, "first_seen": 1758000000, "last_seen": 1760880000 }
+    ],
+    "failed_searches": [
+      { "query": "oauth refresh token", "search_type": "search", "count": 7, "first_seen": 1759000000, "last_seen": 1760870000 }
+    ]
+  }
 }
 ```
 
-<ResponseField name="total_pages" type="integer">Total number of pages.</ResponseField>
-<ResponseField name="stale_pages" type="integer">Pages past their `review-by` date in frontmatter.</ResponseField>
-<ResponseField name="orphan_pages" type="integer">Pages with no incoming backlinks.</ResponseField>
-<ResponseField name="broken_links" type="integer">Wiki links pointing to nonexistent pages.</ResponseField>
-<ResponseField name="empty_pages" type="integer">Pages with no content beyond frontmatter.</ResponseField>
-<ResponseField name="pages_without_frontmatter" type="integer">Pages missing YAML frontmatter.</ResponseField>
-<ResponseField name="link_coverage_pct" type="number">Percentage of wiki links that resolve to existing pages.</ResponseField>
-<ResponseField name="recently_updated" type="array">Most recently modified pages.</ResponseField>
-
 ## Analytics overview
 
-Compact dashboard for the web UI engagement panel:
+Return headline numbers for a period, each compared with the period before it.
+
+```http
+GET /api/kiwi/analytics/overview
+```
+
+<ParamField query="period" type="string" default="7d">
+  Number of days followed by `d`, such as `7d`, `30d`, or `90d`. Invalid values fall back to `7d`.
+</ParamField>
 
 ```bash
-curl 'http://localhost:3333/api/kiwi/analytics/overview'
+curl 'http://localhost:3333/api/kiwi/analytics/overview?period=30d'
+```
+
+<ResponseField name="period" type="string">Period used.</ResponseField>
+<ResponseField name="total_views" type="integer">Page views in the period.</ResponseField>
+<ResponseField name="views_delta_percent" type="number">Change in views versus the previous period, in percent.</ResponseField>
+<ResponseField name="total_searches" type="integer">Searches in the period.</ResponseField>
+<ResponseField name="searches_delta_percent" type="number">Change in searches, in percent.</ResponseField>
+<ResponseField name="search_success_rate" type="number">Share of searches that returned results.</ResponseField>
+<ResponseField name="success_rate_delta_pp" type="number">Change in success rate, in percentage points.</ResponseField>
+<ResponseField name="unique_pages_viewed" type="integer">Distinct pages viewed.</ResponseField>
+<ResponseField name="unique_pages_delta_percent" type="number">Change in distinct pages viewed, in percent.</ResponseField>
+
+```json
+{
+  "period": "30d",
+  "total_views": 3120,
+  "views_delta_percent": 12.5,
+  "total_searches": 860,
+  "searches_delta_percent": -3.1,
+  "search_success_rate": 0.91,
+  "success_rate_delta_pp": 2.0,
+  "unique_pages_viewed": 97,
+  "unique_pages_delta_percent": 4.3
+}
 ```
 
 ## Page views
 
-```bash
-curl 'http://localhost:3333/api/kiwi/analytics/views'
-curl 'http://localhost:3333/api/kiwi/analytics/views/v2?path=concepts/auth.md'
+Return the most viewed pages, optionally for one page or since a point in time.
+
+```http
+GET /api/kiwi/analytics/views
 ```
 
-`views/v2` returns richer per-page engagement when tracking is enabled.
+<ParamField query="top" type="integer" default="20">
+  Maximum rows, up to 200.
+</ParamField>
+<ParamField query="path" type="string">
+  Only return views of this page.
+</ParamField>
+<ParamField query="since" type="string">
+  Unix timestamp or RFC 3339 time. Returns `400` if it is neither.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/analytics/views?top=5&since=2026-10-01T00:00:00Z'
+```
+
+<ResponseField name="top" type="integer">Row limit used.</ResponseField>
+<ResponseField name="path" type="string">Path filter, if given.</ResponseField>
+<ResponseField name="since" type="integer">Start time as a Unix timestamp, if given.</ResponseField>
+<ResponseField name="results" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="path" type="string">Page path.</ResponseField>
+    <ResponseField name="count" type="integer">Views.</ResponseField>
+    <ResponseField name="first_seen" type="integer">First view, Unix seconds.</ResponseField>
+    <ResponseField name="last_seen" type="integer">Latest view, Unix seconds.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{
+  "top": 5,
+  "since": 1759276800,
+  "results": [
+    { "path": "concepts/auth.md", "count": 212, "first_seen": 1759280000, "last_seen": 1760880000 }
+  ]
+}
+```
+
+## Page view time series
+
+Return page views bucketed over time, plus the top 20 pages for the period. Buckets are hourly for periods up to 7 days and daily beyond that.
+
+```http
+GET /api/kiwi/analytics/views/v2
+```
+
+<ParamField query="period" type="string" default="30d">
+  Number of days followed by `d`.
+</ParamField>
+<ParamField query="path" type="string">
+  Limit the time series to one page. `top_pages` always covers every page.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/analytics/views/v2?period=7d&path=concepts/auth.md'
+```
+
+<ResponseField name="period" type="string">Period used.</ResponseField>
+<ResponseField name="path" type="string">Path filter, if given.</ResponseField>
+<ResponseField name="time_series" type="object[]">Buckets, each with `timestamp` (Unix seconds, bucket start) and `count`.</ResponseField>
+<ResponseField name="top_pages" type="object[]">Up to 20 pages, same shape as [page views](#page-views) results.</ResponseField>
+
+```json
+{
+  "period": "7d",
+  "path": "concepts/auth.md",
+  "time_series": [
+    { "timestamp": 1760839200, "count": 4 },
+    { "timestamp": 1760842800, "count": 9 }
+  ],
+  "top_pages": [
+    { "path": "concepts/auth.md", "count": 61, "first_seen": 1760300000, "last_seen": 1760880000 }
+  ]
+}
+```
 
 ## Search analytics
 
-```bash
-curl 'http://localhost:3333/api/kiwi/analytics/searches'
-curl 'http://localhost:3333/api/kiwi/analytics/failed-searches'
+Return search volume over time, the success rate, and the 20 most frequent failed queries for a period.
+
+```http
+GET /api/kiwi/analytics/searches
 ```
 
-Failed searches help identify content gaps agents could not answer.
-
-## Trends and content gaps
+<ParamField query="period" type="string" default="30d">
+  Number of days followed by `d`.
+</ParamField>
 
 ```bash
-curl 'http://localhost:3333/api/kiwi/analytics/trends'
-curl 'http://localhost:3333/api/kiwi/analytics/content-gaps'
+curl 'http://localhost:3333/api/kiwi/analytics/searches?period=30d'
 ```
 
-Dismiss a content gap suggestion:
+<ResponseField name="period" type="string">Period used.</ResponseField>
+<ResponseField name="search_success_rate" type="number">Share of searches that returned results.</ResponseField>
+<ResponseField name="time_series" type="object[]">Buckets, each with `timestamp` and `count`.</ResponseField>
+<ResponseField name="top_failed" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="query" type="string">Query text.</ResponseField>
+    <ResponseField name="search_type" type="string">Which search ran it, such as `search` or `semantic`.</ResponseField>
+    <ResponseField name="count" type="integer">Times it was run.</ResponseField>
+    <ResponseField name="had_results" type="integer">Times it returned results.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{
+  "period": "30d",
+  "search_success_rate": 0.91,
+  "time_series": [{ "timestamp": 1758240000, "count": 31 }],
+  "top_failed": [
+    { "query": "oauth refresh token", "search_type": "search", "count": 7, "had_results": 0 }
+  ]
+}
+```
+
+## Failed searches
+
+Return the most frequent searches that returned no results.
+
+```http
+GET /api/kiwi/analytics/failed-searches
+```
+
+<ParamField query="top" type="integer" default="20">
+  Maximum rows, up to 200.
+</ParamField>
+<ParamField query="since" type="string">
+  Unix timestamp or RFC 3339 time. Returns `400` if it is neither.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/analytics/failed-searches?top=10'
+```
+
+<ResponseField name="top" type="integer">Row limit used.</ResponseField>
+<ResponseField name="since" type="integer">Start time as a Unix timestamp, if given.</ResponseField>
+<ResponseField name="results" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="query" type="string">Query text.</ResponseField>
+    <ResponseField name="search_type" type="string">Which search ran it.</ResponseField>
+    <ResponseField name="count" type="integer">Times it failed.</ResponseField>
+    <ResponseField name="first_seen" type="integer">First failure, Unix seconds.</ResponseField>
+    <ResponseField name="last_seen" type="integer">Latest failure, Unix seconds.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{
+  "top": 10,
+  "results": [
+    { "query": "oauth refresh token", "search_type": "search", "count": 7, "first_seen": 1759000000, "last_seen": 1760870000 }
+  ]
+}
+```
+
+## Trends
+
+Return pages whose views rose or fell most compared with the previous period.
+
+```http
+GET /api/kiwi/analytics/trends
+```
+
+<ParamField query="period" type="string" default="7d">
+  Number of days followed by `d`.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/analytics/trends?period=7d'
+```
+
+<ResponseField name="period" type="string">Period used.</ResponseField>
+<ResponseField name="trending" type="object[]">Pages with rising views.</ResponseField>
+<ResponseField name="declining" type="object[]">
+  Pages with falling views. Both arrays share this shape:
+  <Expandable title="properties">
+    <ResponseField name="path" type="string">Page path.</ResponseField>
+    <ResponseField name="current_views" type="integer">Views in this period.</ResponseField>
+    <ResponseField name="previous_views" type="integer">Views in the previous period.</ResponseField>
+    <ResponseField name="delta_percent" type="number">Change, in percent.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{
+  "period": "7d",
+  "trending": [{ "path": "runbooks/deploy.md", "current_views": 48, "previous_views": 12, "delta_percent": 300 }],
+  "declining": [{ "path": "concepts/legacy-auth.md", "current_views": 2, "previous_views": 15, "delta_percent": -86.7 }]
+}
+```
+
+## Content gaps
+
+Return failed queries that suggest missing pages. Dismissed queries are excluded.
+
+```http
+GET /api/kiwi/analytics/content-gaps
+```
+
+<ParamField query="limit" type="integer" default="20">
+  Maximum rows, up to 200.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/analytics/content-gaps?limit=10'
+```
+
+<ResponseField name="results" type="object[]">Same shape as [failed searches](#failed-searches) results.</ResponseField>
+
+```json
+{
+  "results": [
+    { "query": "oauth refresh token", "search_type": "search", "count": 7, "first_seen": 1759000000, "last_seen": 1760870000 }
+  ]
+}
+```
+
+## Dismiss a content gap
+
+Hide a query from the content gaps list, for example after writing the missing page.
+
+```http
+POST /api/kiwi/analytics/content-gaps/dismiss
+```
+
+<ParamField body="query" type="string" required>
+  Query text, exactly as listed.
+</ParamField>
+<ParamField body="search_type" type="string" default="search">
+  `search_type` from the content gap entry.
+</ParamField>
 
 ```bash
 curl -X POST 'http://localhost:3333/api/kiwi/analytics/content-gaps/dismiss' \
-  -H 'Content-Type: application/json' \
+  -H "Content-Type: application/json" \
   -d '{"query": "oauth refresh token"}'
 ```
 
-## Import sources analytics
+Returns `400` if `query` is missing.
 
-```bash
-curl 'http://localhost:3333/api/kiwi/analytics/sources'
+```json
+{ "dismissed": "oauth refresh token" }
 ```
 
-Summarizes pages by `_source` frontmatter from imports.
+## View sources
 
-## Per-page health check
+Return page views in a period grouped by source. The source is the `source` query parameter or `X-Kiwi-Source` header sent with the file read, or `api` when neither is set.
 
-Analyze the health of a single page.
+```http
+GET /api/kiwi/analytics/sources
+```
+
+<ParamField query="period" type="string" default="7d">
+  Number of days followed by `d`.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/analytics/sources?period=30d'
+```
+
+<ResponseField name="period" type="string">Period used.</ResponseField>
+<ResponseField name="sources" type="object">Map from source name to view count.</ResponseField>
+
+```json
+{ "period": "30d", "sources": { "ui": 2410, "api": 530, "mcp": 180 } }
+```
+
+## Page health check
+
+Return size, link, and freshness metrics and open issues for one page.
+
+```http
+GET /api/kiwi/health-check
+```
 
 <ParamField query="path" type="string" required>
-  File path to check.
+  Page path.
 </ParamField>
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/health-check?path=concepts/auth.md'
 ```
 
+Returns `400` if `path` is missing. A page that isn't indexed returns `200` with the issue `page not found in index`.
+
+<ResponseField name="path" type="string">Page path.</ResponseField>
+<ResponseField name="word_count" type="integer">Words in the page.</ResponseField>
+<ResponseField name="link_count" type="integer">Outgoing links.</ResponseField>
+<ResponseField name="backlink_count" type="integer">Incoming links.</ResponseField>
+<ResponseField name="days_since_update" type="number">Days since the page last changed.</ResponseField>
+<ResponseField name="quality_score" type="number">Frontmatter `quality_score`, if set.</ResponseField>
+<ResponseField name="issues" type="string[]">Issues from the latest janitor scan, formatted `kind: message`.</ResponseField>
+
 ```json
 {
-  "path": "concepts/auth.md",
+  "path": "concepts/billing.md",
   "word_count": 342,
   "link_count": 5,
   "backlink_count": 8,
-  "days_since_update": 2,
-  "issues": []
-}
-```
-
-When issues are detected, they appear in the `issues` array:
-
-```json
-{
-  "issues": [
-    {"type": "stale", "message": "Page is 45 days past its review date"},
-    {"type": "broken_link", "message": "Link [[payments-v1]] does not resolve"}
-  ]
+  "days_since_update": 2.4,
+  "issues": ["broken-link: link [[payments-v1]] does not resolve"]
 }
 ```
 
 ## Stale pages
 
-List pages that are past their review date.
+List pages due for review. A page is stale when its `next-review` date has passed, or, if it has no `next-review`, when its `reviewed` date is older than `days`. Pages with `status: deprecated` or `status: archived` are skipped.
+
+```http
+GET /api/kiwi/stale
+```
+
+<ParamField query="days" type="integer" default="30">
+  Age threshold for the `reviewed` fallback.
+</ParamField>
 
 ```bash
-curl 'http://localhost:3333/api/kiwi/stale'
+curl 'http://localhost:3333/api/kiwi/stale?days=60'
 ```
 
-```json
-[
-  {
-    "path": "concepts/legacy-auth.md",
-    "title": "Legacy Authentication",
-    "review_by": "2026-03-01",
-    "days_overdue": 55
-  }
-]
-```
-
-## Contradictions
-
-Detect pages with potentially conflicting claims.
-
-```bash
-curl 'http://localhost:3333/api/kiwi/contradictions'
-```
-
-```json
-[
-  {
-    "pages": ["concepts/auth.md", "runbooks/login-flow.md"],
-    "claim": "session timeout duration",
-    "details": "auth.md says 30 minutes, login-flow.md says 1 hour"
-  }
-]
-```
-
-## Janitor scan
-
-Run a full knowledge health scan across the entire knowledge base.
-
-```bash
-curl 'http://localhost:3333/api/kiwi/janitor'
-```
+<ResponseField name="staleDays" type="integer">Threshold used.</ResponseField>
+<ResponseField name="count" type="integer">Stale pages found.</ResponseField>
+<ResponseField name="results" type="object[]">Pages, each with `path` and `frontmatter`.</ResponseField>
 
 ```json
 {
-  "stale": 8,
-  "orphans": 5,
-  "broken_links": 3,
-  "empty": 1,
-  "missing_frontmatter": 12,
-  "recommendations": [
-    "Link orphan page concepts/caching.md from a parent topic",
-    "Update stale page runbooks/deploy-v1.md (90 days overdue)",
-    "Fix broken link [[payments-v1]] in concepts/billing.md"
+  "staleDays": 60,
+  "count": 1,
+  "results": [
+    { "path": "concepts/legacy-auth.md", "frontmatter": { "title": "Legacy authentication", "next-review": "2026-08-01", "status": "active" } }
   ]
 }
 ```
 
----
+## Contradictions
+
+List pages that may conflict with a given page. A page is a candidate when it shares a `tags` or `topics` value with the given page and either has a different `status`, or both pages set `source-of-truth: true`.
+
+```http
+GET /api/kiwi/contradictions
+```
+
+<ParamField query="path" type="string" required>
+  Page path.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/contradictions?path=concepts/auth.md'
+```
+
+<ResponseField name="path" type="string">Page checked.</ResponseField>
+<ResponseField name="contradictions" type="string[]">Paths of possibly conflicting pages.</ResponseField>
+
+```json
+{ "path": "concepts/auth.md", "contradictions": ["runbooks/login-flow.md"] }
+```
+
+## Janitor scan
+
+Return the results of a knowledge base health scan. The server runs scans on a schedule; this endpoint returns the cached result unless you ask for a fresh one or a non-default threshold.
+
+```http
+GET /api/kiwi/janitor
+```
+
+<ParamField query="staleDays" type="integer" default="90">
+  Days without changes before a page counts as stale. The default comes from the janitor configuration.
+</ParamField>
+<ParamField query="fresh" type="boolean" default="false">
+  Run a new scan instead of returning the cached result.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/janitor?fresh=true'
+```
+
+Cached responses include an `X-Kiwi-Janitor-LastScan` header with the scan time.
+
+<ResponseField name="issues" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="kind" type="string">`stale`, `orphan`, `duplicate`, `contradiction`, `missing-owner`, `missing-status`, `empty-page`, `broken-link`, `no-review-date`, `decision-found`, `expired-memory`, or `execution-stale`.</ResponseField>
+    <ResponseField name="path" type="string">Affected page.</ResponseField>
+    <ResponseField name="message" type="string">What's wrong.</ResponseField>
+    <ResponseField name="related" type="string[]">Other pages involved, such as the duplicate.</ResponseField>
+    <ResponseField name="suggestion" type="string">How to fix it.</ResponseField>
+    <ResponseField name="severity" type="string">`error`, `warning`, or `info`.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="scanned" type="integer">Pages scanned.</ResponseField>
+<ResponseField name="healthy" type="integer">Pages with no issues.</ResponseField>
+<ResponseField name="timestamp" type="string">When the scan ran.</ResponseField>
+
+```json
+{
+  "issues": [
+    {
+      "kind": "orphan",
+      "path": "concepts/caching.md",
+      "message": "no other page links here",
+      "suggestion": "link it from a parent topic",
+      "severity": "warning"
+    }
+  ],
+  "scanned": 142,
+  "healthy": 131,
+  "timestamp": "2026-10-19T06:00:00Z"
+}
+```
 
 ## Memory report
 
-Get an overview of your episodic memory structure — useful for agents that use the episode/merge pattern.
+Summarize episodic memory: how many episode files exist, how many have been merged into durable pages, and which haven't. See [Episodic memory](/concepts/episodic-memory).
 
 ```http
 GET /api/kiwi/memory/report
 ```
 
-<ParamField query="episodes_prefix" type="string">
-  Path prefix for episodes directory. Uses the configured default if omitted.
+<ParamField query="episodes_prefix" type="string" default="episodes/">
+  Folder holding episode files. Defaults to `[memory] episodes_path_prefix` in config.
+</ParamField>
+<ParamField query="limit" type="integer">
+  Maximum entries in `episodic_files` and `unmerged`.
+</ParamField>
+<ParamField query="offset" type="integer">
+  Entries to skip in `episodic_files` and `unmerged`.
 </ParamField>
 
 ```bash
-curl 'http://localhost:3333/api/kiwi/memory/report'
+curl 'http://localhost:3333/api/kiwi/memory/report?limit=50'
 ```
+
+Returns `400` for a negative or non-numeric `limit` or `offset`. Results are cached for 30 seconds.
+
+<ResponseField name="episodic_count" type="integer">Episode files found.</ResponseField>
+<ResponseField name="total_episodic" type="integer">Episode files before pagination.</ResponseField>
+<ResponseField name="total_unmerged" type="integer">Unmerged episodes before pagination.</ResponseField>
+<ResponseField name="merged_from_refs" type="integer">`merged-from` references across all pages.</ResponseField>
+<ResponseField name="coverage_pct" type="number">Percentage of episodes referenced by a `merged-from` entry.</ResponseField>
+<ResponseField name="contradictions" type="integer">Pages flagged as contradicting each other.</ResponseField>
+<ResponseField name="avg_age_days" type="number">Mean age of active pages, in days.</ResponseField>
+<ResponseField name="expired_count" type="integer">Pages whose `expires_at` has passed.</ResponseField>
+<ResponseField name="contested_count" type="integer">Pages with `memory_status: contested`.</ResponseField>
+<ResponseField name="scope_counts" type="object">Map from frontmatter `scope` value to page count.</ResponseField>
+<ResponseField name="episodic_files" type="object[]">Episode files, each with `path` and optional `episode_id` and `memory_kind`.</ResponseField>
+<ResponseField name="unmerged" type="object[]">Episodes not yet merged, same shape.</ResponseField>
+<ResponseField name="warnings" type="string[]">Problems found while scanning. Omitted when empty.</ResponseField>
 
 ```json
 {
   "episodic_count": 23,
+  "total_episodic": 23,
+  "total_unmerged": 8,
+  "contradictions": 0,
   "merged_from_refs": 15,
-  "episodic_files": ["episodes/ep-001.md", "episodes/ep-002.md"],
-  "unmerged": 8,
-  "warnings": ["Episode ep-012.md has no merge target"]
+  "coverage_pct": 65.2,
+  "avg_age_days": 41.7,
+  "expired_count": 1,
+  "contested_count": 0,
+  "scope_counts": { "team": 18, "personal": 5 },
+  "episodic_files": [{ "path": "episodes/ep-001.md", "episode_id": "ep-001" }],
+  "unmerged": [{ "path": "episodes/ep-012.md", "episode_id": "ep-012" }]
 }
 ```
 
-## Context
+## MCP equivalents
 
-Retrieve the knowledge base context files used by agents — the playbook, schema description, and index.
+`kiwi_analytics` (health dashboard), `kiwi_health_check`, and `kiwi_memory_report`.
 
-```http
-GET /api/kiwi/context
-```
+## Related
 
-```bash
-curl 'http://localhost:3333/api/kiwi/context'
-```
-
-```json
-{
-  "playbook": "# Playbook\n\nRules for how agents should interact...",
-  "schema": "# Schema\n\nFrontmatter fields and their meanings...",
-  "index": "# Index\n\nTop-level knowledge structure..."
-}
-```
-
-These map to `.kiwi/playbook.md`, `.kiwi/SCHEMA.md`, and `.kiwi/index.md`.
-
-## Theme
-
-Read or update the web UI theme.
-
-### Get theme
-
-```bash
-curl 'http://localhost:3333/api/kiwi/theme'
-```
-
-### Set theme
-
-```bash
-curl -X PUT 'http://localhost:3333/api/kiwi/theme' \
-  -H "Content-Type: application/json" \
-  -d '{"primary": "#6cbe45", "mode": "light"}'
-```
-
-Returns `403` if `ui.theme_locked = true` in configuration.
-
----
-
-## Comments
-
-Add, list, resolve, and delete inline comments on pages.
-
-### List comments
-
-<ParamField query="path" type="string" required>
-  File path to list comments for.
-</ParamField>
-
-```bash
-curl 'http://localhost:3333/api/kiwi/comments?path=concepts/auth.md'
-```
-
-```json
-[
-  {
-    "id": "cmt_01",
-    "path": "concepts/auth.md",
-    "line": 15,
-    "author": "agent:reviewer",
-    "body": "Should this mention refresh tokens?",
-    "resolved": false,
-    "created": "2026-04-25T10:00:00Z"
-  }
-]
-```
-
-### Add a comment
-
-```bash
-curl -X POST 'http://localhost:3333/api/kiwi/comments?path=concepts/auth.md' \
-  -H "Content-Type: application/json" \
-  -H "X-Actor: agent:reviewer" \
-  -d '{"line": 15, "body": "Should this mention refresh tokens?"}'
-```
-
-### Resolve a comment
-
-```bash
-curl -X PATCH 'http://localhost:3333/api/kiwi/comments/cmt_01' \
-  -H "Content-Type: application/json" \
-  -d '{"resolved": true}'
-```
-
-### Delete a comment
-
-```bash
-curl -X DELETE 'http://localhost:3333/api/kiwi/comments/cmt_01'
-```
-
----
-
-## Sharing
-
-Create and manage share links for pages.
-
-### Create a share link
-
-```bash
-curl -X POST 'http://localhost:3333/api/kiwi/share' \
-  -H "Content-Type: application/json" \
-  -H "X-Actor: agent:sharer" \
-  -d '{"path": "concepts/auth.md", "expiresIn": "168h", "password": "optional-secret"}'
-```
-
-`expiresIn` is a Go duration string (`168h` for seven days). Omit it for links that never expire.
-
-```json
-{
-  "id": "a1b2c3d4",
-  "path": "concepts/auth.md",
-  "token": "<opaque-token>",
-  "expiresAt": "2026-05-09T14:30:00Z",
-  "createdBy": "agent:sharer",
-  "createdAt": "2026-05-02T14:30:00Z",
-  "viewCount": 0
-}
-```
-
-Readers open `GET /api/kiwi/public/:token` (see [Utilities](/api/utilities#public-routes)).
-
-### List share links
-
-```bash
-curl 'http://localhost:3333/api/kiwi/share?path=concepts/auth.md'
-```
-
-`path` is **required** — the handler returns every active link for that page.
-
-### Revoke a share link
-
-```bash
-curl -X DELETE 'http://localhost:3333/api/kiwi/share/a1b2c3d4'
-```
-
-Returns JSON `{ "revoked": "<id>" }` using the share **`id`** field (not the long `token`).
-
----
-
-## Real-time events (SSE)
-
-Subscribe to a Server-Sent Events stream that emits events on every write and delete. Use this for real-time UI updates or external integrations.
-
-```bash
-curl -N 'http://localhost:3333/api/kiwi/events'
-```
-
-```
-event: write
-data: {"path":"concepts/auth.md","actor":"agent:docs-writer","timestamp":"2026-04-25T14:30:00Z"}
-
-event: delete
-data: {"path":"concepts/old-page.md","actor":"agent:cleanup","timestamp":"2026-04-25T14:31:00Z"}
-
-event: write
-data: {"path":"concepts/billing.md","actor":"agent:importer","timestamp":"2026-04-25T14:32:00Z"}
-```
-
-<Note>
-The SSE connection stays open indefinitely. Use `curl -N` (no-buffer) to see events as they arrive. In production, implement reconnection logic with the `Last-Event-ID` header.
-</Note>
-
-### Event types
-
-| Event | Trigger |
-|---|---|
-| `write` | A file was created or updated |
-| `delete` | A file was deleted |
-| `bulk` | A bulk write completed |
-| `import` | An import completed |
+<CardGroup cols={2}>
+  <Card title="Refactor" icon="shuffle" href="/api/refactor">
+    Find and fix broken links and orphan pages.
+  </Card>
+  <Card title="Web UI analytics" icon="window" href="/guides/web-ui#analytics">
+    The analytics panel built on these endpoints.
+  </Card>
+</CardGroup>

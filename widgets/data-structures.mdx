@@ -1,0 +1,621 @@
+---
+title: "Data structure widgets"
+sidebarTitle: "Data structures"
+description: "Typed fences for arrays, matrices, tables, trees, linked lists, stacks, queues, hash maps, bit patterns, and memory diagrams."
+icon: "cubes"
+---
+
+These fences draw a data structure from YAML and step through changes to it. Use them to explain an algorithm, a database internal, or a runtime behavior, with each step's reasoning in a `note`.
+
+Every fence here follows the shared rules for [steps, meta strings, playback, and validation](/concepts/widgets#writing-a-typed-fence). Each key table lists the exact keys the linter accepts.
+
+## array
+
+One or more arrays on a shared index axis, with pointers, dependency arrows, and span brackets. Use `rows:` to stack several arrays, such as `nums` over `dp`, on one index axis.
+
+A bare `array` fence renders when its body has `values` or `rows`. Also spelled `kiwi-array`, `widget:array`, `arraystack`, `kiwi-arraystack`.
+
+````markdown
+```array id=two-sum caption="Two-pointer sweep on a sorted array"
+values: [2, 7, 11, 15, 19]
+pointers:
+  - {index: 0, label: lo}
+  - {index: 4, label: hi}
+steps:
+  - note: "2 + 19 = 21 > 9 — move hi left"
+    activeIndices: [0, 4]
+    line: 3
+  - note: "2 + 15 = 17 > 9 — move hi left"
+    pointers: [{index: 0, label: lo}, {index: 3, label: hi}]
+    activeIndices: [0, 3]
+  - note: "2 + 7 = 9 — found it"
+    pointers: [{index: 0, label: lo}, {index: 1, label: hi}]
+    activeIndices: [0, 1]
+    breakpoint: true
+code: |
+  lo, hi = 0, len(a) - 1
+  while lo < hi:
+      s = a[lo] + a[hi]
+      if s == target: return lo, hi
+      if s > target: hi -= 1
+      else: lo += 1
+lang: python
+```
+````
+
+<Accordion title="All 30 keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `activeColor` | string | Primary highlight color. Fixed across steps. |
+| `activeIndex` | array or number or string | The cell being written this step. |
+| `activeIndices` | array or number or string | Cells being written this step. |
+| `ariaLabel` | string | Accessible name. Defaults to a summary derived from the data. Fixed across steps. |
+| `arrows` | array of object | Dependency arcs within the row: `{from, to, label?, dashed?, side?}`. |
+| `arrowsBetweenRows` | array of object | With `rows:`: arrows between rows, `{from: [row, index], to: [row, index], label?}`. |
+| `cellColors` | array | Base color per cell, matching the same items in a tree or graph. |
+| `cellSize` | number | Cell size in px. Defaults to 48, shrinking for long arrays. Fixed across steps. |
+| `dimIndices` | array or number or string | Done / greyed-out cells. |
+| `empty` | array of string | Strings that render as unfilled slots, e.g. `["."]`. |
+| `flash` | boolean | Pulse cells whose value changed since the previous step. Default true. |
+| `highlightColor` | string | Secondary highlight color. Fixed across steps. |
+| `highlightIndices` | array or number or string | Secondary highlight, e.g. the current window. |
+| `indexBase` | number | First index number. Default 0. Fixed across steps. |
+| `indexLabels` | array | Index captions instead of 0..n-1 — characters, amounts, `∅`. |
+| `label` | string | Row title in the left gutter, e.g. `nums` or `dp`. |
+| `labelWidth` | number | Width of the row-label gutter in px. Fixed across steps. |
+| `offset` | number | Blank cells before the first value, to line this row up under another. |
+| `pointers` | array of object | Named pointers above or below cells: `{index, label, color?, side?}`. |
+| `props` | any | Escape hatch for a widget prop whose name collides with a reserved key. |
+| `ranges` | array of object | Brackets over spans: `{start, end, label?, color?, side?}`. |
+| `readColor` | string | Color of cells read by the active cell. Fixed across steps. |
+| `readIndices` | array or number or string | Cells the active cell reads from — `dp[i-1]`, `dp[c-w]`. |
+| `rowGap` | number | Vertical gap between rows in px. Default 2, or 36 when arrows are drawn. Fixed across steps. |
+| `rows` | array of object | Several rows sharing one index axis. Each entry takes the single-row keys above. |
+| `showIndices` | boolean or string | Show the index row. With `rows:`: true, false, "last" (default) or "all". |
+| `sublabels` | array | Caption under each value — a choice arrow ↖ ↑ ←, a parent pointer. |
+| `tooltips` | array | Hover text per cell. |
+| `values` | array or string | Cell values. `null` is an unfilled slot; ±Infinity shows ∞; a string is split into characters. |
+| `wrap` | boolean | Wrap long arrays onto more lines instead of scrolling. Fixed across steps. |
+
+</Accordion>
+
+## matrix
+
+An index-addressed grid: DP tables, game boards, adjacency and confusion matrices. Address cells as `[r, c]` or `"r,c"`. Set `heatmap: true` to shade numeric cells, or `layers:` to show slices of a 3-D table as tabs.
+
+A bare `matrix` fence renders when its body has `values` or `layers`. Also spelled `kiwi-matrix`, `widget:matrix`, `grid`, `kiwi-grid`, `dp`.
+
+````markdown
+```matrix id=lcs caption="Longest common subsequence of ABC and AC"
+rowHeaders: ["", A, B, C]
+colHeaders: ["", A, C]
+values:
+  - [0, 0, 0]
+  - [0, 1, 1]
+  - [0, 1, 1]
+  - [0, 1, 2]
+steps:
+  - note: "Characters match: take the diagonal and add one"
+    activeCells: [[1, 1]]
+    readCells: [[0, 0]]
+    line: 4
+  - note: "No match: carry the better of above and left"
+    activeCells: [[2, 2]]
+    readCells: [[1, 2], [2, 1]]
+    line: 6
+  - note: "Match again — the answer is 2"
+    activeCells: [[3, 2]]
+    readCells: [[2, 1]]
+    path: [[3, 2], [2, 1], [1, 1]]
+code: |
+  for i in range(1, n + 1):
+      for j in range(1, m + 1):
+          if a[i-1] == b[j-1]:
+              dp[i][j] = dp[i-1][j-1] + 1
+          else:
+              dp[i][j] = max(dp[i-1][j], dp[i][j-1])
+lang: python
+```
+````
+
+<Accordion title="All 31 keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `activeCell` | array or string or object | The cell being written this step. |
+| `activeCells` | array or string or object | Cells being written this step. |
+| `activeColor` | string | Primary highlight color. Fixed across steps. |
+| `ariaLabel` | string | Accessible name. Defaults to a summary derived from the data. Fixed across steps. |
+| `arrows` | array of object | Dependency arrows between cells: `{from, to, label?, dashed?}`. |
+| `cellColors` | array of array | Base color per cell. |
+| `cellSize` | number | Cell size in px. Defaults to 44, shrinking for wide tables. Fixed across steps. |
+| `centerRows` | boolean or string | Ragged mode: `"start"` for a staircase, `"center"` for a pyramid. Fixed across steps. |
+| `colHeaders` | array | Captions per column — the characters of a string, item weights, bit place values. |
+| `colPointers` | array of object | Column labels above the table: `{col, label, color?}`. |
+| `dimCells` | array or string or object | Dimmed cells. |
+| `empty` | array of string | Strings that render as unfilled slots, e.g. `["."]`. |
+| `flash` | boolean | Pulse cells whose value changed since the previous step. Default true. |
+| `heatmap` | boolean or object | Shade numeric cells by value. `true` uses the table's own min/max. |
+| `highlightCells` | array or string or object | Secondary highlight. |
+| `highlightColor` | string | Secondary highlight color. Fixed across steps. |
+| `layer` | number | Index of the slice to show. Readers can still click the tabs. |
+| `layers` | array of object | Slices of a 3-D table as tabs: `{label, values}`. The shown slice replaces `values`. |
+| `mask` | string or array | `"lower"` or `"upper"` to grey out the unused triangle, or an explicit cell list. |
+| `path` | array | A traceback path drawn as a line over the cells. |
+| `pathColor` | string | Color of the traceback path. Fixed across steps. |
+| `props` | any | Escape hatch for a widget prop whose name collides with a reserved key. |
+| `readCells` | array or string or object | Cells the active cell reads from — diagonal, above, left. |
+| `readColor` | string | Color of cells read by the active cell. Fixed across steps. |
+| `roundCells` | boolean | Circular cells instead of squares, for coin and token grids. Fixed across steps. |
+| `rowHeaders` | array | Captions per row. |
+| `rowPointers` | array of object | Row labels right of the table: `{row, label, color?}`. |
+| `showIndices` | boolean | Show row and column indices. Default true. Fixed across steps. |
+| `sublabels` | array of array | Small caption under each value — a choice arrow, a parent pointer. |
+| `tooltips` | array of array | Hover text per cell. |
+| `values` | array of array|string | Rows of cell values. Rows may differ in length (ragged / triangular). `null` is unfilled, ±Infinity shows ∞, booleans show T/F. |
+
+</Accordion>
+
+## table
+
+A named-column table: relations, schemas, lock tables, MVCC row versions, decision tables. Address cells as `"rowKey.colKey"`. Set `fromData: <kind>` to render the records of a [`kiwi-data`](/widgets/data-and-queries#kiwi-data) block on the same page, so the dataset and the walkthrough that animates it share one source.
+
+The `why` map below lets a reader click a cell and read why it says what it says.
+
+A bare `table` fence renders when its body has `columns` or `rows` or `fromData`. Also spelled `kiwi-table`, `widget:table`, `relation`.
+
+````markdown
+```table id=sev caption="Severity ladder"
+columns:
+  - {key: sev, label: Sev, pk: true}
+  - {key: response, label: Response}
+  - {key: ack, label: Ack target, align: right}
+rows:
+  - {sev: SEV1, response: Page IM + exec bridge, ack: 5m}
+  - {sev: SEV2, response: Page on-call + team lead, ack: 15m}
+  - {sev: SEV3, response: "Slack #platform-oncall", ack: 1h}
+why:
+  SEV2.response: >
+    Team lead, not the exec bridge: a SEV2 that pulls in leadership stops
+    being a SEV2 and starts being a meeting.
+```
+````
+
+<Accordion title="All 26 keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `activeCells` | array or number or string | Cells written this step, as `"rowKey.colKey"` or `[rowKey, colKey]`. |
+| `activeColor` | string | Primary highlight color. Fixed across steps. |
+| `activeRows` | array or number or string | Row keys active this step. |
+| `ariaLabel` | string | Accessible name. Defaults to a summary derived from the data. Fixed across steps. |
+| `arrows` | array of object | Cell-to-cell references: `{from: "r.c", to: "r.c", label?, color?}`. Drawn as a ↳ glyph in the source cell, with the target in its tooltip — not a line. |
+| `caption` | string | Caption under the table. Fixed across steps. |
+| `columns` | array of object|string | `{key, label?, pk?, fk?: {table, column} \| "table.column", align?, width?, type?}`, or a bare key string. Omit to infer one column per key seen in the rows, in first-seen order. Fixed across steps. |
+| `deletedRows` | array or number or string | Rows removed this step, struck through. |
+| `dimCells` | array or number or string | Dimmed cells. |
+| `dimRows` | array or number or string | Dimmed row keys. |
+| `fromData` | string | Render the records of a `kiwi-data` block on the same page, by its kind. The dataset and the walkthrough that animates it then share one source. Fixed across steps. |
+| `highlightCells` | array or number or string | Secondary-highlighted cells. |
+| `highlightColor` | string | Secondary highlight color. Fixed across steps. |
+| `highlightCols` | array or number or string | Highlighted column keys — the join key, the column being scanned. |
+| `highlightRows` | array or number or string | Secondary-highlighted row keys. |
+| `insertedRows` | array or number or string | Rows added this step, drawn green with a `+` gutter. |
+| `maxHeight` | number | Scroll past this height, px. Default 420. Fixed across steps. |
+| `maxRows` | number | Render at most this many rows, then a "…n more" line. Ignored unless a non-negative number. Fixed across steps. |
+| `props` | any | Escape hatch for a widget prop whose name collides with a reserved key. |
+| `rowKey` | string | Column whose value identifies a row. Defaults to the `pk` column. Fixed across steps. |
+| `rows` | array of object | One object per row, keyed by column `key`. |
+| `selected` | array or number or string | Cells drawn as selected. |
+| `showIndices` | boolean | Unused; accepted so `table` and `matrix` bodies are interchangeable. Fixed across steps. |
+| `sort` | object or string | Sort indicator only: `{key, dir}` or a column key. Rows render in the order given. |
+| `why` | any | Cell key → explanation, revealed when the reader selects it. |
+| `widgetId` | string | Name for the inspect bus, for cross-widget linking. Fixed across steps. |
+
+</Accordion>
+
+## tree
+
+Binary, n-ary, and keyed trees. Nest nodes under `root:`, or use one of the shortcuts: `fromArray` builds a heap (and draws its backing array beside it), `parents` builds a union-find forest, and `keys` on a node turns it into a B-tree page.
+
+A bare `tree` fence renders when its body has `root` or `roots` or `parents` or `fromArray`. Also spelled `kiwi-tree`, `widget:tree`.
+
+````markdown
+```tree id=heap caption="Sift-down after popping the root"
+fromArray: [1, 3, 2, 7, 5, 9]
+steps:
+  - note: "Pop the root; move the last element up"
+    activeNodes: [0]
+  - note: "9 is bigger than both children — swap with the smaller, 2"
+    activeNodes: [0, 2]
+    highlightNodes: [1]
+  - note: "Heap property restored"
+    dimNodes: [0, 1, 2]
+```
+````
+
+<Accordion title="All 29 keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `activeColor` | string | Primary highlight color. Fixed across steps. |
+| `activeKeys` | object | Which key cells light inside a keyed page: `{nodeId: [keyIndex, …]}`. |
+| `activeNodes` | array or number or string | Node keys active this step. |
+| `animate` | boolean | Glide nodes to new positions when the tree changes. Default true. Fixed across steps. |
+| `ariaLabel` | string | Accessible name. Defaults to a summary derived from the data. Fixed across steps. |
+| `arity` | number | `fromArray` children per node. 2 (default) for a binary heap. Fixed across steps. |
+| `badges` | object | Badge per node key — subtree size, the range a segment-tree node covers. |
+| `dimNodes` | array or number or string | Dimmed (already processed) node keys. |
+| `edgeDirection` | `none` \| `down` \| `up` | Arrowheads on edges. "up" for parent pointers and union-find. Fixed across steps. |
+| `fromArray` | array | Build a complete heap from an array: ids are indices, children of `i` are `2i+1`/`2i+2`. Pair with an `array` fence and `link:` for the two-representation view. |
+| `ghostEdges` | array of object | Edges that no longer exist, drawn dashed: `{from, to, label?}` — the old link after a rotation. |
+| `hGap` | number | Horizontal gap between sibling subtrees, px. Fixed across steps. |
+| `highlightColor` | string | Secondary highlight color. Fixed across steps. |
+| `highlightEdges` | array or number or string | Child keys, or `"parent->child"`, whose edge lights up. |
+| `highlightNodes` | array or number or string | Secondary-highlighted node keys. |
+| `keyCell` | number | Width of one key cell in a keyed page, px. Default 30. Fixed across steps. |
+| `nextLinks` | array of object | Same-level arrows: `{from, to}` — next-right pointers, the B+-tree leaf chain. |
+| `nodeColors` | object | Base color per node key, e.g. one per connected component. |
+| `nodeSize` | number | Node diameter, px. Fixed across steps. |
+| `parents` | array or object | Parent pointers instead of nesting: `parents[i]` is the parent of `i`. Self, `null` or `-1` marks a root. Node keys are the indices or object keys. |
+| `pointers` | array of object | Labels next to nodes: `{value?\|id?, label, color?}`. |
+| `props` | any | Escape hatch for a widget prop whose name collides with a reserved key. |
+| `prunedNodes` | array or number or string | Node keys the search abandoned — drawn dashed and struck through. |
+| `root` | object | Nested node: `{value, id?, badge?, edgeLabel?, keys?, leaf?, left?, right?, children?}`. |
+| `roots` | array of object | Several trees side by side — a disjoint-set forest, a trie split per letter. |
+| `showEdgeLabels` | boolean | Show each node's `edgeLabel`. Default true. Fixed across steps. |
+| `showNulls` | boolean | Dashed empty slot on the missing side of a one-child binary node. Default true. Fixed across steps. |
+| `vGap` | number | Vertical gap between levels, px. Fixed across steps. |
+| `withArray` | boolean | With `fromArray`: also draw the backing array beside the tree, highlights kept in step. Default true. Fixed across steps. |
+
+</Accordion>
+
+## list
+
+A linked list. Each node's `next` defaults to the following node. `next: false` ends the list, and a number points back to that index, which is how you draw a cycle.
+
+A bare `list` fence renders when its body has `nodes`. Also spelled `kiwi-list`, `widget:list`, `linkedlist`, `linked-list`, `kiwi-linkedlist`.
+
+````markdown
+```list id=floyd caption="Floyd's cycle detection"
+nodes:
+  - {value: 1}
+  - {value: 2}
+  - {value: 3}
+  - {value: 4}
+  - {value: 5, next: 2}
+steps:
+  - note: "slow and fast both start at the head"
+    pointers: [{index: 0, label: slow}, {index: 0, label: fast}]
+  - note: "slow moves one, fast moves two"
+    pointers: [{index: 1, label: slow}, {index: 2, label: fast}]
+  - note: "fast has entered the cycle"
+    pointers: [{index: 2, label: slow}, {index: 4, label: fast}]
+  - note: "They meet inside the cycle — there is one"
+    pointers: [{index: 3, label: "slow,fast"}]
+    activeIndex: 3
+    breakpoint: true
+```
+````
+
+<Accordion title="All 13 keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `nodes` | array of object | **Required.** `{value, next?}`. `next` omitted or `true` means the following node, `false` means null, a number means that index — a cycle. |
+| `activeColor` | string | Primary highlight color. Fixed across steps. |
+| `activeIndex` | number | Index of the active node. |
+| `ariaLabel` | string | Accessible name. Defaults to a summary derived from the data. Fixed across steps. |
+| `dimIndices` | array or number or string | Dimmed indices. |
+| `doubly` | boolean | Draw a backward arrow beside each forward one. Fixed across steps. |
+| `edges` | array of object | Arcs over the chain: `{from, to, label?, side?: "above"\|"below"}` — random pointers, child links. |
+| `highlightColor` | string | Secondary highlight color. Fixed across steps. |
+| `highlightIndices` | array or number or string | Secondary-highlighted indices. |
+| `nodeWidth` | number | Node width, px. Fixed across steps. |
+| `pointers` | array of object | Named pointers: `{index, label, color?}` — `slow`, `fast`, `prev`, `curr`. |
+| `props` | any | Escape hatch for a widget prop whose name collides with a reserved key. |
+| `showNull` | boolean | Draw a null terminator. Default true. Fixed across steps. |
+
+</Accordion>
+
+## stack
+
+A LIFO stack, drawn bottom to top: monotonic stacks, bracket matching, call stacks, undo histories.
+
+A bare `stack` fence renders when its body has `values`. Also spelled `kiwi-stack`, `widget:stack`.
+
+````markdown
+```stack id=monotonic title=stack caption="Next greater element"
+values: []
+steps:
+  - note: "Push 2"
+    values: [2]
+  - note: "1 is smaller — push it too"
+    values: [2, 1]
+  - note: "5 pops everything smaller: 1 and 2 both get their answer"
+    values: [2, 1]
+    activeIndex: 1
+  - note: "Stack holds only 5"
+    values: [5]
+```
+````
+
+<Accordion title="All 17 keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `values` | array or string | **Required.** Items from the bottom of the stack to the top. |
+| `activeColor` | string | Primary highlight color. Fixed across steps. |
+| `activeIndex` | number | Index of the active item. Defaults to the top. |
+| `ariaLabel` | string | Accessible name. Defaults to a summary derived from the data. Fixed across steps. |
+| `dimIndices` | array or number or string | Dimmed indices. |
+| `empty` | string | Text shown when there are no items. Default "(empty)". Fixed across steps. |
+| `growth` | `top` \| `bottom` | Which end the top of the stack is drawn at. Default top. Fixed across steps. |
+| `highlightColor` | string | Secondary highlight color. Fixed across steps. |
+| `highlightIndices` | array or number or string | Secondary-highlighted indices. |
+| `itemHeight` | number | Item height, px. Fixed across steps. |
+| `itemWidth` | number | Item width, px. Fixed across steps. |
+| `maxHeight` | number | Scroll past this height, px. Default 300. Fixed across steps. |
+| `pointers` | array of object | Markers beside items: `{index, label, color?}`. |
+| `props` | any | Escape hatch for a widget prop whose name collides with a reserved key. |
+| `showIndices` | boolean | Show the index of each item. Default true. Fixed across steps. |
+| `title` | string | Caption above the stack. Fixed across steps. |
+| `topLabel` | string | Caption on the open end. Default "top". Fixed across steps. |
+
+</Accordion>
+
+## queue
+
+A FIFO queue: BFS frontiers, work queues, sliding windows. Set `layout: ring` to draw a circular buffer, where `front` and `back` wrapping past the end is the point.
+
+A bare `queue` fence renders when its body has `values`. Also spelled `kiwi-queue`, `widget:queue`, `ringbuffer`, `ring-buffer`.
+
+````markdown
+```queue id=ring caption="A ring buffer wrapping past the end"
+layout: ring
+capacity: 6
+values: [null, null, null, null, null, null]
+front: 0
+back: 0
+steps:
+  - note: "Empty: front and back coincide"
+    size: 0
+  - note: "Enqueue three; back advances"
+    values: [a, b, c, null, null, null]
+    back: 3
+    size: 3
+    activeIndices: [2]
+  - note: "Dequeue two; front advances, the slots are not cleared"
+    values: [a, b, c, null, null, null]
+    front: 2
+    back: 3
+    size: 1
+    dimIndices: [0, 1]
+  - note: "Enqueue four more — back wraps past the end to slot 1"
+    values: [g, h, c, d, e, f]
+    front: 2
+    back: 2
+    size: 6
+    activeIndices: [0, 1]
+```
+````
+
+<Accordion title="All 24 keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `values` | array | **Required.** Slot contents. In `ring` layout this is the whole buffer, with `null` for an empty slot. |
+| `activeColor` | string | Primary highlight color. Fixed across steps. |
+| `activeIndices` | array or number or string | Slots active this step. |
+| `ariaLabel` | string | Accessible name. Defaults to a summary derived from the data. Fixed across steps. |
+| `back` | number | Index one past the tail — where the next enqueue lands. |
+| `backLabel` | string | Label on the tail end. Default "back". Fixed across steps. |
+| `capacity` | number | Buffer size, at most 1024. Defaults to `values.length`. Fixed across steps. |
+| `dimIndices` | array or number or string | Dimmed slots. |
+| `empty` | string | Text shown when every slot is empty. Fixed across steps. |
+| `front` | number | Index of the head, wrapped into the buffer. Defaults to 0, where the front marker is drawn. |
+| `frontLabel` | string | Label on the head end. Default "front". Fixed across steps. |
+| `highlightColor` | string | Secondary highlight color. Fixed across steps. |
+| `highlightIndices` | array or number or string | Secondary-highlighted slots. |
+| `layout` | `horizontal` \| `ring` | Default horizontal. Fixed across steps. |
+| `pointers` | array of object | Extra markers beside slots: `{index, label, color?}`. In a ring the index wraps. |
+| `props` | any | Escape hatch for a widget prop whose name collides with a reserved key. |
+| `radius` | number | Ring radius, px. Defaults to whatever fits the slots, at least 86. Fixed across steps. |
+| `selected` | array or number or string | Slot indices drawn as selected. |
+| `showIndices` | boolean | Show slot indices. Default true. Fixed across steps. |
+| `size` | number | How many slots hold data, counted from `front`. Tells a full ring from an empty one when front and back coincide; slots outside the window draw as stale. |
+| `slotSize` | number | Slot size, px. Default 44. Fixed across steps. |
+| `title` | string | Caption above the queue. Fixed across steps. |
+| `why` | any | Slot index → explanation, revealed on select. |
+| `widgetId` | string | Name for the inspect bus. Fixed across steps. |
+
+</Accordion>
+
+## map
+
+Hash slots, chains, and probe paths. Without a `mode`, `slots` draw as chained buckets and `entries` as a plain dictionary. Set `mode: open` for open addressing with tombstones.
+
+A bare `map` fence renders when its body has `slots` or `entries`. Also spelled `kiwi-map`, `widget:map`, `hashmap`, `hashtable`, `kiwi-hashmap`.
+
+````markdown
+```map id=probe caption="Linear probing into a full-ish table"
+mode: open
+capacity: 8
+hashOf: {apple: 3, mango: 3}
+slots:
+  - null
+  - null
+  - null
+  - {key: apple, value: 1}
+  - null
+  - null
+  - null
+  - null
+steps:
+  - note: "h(mango) = 3, but slot 3 is taken by apple"
+    activeKey: mango
+    activeSlots: [3]
+    probePath: [3]
+  - note: "Probe forward: slot 4 is free"
+    activeKey: mango
+    activeSlots: [4]
+    probePath: [3, 4]
+  - note: "Inserted. α = 2/8 — plenty of headroom"
+    slots:
+      - null
+      - null
+      - null
+      - {key: apple, value: 1}
+      - {key: mango, value: 2}
+      - null
+      - null
+      - null
+```
+````
+
+<Accordion title="All 21 keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `activeColor` | string | Primary highlight color. Fixed across steps. |
+| `activeKey` | string or number | The key being inserted or looked up this step. |
+| `activeSlots` | array or number or string | Slots being written this step. |
+| `ariaLabel` | string | Accessible name. Defaults to a summary derived from the data. Fixed across steps. |
+| `capacity` | number | Slot count, 0–1024. Defaults to `slots.length`. |
+| `dimSlots` | array or number or string | Dimmed slots. |
+| `entries` | array or object | `[{key, value?}]` for `mode: "map"` — a frequency map, a seen-set. A plain `{key: value}` object works too. |
+| `hashOf` | object | Key → slot, shown as an `h(k)=i` badge beside the key in every mode. |
+| `highlightColor` | string | Secondary highlight color. Fixed across steps. |
+| `highlightSlots` | array or number or string | Secondary-highlighted slots. |
+| `mode` | `chain` \| `open` \| `map` | How to draw it: "chain" for buckets, "open" for open addressing with tombstones, "map" for an unordered dictionary. Inferred from `slots` / `entries`. Fixed across steps. |
+| `probePath` | array of number | Slots visited in order, numbered above the row and joined by arrows. |
+| `props` | any | Escape hatch for a widget prop whose name collides with a reserved key. |
+| `selected` | array or number or string | Slot indices drawn as selected; keys in `mode: "map"`. |
+| `showIndices` | boolean | Index captions under the slots. Default true. Fixed across steps. |
+| `showLoadFactor` | boolean | Show α = n/m: entries per slot for chaining, occupied slots for open addressing. Default true. Fixed across steps. |
+| `slots` | array | One entry per slot: `null` empty, `"DEL"` a tombstone, `{key, value?}` or a bare key, or a list of those for a chain. |
+| `slotWidth` | number | Slot width, px. Default 54. Fixed across steps. |
+| `tombstones` | array or number or string | Slots holding a tombstone, if not already `"DEL"`. |
+| `why` | any | Slot index (key in `mode: "map"`) → explanation, revealed on select. |
+| `widgetId` | string | Name for the inspect bus, for cross-widget linking. Fixed across steps. |
+
+</Accordion>
+
+## bits
+
+A value as labelled bits: bitmask DP, flag registers, permission sets, two's complement, IEEE-754 layouts. `fields` brackets named bit ranges, and `decode` chooses how the summary row reads the pattern.
+
+A bare `bits` fence renders when its body has `value`. Also spelled `kiwi-bits`, `widget:bits`, `bitmask`.
+
+````markdown
+```bits id=subsets caption="Bitmask DP: visiting city 2"
+bits: 4
+labels: [A, B, C, D]
+steps:
+  - note: "Start at A only"
+    value: 1
+    activeBits: [0]
+  - note: "Add C to the visited set"
+    value: 5
+    activeBits: [2]
+    readBits: [0]
+  - note: "All four visited — the subproblem is complete"
+    value: 15
+    activeBits: [1, 3]
+```
+````
+
+<Accordion title="All 18 keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `value` | number or string | **Required.** The value to show. A number, or a `"0x…"` / `"0b…"` string for 64-bit patterns a JS number cannot hold exactly. |
+| `activeBits` | array or number or string | Bit positions being set or tested this step. |
+| `activeColor` | string | Primary highlight color. Fixed across steps. |
+| `ariaLabel` | string | Accessible name. Defaults to a summary derived from the data. Fixed across steps. |
+| `arrows` | array of object | Arcs between bit positions: `{from, to, label?, dashed?}`. |
+| `bits` | number | How many bits to draw. Defaults to the value's bit length. Fixed across steps. |
+| `cellSize` | number | Cell size, px. Fixed across steps. |
+| `decode` | `uint` \| `int` \| `twos` \| `ieee32` \| `ieee64` \| `hex` \| `oct` \| `raw` | How to read the pattern in the summary row. A list shows several readings at once. Default uint. |
+| `fields` | array of object | Named bit ranges drawn as brackets under the row: `{from, to, label, color?}` — a float's sign, exponent and mantissa; a flags register; a packed struct. Each bracket shows the field's value. |
+| `highlightBits` | array or number or string | Secondary-highlighted bit positions. |
+| `highlightColor` | string | Secondary highlight color. Fixed across steps. |
+| `label` | string | Row title, e.g. `mask`. |
+| `labels` | array | What each bit stands for, indexed by bit position (bit 0 = least significant). |
+| `lsbFirst` | boolean | Draw bit 0 on the left. Default false (most significant first). Fixed across steps. |
+| `pointers` | array of object | Pointers by bit position: `{bit, label, color?, side?}`. |
+| `props` | any | Escape hatch for a widget prop whose name collides with a reserved key. |
+| `readBits` | array or number or string | Bit positions read by this step. |
+| `showSummary` | boolean | Show the decimal value and popcount beside the bits. Default true. Fixed across steps. |
+
+</Accordion>
+
+## memory
+
+Frames on the left, heap objects on the right, pointers between them: aliasing, mutation, closures, recursion. The props follow the Python Tutor trace format, so a recorded trace drops straight in. A frame variable written as `[REF, id]` points into the heap.
+
+A bare `memory` fence renders when its body has `frames` or `heap`. Also spelled `kiwi-memory`, `widget:memory`, `heap`, `stack-heap`.
+
+````markdown
+```memory id=alias caption="Why mutating b changed a"
+frames:
+  - name: "<module>"
+    vars: {a: [REF, 1], b: [REF, 1]}
+heap:
+  1: [LIST, 1, 2, 3]
+steps:
+  - note: "a = [1, 2, 3] allocates one list"
+    frames:
+      - {name: "<module>", vars: {a: [REF, 1]}}
+    activeIds: [1]
+  - note: "b = a copies the pointer, not the list — both names are the one object"
+    frames:
+      - {name: "<module>", vars: {a: [REF, 1], b: [REF, 1]}}
+    activeIds: [1]
+  - note: "b.append(4) mutates that object, so a sees it too"
+    heap:
+      1: [LIST, 1, 2, 3, 4]
+    activeIds: [1]
+    breakpoint: true
+```
+````
+
+<Accordion title="All 15 keys">
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `activeColor` | string | Primary highlight color. Fixed across steps. |
+| `activeFrame` | string or number | Which frame is executing: a frame `id`, or a number for its index in `frames`. Defaults to the innermost. |
+| `activeIds` | array or number or string | Heap ids to emphasise this step. |
+| `ariaLabel` | string | Accessible name. Defaults to a summary derived from the data. Fixed across steps. |
+| `dimIds` | array or number or string | Dimmed heap ids — garbage, or a frame about to return. |
+| `frames` | array of object | Call stack, outermost first: `{name, id?, vars: {k: value}, order?, returned?, active?}`. A value of `[REF, id]` points into the heap. |
+| `framesLabel` | string | Caption above the frames column. Default "Frames". Fixed across steps. |
+| `heap` | object | Objects by id, tagged: `["LIST", 1, 2]`, `["DICT", ["k", 1]]`, `["INSTANCE", "Node", ["val", 1]]`, `["TUPLE", …]`, `["SET", …]`. An untagged `{field: value}` draws as an object's fields. |
+| `heapLabel` | string | Caption above the heap column. Default "Objects". Fixed across steps. |
+| `highlightColor` | string | Secondary highlight color. Fixed across steps. |
+| `highlightIds` | array or number or string | Secondary-highlighted heap ids. |
+| `inlinePrimitives` | boolean | Draw a frame variable's primitive inside its slot. Default true; `false` boxes each one on the heap with an arrow, Python Tutor's "render all objects on the heap". Fixed across steps. |
+| `props` | any | Escape hatch for a widget prop whose name collides with a reserved key. |
+| `why` | any | Heap id → explanation, revealed on select. |
+| `widgetId` | string | Name for the inspect bus. Fixed across steps. |
+
+</Accordion>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Widgets overview" icon="puzzle-piece" href="/concepts/widgets">
+    Fence names, steps, playback, and validation.
+  </Card>
+  <Card title="Charts and plots" icon="chart-line" href="/widgets/charts">
+    plot, bars, numberline, plane, timeline, and more.
+  </Card>
+  <Card title="Diagrams" icon="diagram-project" href="/widgets/diagrams">
+    graph, sequence, steps, Mermaid, and D2.
+  </Card>
+  <Card title="Data and queries" icon="database" href="/widgets/data-and-queries">
+    `kiwi-data` records that a `table` can animate.
+  </Card>
+</CardGroup>

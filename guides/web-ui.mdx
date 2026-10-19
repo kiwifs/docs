@@ -1,160 +1,247 @@
 ---
 title: "Web UI"
-description: "Browse, edit, search, and visualize your knowledge base in the embedded KiwiFS web UI."
+description: "Browse, edit, search, and restructure your knowledge base in the web UI built into the kiwifs binary."
 icon: "window"
 ---
 
-KiwiFS ships a full **web UI** embedded in the Go binary. Open `http://localhost:3333` after `kiwifs serve` — no separate install.
-
-## Features
-
-<CardGroup cols={2}>
-  <Card title="File tree" icon="folder-tree">
-    Expand, collapse, drag-drop, and context menu on markdown files.
-  </Card>
-  <Card title="Editor" icon="pen-to-square">
-    Source-preserving BlockNote editor. Keeps on-disk formatting stable.
-  </Card>
-  <Card title="Search" icon="magnifying-glass">
-    **Cmd+K** opens global BM25 search. Semantic results appear when vector search is configured.
-  </Card>
-  <Card title="Graph view" icon="diagram-project">
-    Force-directed wiki-link network.
-  </Card>
-  <Card title="Bases" icon="table">
-    Saved DQL queries with table, cards, list, and map layouts.
-  </Card>
-  <Card title="Canvas" icon="object-group">
-    Interactive Flow diagrams from `.canvas.json` files.
-  </Card>
-  <Card title="Whiteboard" icon="pen">
-    Excalidraw sketches in `.excalidraw.md` files.
-  </Card>
-  <Card title="Kanban" icon="bars-progress">
-    Boards driven by workflow state machines.
-  </Card>
-  <Card title="Comments" icon="comment">
-    Inline annotations on specific lines.
-  </Card>
-  <Card title="Data sources" icon="database">
-    Saved import connections with auto-sync.
-  </Card>
-  <Card title="Analytics" icon="chart-line">
-    Views, searches, content gaps, and trend charts.
-  </Card>
-  <Card title="Publish" icon="globe">
-    Public reader URLs at `/p/{path}`.
-  </Card>
-</CardGroup>
+`kiwifs serve` includes a full web UI. Open `http://localhost:3333`; there is nothing else to install. Everything you do in it goes through the same write pipeline as the API, so every save is a git commit and shows up in search right away.
 
 ## Layout
 
-The UI uses a three-pane layout:
-
-| Pane | Contents |
+| Area | What's there |
 | --- | --- |
-| **Sidebar** | File tree, space switcher (multi-space mode) |
-| **Main** | Page view or editor |
-| **Panels** | Backlinks, ToC, comments, page view counts |
+| **Header** | Sidebar toggle, **Search pages…**, **New page**, view buttons, light/dark toggle |
+| **Sidebar** | Space switcher, **Pinned**, **Starred**, **Recent**, and the **Pages** tree with **Filter pages…** |
+| **Page** | Rendered markdown with author, last modified, comment count, reading time, and view count under the title |
+| **On this page** | Table of contents, on screens 1280 px and wider |
+| **Footer** | **My Notes**, comments, and **Backlinks** |
 
-## File tree
+On screens narrower than 768 px, the sidebar becomes an overlay that closes when you open a page.
 
-The sidebar file tree supports expand/collapse, drag-and-drop reordering, and context menus for rename, duplicate, move, and delete. You can drag files from your operating system into the tree to import them as markdown pages.
+## Keyboard shortcuts
 
-## Toolbar views
+Press **Mod+/** to see every shortcut. Mod is Cmd on macOS and Ctrl elsewhere.
 
-Beyond the page editor, the header toolbar opens full-screen views:
-
-| Button | View |
+| Shortcut | Action |
 | --- | --- |
-| **Knowledge graph** | Force-directed wiki-link network |
-| **Bases** | Saved DQL queries with table, cards, list, or map layouts |
-| **Canvas** | Interactive Flow editor for `.canvas.json` files |
-| **Whiteboard** | Excalidraw hub for `.excalidraw.md` files |
-| **Timeline** | Recent git-backed activity |
-| **Kanban** | Workflow boards grouped by state |
-| **Data sources** | Saved import connections and sync controls |
+| `Mod+K` | Search |
+| `Mod+N` | New page |
+| `Mod+E` | Toggle editor |
+| `Mod+S` | Save and close the editor (the editor also autosaves after 2 seconds) |
+| `Mod+Shift+E` | Switch between Visual and Source while editing |
+| `Mod+B` | Toggle sidebar |
+| `Mod+Alt+F` | Focus the tree filter |
+| `Mod+G` | Knowledge graph |
+| `Mod+Shift+B` | Bases |
+| `Mod+Shift+T` | Timeline |
+| `Mod+Shift+W` | Kanban |
+| `Mod+Z` | Undo the last file operation in the tree (when not editing) |
+| `Escape` | Close overlay or cancel |
+| `Mod+/` | Keyboard shortcuts |
 
-See [Canvas](/concepts/canvas), [Whiteboard](/concepts/whiteboard), and [Import connections](/import/connections).
+### Customize shortcuts
 
-## Engagement metrics
+Rebind actions in `.kiwi/keybindings.json` or inline in `config.toml`. Inline config wins over the file, and unknown actions or invalid chords are ignored.
 
-When analytics tracking is enabled, page view counts appear in the page header. The `kiwifs analytics` CLI command and `GET /api/kiwi/analytics` REST endpoint also report engagement data — top viewed pages and failed searches that indicate content gaps. See [Analytics API](/api/analytics).
+<CodeGroup>
+```json .kiwi/keybindings.json
+{
+  "toggle_kanban": "Mod+Shift+J",
+  "graph": "Mod+Shift+G"
+}
+```
 
-## Page view and editor
+```toml .kiwi/config.toml
+[ui.keybindings]
+toggle_kanban = "Mod+Shift+J"
+```
+</CodeGroup>
+
+Action names are `search`, `new_page`, `toggle_editor`, `save`, `toggle_sidebar`, `graph`, `toggle_bases`, `toggle_timeline`, `toggle_kanban`, `toggle_mode`, `shortcuts_help`, `undo`, `focus_tree_filter`, and `close_overlay`. `GET /api/kiwi/keybindings` returns the active bindings and any conflicts; the shortcuts dialog shows a warning when two actions share a chord.
+
+## Search
+
+**Mod+K** opens the search palette. Each query runs full-text search and, when [vector search](/concepts/search) is configured, semantic search at the same time, and merges the results.
+
+- Narrow results with folder chips and the **7 days**, **30 days**, and **90 days** chips.
+- Type `field:value` to filter by frontmatter, for example `status:draft` or `tag:billing`.
+- With no matches, the palette suggests a spelling (**Did you mean: …?**).
+
+## Pages and the file tree
+
+- **New page** opens a dialog with a **Path** and a **Template**: **Blank page** or any template in `.kiwi/templates/`.
+- Right-click a page for **Open**, **Duplicate**, **Rename**, **Move**, **Delete**, and publish actions. Right-click a folder for **New page in …**, **Upload files to …**, **Rename**, **Move**, and **Delete folder**.
+- Drag files from your desktop onto the tree to upload them.
+- Click a missing wiki link (tooltip **Missing: … — click to create**) to create the page.
+- **Previous** and **Next** at the bottom of a page follow the nearest `_book.yaml` (a `parts:` list). Without one, they follow the folder's files, with `_index.md` first.
+
+<Tip>
+To move pages and keep every link working, use [Restructure](#restructure-pages) or the tree's **Move**, both of which rewrite links. The **Move / Rename** item in the page's **More actions** menu copies the file to the new path and deletes the old one without rewriting links.
+</Tip>
+
+## Editor
+
+Click **Edit** (or press **Mod+E**) to edit the current page. The editor has two modes, chosen with the **Visual** | **Source** toggle:
 
 <Tabs>
-  <Tab title="View mode">
-    Rendered markdown with wiki links, Mermaid diagrams, charts, kanban blocks, callouts, tabs, columns, and other rich widgets. Syntax-highlighted code blocks use Shiki with line highlights and titles.
+  <Tab title="Visual">
+    A block editor. Type `/` for commands, including **Wiki link**, **Info callout**, **Warning callout**, **Error callout**, and one entry per widget. Type `[` to link to a page.
+
+    Visual mode may reformat some markdown on save. If a page can't be opened visually, KiwiFS offers **Back to Source**.
   </Tab>
-  <Tab title="Edit mode">
-    Source-preserving editor (BlockNote-based). Slash commands for templates and widgets. Drag-drop images. Markdown source mode available via toggle.
-  </Tab>
-  <Tab title="History">
-    Git versions, unified diff, and one-click restore from the versioning panel.
+  <Tab title="Source">
+    A markdown source editor that keeps your formatting byte-for-byte. Type `/` for **Table**, **Todo**, **Code block**, **D2 diagram**, **Quote**, **Quiz**, **Frontmatter**, and widget fences. Type `[[` to autocomplete page names. While the cursor is inside a widget fence, a **Widget preview** pane renders it live.
   </Tab>
 </Tabs>
 
-## Rich blocks and widgets
+- The editor autosaves 2 seconds after you stop typing and shows **Unsaved**, **Saving…**, **Saved**, or **Error**.
+- **Save & Close** saves and returns to the rendered page.
+- Switching modes with unsaved changes asks whether to **Save & switch** or **Switch without saving**.
+- The **Frontmatter** section above the body edits YAML frontmatter.
+- KiwiFS remembers the mode you used last.
 
-Pages can embed interactive blocks using fenced code blocks. These render as rich components in the web UI and degrade to plain code in other markdown viewers.
+Add your own slash commands that insert a template page:
 
-| Block | What it renders |
+```toml .kiwi/config.toml
+[[ui.editor.slash_commands]]
+id = "incident"
+label = "Incident report"
+icon = "siren"            # a Lucide icon name
+description = "Insert the incident template"
+template = ".kiwi/templates/incident.md"
+```
+
+<Note>
+Saves use the file's ETag. If someone else changed the page since you opened it, the save fails with a `409` error. Copy your changes, reload the page, and edit again.
+</Note>
+
+## History
+
+Click **History** on a page to see its git versions. Choose **Diff** for a word-level diff against the previous version, or **Blame** for line-by-line authorship. **Restore** writes an older version back as a new commit.
+
+## Views
+
+The header buttons open full-screen views. Only one is open at a time.
+
+| Button | View | Feature key |
+| --- | --- | --- |
+| **Knowledge graph** | Wiki-link and typed-link network | `graph` |
+| **Bases** | Saved DQL queries as tables, cards, lists, or maps | `bases` |
+| **Canvas** | Spatial diagrams in `.canvas` files | `canvas` |
+| **Whiteboard** | Excalidraw sketches | `whiteboard` |
+| **Timeline** | Recent commits, filterable by actor, path prefix, and time | `timeline` |
+| **Kanban** | Workflow boards grouped by state | `kanban` |
+| **Data sources** | Import connections and sync controls | `data_sources` |
+
+See [Bases](/concepts/bases-views), [Canvas](/concepts/canvas), [Whiteboard](/concepts/whiteboard), and [Workflows](/concepts/workflows).
+
+### Knowledge graph
+
+The graph shows every page and link in the knowledge base.
+
+- **Highlight...** searches for nodes. **All folders** and **All tags** filter the graph.
+- **Mode** switches between 2D and 3D.
+- **Size by PageRank**, **Color by community**, and **Show links** change how nodes and edges are drawn.
+- **Link types** filters edges: **wiki-link** or any typed frontmatter relation, such as `supersedes`.
+- **Find path** shows the shortest path between two pages you click.
+- Click a node to open its page.
+
+## Restructure pages
+
+**Restructure** moves, renames, and merges pages as one commit without breaking links. Open it from the **Restructure: move and merge pages** icon in the sidebar's **Pages** header.
+
+<Steps>
+  <Step title="Write a manifest">
+    Enter moves, merges, and edits in **Manifest (YAML or JSON)**:
+
+    ```yaml
+    moves:
+      - from: drafts
+        to: archive/drafts/
+    merges:
+      - from: faq/duplicate.md
+        into: faq/canonical.md
+    delete_empty_dirs: true
+    ```
+  </Step>
+  <Step title="Plan and review">
+    Click **Plan**. Nothing changes yet. The plan shows **Before** and **After** trees, how many links will be rewritten, any errors under **Cannot apply**, warnings under **Check before applying**, and a diff for every file under **Changes, file by file**. Uncheck an item to leave it out.
+  </Step>
+  <Step title="Apply">
+    Click **Apply**. The result names the commit, and **Undo** reverts it.
+  </Step>
+</Steps>
+
+When an agent proposes a restructuring over MCP that needs a person's sign-off, it appears under **Waiting for your approval** as **… wants to restructure**. Review it the same way and click **Approve for …**. If files were moved outside KiwiFS (on disk, over NFS, or over WebDAV), **Moved outside KiwiFS** offers **Review the fix** to repair the links.
+
+The same plans are available from the CLI with `kiwifs refactor` and to agents through `kiwi_refactor_plan` and `kiwi_refactor_apply`. See [Refactor](/concepts/refactor) for the full manifest format.
+
+## Import data
+
+Open **Data sources**, then **Connect a source**. On a fresh knowledge base, the welcome page also offers **Import from a source**.
+
+| Group | Sources |
 | --- | --- |
-| `kiwi-chart` | Bar, line, area, pie, radar, scatter charts |
-| `kiwi-query` | Inline DQL tables and lists |
-| `kiwi-kanban` | Inline kanban boards |
-| `kiwi-playground` | Interactive sliders, toggles, selects |
-| `kiwi-app` | Sandboxed HTML/CSS/JS |
-| `kiwi-diff` | Annotated inline diffs |
-| `kiwi-progress` | Progress bars and gauges |
-| `kiwi-color` | Color palette swatches |
-| `kiwi-calc` | Back-of-envelope math with sliders |
-| `kiwi-steps` | Stepped Mermaid walkthroughs |
-| `kiwi-data` | Structured records (`FROM RECORDS`) |
-| `:::claim` | Provenance badges on assertions |
-| `:::figure` / `![[…]]` | Wide/pinned figures and canvas embeds |
-| `mermaid` | Flowcharts, sequence diagrams |
-| `widget:live` | React Live code |
-| `widget:code` | Python via Pyodide |
+| Files | CSV, JSON, JSON Lines, YAML, BibTeX, Excel, SQLite |
+| Documents | Markdown, Obsidian |
+| Databases | PostgreSQL, MySQL, MongoDB |
+| Cloud services | Firestore, Firebase RTDB, Notion, Airtable |
 
-Container directives `:::tabs` and `:::columns` provide layout control. GitHub-style callouts (`> [!NOTE]`, `> [!WARNING]`, etc.) render as styled admonitions with foldable variants.
+The wizard walks through the source, the connection (upload a file, or give a server path such as an Obsidian **Vault path**), a **Target folder**, **Field mapping** with types inferred from up to 100 sample rows, and a **Preview** of five records before you click **Import**. Syncable sources then show **Sync now** and **Pause sync** in Data sources.
 
-See [Widgets and block types](/concepts/widgets) for syntax and examples.
+See [Import connections](/import/connections).
 
-## Wiki navigation
+## Reading features
 
-- `[[wiki links]]` render as clickable links; unresolved links are highlighted.
-- **Backlinks** panel lists pages linking to the current page.
-- **Graph** view visualizes the wiki-link network with link-type filtering.
-- **Reading order** — `_book.yaml` or frontmatter `order` drives prev/next pills at the bottom of the page.
+### Rich blocks and widgets
 
-## Clip URL
+Fenced code blocks render as interactive components: Mermaid and D2 diagrams, charts, DQL tables, calculators, and step-through widgets such as ```` ```array ````, ```` ```tree ````, and ```` ```graph ````. Other markdown viewers show them as plain code.
 
-**Clip URL** in the page actions menu fetches a public page and saves it as markdown under `clips/` (or a folder you choose). Same as `POST /api/kiwi/clip`.
+- **Mermaid** diagrams have zoom, **Reset**, fullscreen, and **SVG** / **PNG** download. Add `focus="A,B"` or `dim="C"` to the fence to highlight nodes.
+- **D2** diagrams are rendered on the server, with **Download SVG**.
+- **Step-through widgets** and `kiwi-steps` have playback controls: Space plays and pauses, the arrow keys step, and `r` resets. Widgets on one page can share a clock, and **Copy link to this step** links to a specific step.
 
-## Theme editor
+See [Widgets](/concepts/widgets) for every fence and its syntax.
 
-Open the theme editor from settings to override brand tokens, import/export a theme JSON, and persist it with `PUT /api/kiwi/theme`. Lock the theme for readers with `[ui] theme_locked = true`.
+### Quizzes
 
-## Publishing and PDF export
+A `[!quiz]` callout becomes an interactive question:
 
-Use **Publish** in the page header (or `POST /api/kiwi/publish`) to set `published: true` in frontmatter. Published pages are readable at `/p/{path}` with a themed reader view.
+```markdown
+> [!quiz single] Which port does KiwiFS serve on by default?
+> - [ ] 8080
+> - [x] 3333
+>   The REST API and web UI share it.
+> - [ ] 2049
+```
 
-The page actions menu also supports in-browser PDF export via Typst.
+Kinds are `single`, `multi`, `boolean`, `order`, `match`, and `short`. **Submit** grades the answer and shows **Correct** or **Not quite** with the explanation; short-answer quizzes use **Show answers** instead. A running score appears above the page, and your answers are saved for next time. Search indexes only the question, so answers never show up in snippets.
 
-See [Publishing](/concepts/publishing) and [Document export](/export/documents).
+### Progress tracker
 
-## Themes
+A ```` ```widget:tracker ```` block turns numbered folders such as `01-intro/` and `02-setup/` into a checklist. Mark pages complete with the circle next to each one, filter by **All**, **Todo**, or **Done**, and bookmark pages for review. Each folder starts collapsed; click its header to expand it. Progress is saved per user.
 
-Built-in themes: kiwi, ocean, forest, sunset, neutral. Users can switch unless locked:
+### Comments
+
+Select text on a page and click **+ Comment**. Comments can be resolved or deleted, and appear in the page footer.
+
+## Export and publish
+
+- **More actions** (the ⋯ button on a page) has **Export as Markdown** and **Export as PDF**. PDF export runs in your browser with Typst; wiki links become plain text and embeds are dropped. The first export downloads the Typst compiler from a CDN, so it needs internet access. For server-side PDF, HTML, or slides, use [Document export](/export/documents).
+- **Publish** sets `published: true` and makes the page readable at `/p/{path}`. A published page's button shows its view count, **Copy public link**, **View published page**, and **Unpublish**. Right-click a folder for **Publish folder**. See [Publishing](/concepts/publishing).
+
+## Spaces
+
+With [multiple spaces](/concepts/multi-space), a dropdown at the top of the sidebar lists each space with its file count. **New Space** creates one. Switching spaces closes open views and reloads the tree.
+
+## Customize the UI
 
 ```toml .kiwi/config.toml
 [ui]
 theme_locked = false
-start_page = "welcome"   # welcome | recent | dashboard | or a path
+start_page = "welcome"   # welcome | recent | dashboard | a page path
 
-[ui.features]
+[ui.features]            # all default to true
 edit = true
 history = true
 publish = true
@@ -166,51 +253,56 @@ timeline = true
 bases = true
 data_sources = true
 
+[ui.toolbar]
+views = ["graph", "bases", "kanban"]   # order and subset of view buttons
+
+[ui.branding]
+name = "Acme Wiki"
+logo_url = "/raw/assets/logo.svg"
+welcome_title = "Welcome to the Acme wiki"
+
+[ui.sidebar]
+pinned = ["index.md", "handbook/onboarding.md"]
+
 [ui.tags]
 banner = ["status", "difficulty", "tags"]
 hide = ["internal_id"]
 ```
 
-Set a feature to `false` to hide that button from the chrome. Banner tags appear as chips under the page title.
+<AccordionGroup>
+  <Accordion title="Features">
+    Set a key under `[ui.features]` to `false` to hide that part of the UI. `edit = false` hides **New page**, **Edit**, **Restructure**, and the **More actions** menu, which also removes the export items. These flags only hide UI; use [auth scopes](/guides/auth-tokens) to block writes.
+  </Accordion>
+  <Accordion title="Start page">
+    `welcome` shows the welcome screen, `recent` lists recently opened pages, and `dashboard` opens the first of `dashboard.md`, `pages/dashboard.md`, or `index.md`. Any other value is treated as a page path.
+  </Accordion>
+  <Accordion title="Themes">
+    KiwiFS includes five themes: Kiwi (the default), Neutral, Ocean, Sunset, and Forest, each with light and dark variants. The header toggles light and dark mode. Set a theme for everyone with `PUT /api/kiwi/theme`. `theme_locked = true` hides the toggle and blocks theme changes through the API. Add your own styles in `.kiwi/custom.css`.
+  </Accordion>
+  <Accordion title="Tags and properties">
+    `banner` lists frontmatter keys shown as chips under the title (default `["tags"]`). Clicking a chip searches for that value. Other frontmatter appears under **Properties**, except keys in `hide`. Color chips with `[ui.tags.colors]`, for example `easy = "emerald"`.
+  </Accordion>
+  <Accordion title="Sidebar">
+    `pinned` adds a **Pinned** section, `hidden` hides paths from the tree, and `[[ui.sidebar.sections]]` with `label` and `paths` adds labeled sections.
+  </Accordion>
+</AccordionGroup>
 
-Published pages at `/p/*` use a separate reader theme configurable via `PUT /api/kiwi/theme`.
-
-## Analytics
-
-When analytics tracking is enabled, the UI shows an analytics dashboard with page views, search analytics, content gaps, and trend charts. Per-page view counts appear in the page header.
-
-See [Analytics API](/api/analytics).
-
-## Keyboard shortcuts
-
-Configurable keyboard shortcuts for navigation, editing, and search. View and customize via `GET /api/kiwi/keybindings` or the settings panel.
-
-## Mobile
-
-The UI is responsive. Reading works well on phones; editing is best on desktop.
-
-## Related documentation
+## Related
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Install and run in 60 seconds.
+    Install and run KiwiFS.
   </Card>
   <Card title="Widgets" icon="puzzle-piece" href="/concepts/widgets">
-    Charts, kanban, playground, and other rich blocks.
+    Diagrams, charts, and step-through widgets.
   </Card>
   <Card title="Wiki links" icon="link" href="/concepts/wiki-links">
-    Syntax and backlink behavior.
+    Link syntax and backlinks.
   </Card>
-  <Card title="Bases" icon="table" href="/concepts/bases-views">
-    Saved views and DQL.
+  <Card title="Refactor" icon="arrows-split-up-and-left" href="/concepts/refactor">
+    Move and merge pages without breaking links.
   </Card>
-  <Card title="Canvas" icon="object-group" href="/concepts/canvas">
-    Spatial diagrams.
-  </Card>
-  <Card title="Whiteboard" icon="pen" href="/concepts/whiteboard">
-    Excalidraw sketches.
-  </Card>
-  <Card title="Storybook" icon="book-open" href="https://demo.kiwifs.com/storybook/">
-    Live component gallery.
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Every `[ui]` key.
   </Card>
 </CardGroup>

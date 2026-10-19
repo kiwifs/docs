@@ -1,53 +1,125 @@
 ---
 title: "Search"
-description: "Full-text, trust-ranked, vector, and metadata search endpoints."
+description: "Full-text, hybrid, trust-ranked, semantic, frontmatter, and structural-similarity search endpoints."
 icon: "magnifying-glass"
 ---
 
-KiwiFS provides multiple search strategies. You can use full-text search for keyword matching, vector search for semantic similarity, or metadata queries for structured filtering.
+Use these endpoints to find pages by keyword, meaning, frontmatter, or shape. Pick the one that fits the question:
+
+| Endpoint | Use it when |
+|---|---|
+| [`GET /search`](#full-text-search) | You have keywords. BM25 over SQLite FTS5, with a soft trust boost. Add `mode=hybrid` to fuse in vector results. |
+| [`GET /search/verified`](#trust-ranked-search) | You want verified and source-of-truth pages strongly preferred. |
+| [`GET /search/semantic`](#semantic-search) | You have a natural-language question and a vector index is configured. |
+| [`POST /brief`](#context-pack) | You want a token-budgeted pack of the most relevant sections in one call. |
+| [`GET /meta`](#frontmatter-query) | You want to filter pages by frontmatter values. |
+| [`GET /similar`](#similar-pages) | You want pages whose frontmatter is structurally closest to a page or a vector. |
+
+All paths are relative to `http://localhost:3333/api/kiwi`. For DQL queries and the link graph, see [Metadata and graph](/api/metadata).
 
 ## Full-text search
 
-BM25-ranked full-text search powered by SQLite FTS5.
+Run a BM25-ranked keyword search over page content.
+
+**`GET /api/kiwi/search`**
 
 <ParamField query="q" type="string" required>
-  Search query. Supports boolean operators and phrase matching.
+  Search query. See [query syntax](#query-syntax).
 </ParamField>
-<ParamField query="suggest_threshold" type="number">
-  Similarity threshold (0–1) for "did you mean?" suggestions when the query yields few results.
+<ParamField query="limit" type="integer" default="50">
+  Maximum results to return. Capped at `200`.
+</ParamField>
+<ParamField query="offset" type="integer" default="0">
+  Number of results to skip.
+</ParamField>
+<ParamField query="path_prefix" type="string">
+  Restrict results to paths that start with this prefix, for example `runbooks/`. `pathPrefix` is accepted as an alias.
+</ParamField>
+<ParamField query="mode" type="string" default="fts">
+  `fts` for BM25 only, or `hybrid` to fuse BM25 with vector search. See [hybrid search](#hybrid-search). Any other value returns `400`.
+</ParamField>
+<ParamField query="boost" type="string">
+  Set to `none` or `off` to disable the default trust boost.
+</ParamField>
+<ParamField query="scope" type="string">
+  Keep only pages whose frontmatter `scope` equals this value.
+</ParamField>
+<ParamField query="include_superseded" type="boolean" default="false">
+  Include pages with `memory_status: superseded`. They are excluded by default.
+</ParamField>
+<ParamField query="recency_weight" type="number" default="0">
+  Blend recency into ranking, from `0.0` (relevance only) to `1.0` (recency only). Values outside that range return `400`.
+</ParamField>
+<ParamField query="modifiedAfter" type="string">
+  RFC 3339 timestamp. Keep only pages modified after it, for example `2026-09-01T00:00:00Z`.
+</ParamField>
+<ParamField query="suggest_threshold" type="integer" default="3">
+  Maximum edit distance for "did you mean" title suggestions when the first page of results is empty. Capped at `10`.
 </ParamField>
 
 ```bash
-curl 'http://localhost:3333/api/kiwi/search?q=payment+timeout'
+curl 'http://localhost:3333/api/kiwi/search?q=payment+timeout&limit=10'
 ```
 
-```json
-[
-  {
-    "path": "concepts/payments.md",
-    "title": "Payments",
-    "snippet": "...handles <mark>payment</mark> retries after a <mark>timeout</mark>...",
-    "score": 4.82
-  }
-]
+<ResponseField name="query" type="string">The query as received.</ResponseField>
+<ResponseField name="limit" type="integer">The effective limit after defaults and caps.</ResponseField>
+<ResponseField name="offset" type="integer">The effective offset.</ResponseField>
+<ResponseField name="results" type="object[]">
+  Ranked results.
+  <Expandable title="result">
+    <ResponseField name="path" type="string">Page path relative to the knowledge root.</ResponseField>
+    <ResponseField name="matches" type="object[]">Matching lines, each with `line` (1-based) and `text`.</ResponseField>
+    <ResponseField name="score" type="number">Ranking score. Comparable only within one response.</ResponseField>
+    <ResponseField name="snippet" type="string">Highlighted excerpt, when available.</ResponseField>
+    <ResponseField name="permalink" type="string">Public URL of the page, when a public URL is configured.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="suggestions" type="object[]">
+  Present only when the query returned nothing at `offset=0`. Each entry has `query`, `path`, `title`, and `distance`.
+</ResponseField>
+
+```json Response
+{
+  "query": "payment timeout",
+  "limit": 10,
+  "offset": 0,
+  "results": [
+    {
+      "path": "concepts/payments.md",
+      "matches": [{ "line": 12, "text": "Retries happen after a payment timeout of 30s." }],
+      "score": 4.82,
+      "snippet": "...retries after a <mark>payment</mark> <mark>timeout</mark>...",
+      "permalink": "https://wiki.example.com/page/concepts/payments.md"
+    }
+  ]
+}
 ```
+
+Returns `400` when `q` is missing or a parameter is malformed. Returns `501` when `scope` is used on a non-SQLite search backend.
+
+<Note>
+By default results get a soft trust boost: `status: verified`, `source-of-truth: true`, and a `confidence` between 0 and 1 nudge a page up, while `status: deprecated` or `outdated` nudge it down. Requests that set `scope`, `include_superseded`, or `recency_weight` skip the boost.
+</Note>
 
 ### Query syntax
 
+Plain words are matched as an implicit AND, and punctuation such as hyphens is handled for you. If the query contains FTS5 syntax (quotes, parentheses, `*`, `^`, `:`, or uppercase `AND`/`OR`/`NOT`), KiwiFS passes it to FTS5 unchanged.
+
 | Syntax | Example | Behavior |
 |---|---|---|
-| Keywords | `payment timeout` | Match pages containing both terms |
-| Boolean AND | `payment AND timeout` | Explicit AND (same as space-separated) |
-| Boolean OR | `payment OR billing` | Match pages containing either term |
-| Boolean NOT | `payment NOT refund` | Exclude pages containing a term |
-| Phrase | `"payment timeout"` | Match the exact phrase |
+| Keywords | `payment timeout` | Pages containing both terms |
+| AND | `payment AND timeout` | Same as space-separated |
+| OR | `payment OR billing` | Pages containing either term |
+| NOT | `payment NOT refund` | Excludes pages containing the second term |
+| Phrase | `"payment timeout"` | The exact phrase |
+| Prefix | `auth*` | Terms starting with `auth` |
 
 <CodeGroup>
-```bash Boolean search
+```bash Boolean
 curl 'http://localhost:3333/api/kiwi/search?q=payment+AND+timeout'
 ```
 
-```bash Phrase search
+```bash Phrase
 curl 'http://localhost:3333/api/kiwi/search?q=%22payment+timeout%22'
 ```
 
@@ -56,102 +128,44 @@ curl 'http://localhost:3333/api/kiwi/search?q=payment+NOT+refund'
 ```
 </CodeGroup>
 
-## Trust-ranked search
-
-Search results weighted by trust signals in frontmatter. Pages marked as verified or source-of-truth rank higher.
-
-<ParamField query="q" type="string" required>
-  Search query (same syntax as full-text search).
-</ParamField>
-
-```bash
-curl 'http://localhost:3333/api/kiwi/search/verified?q=auth'
-```
-
-```json
-[
-  {
-    "path": "concepts/auth.md",
-    "title": "Authentication",
-    "snippet": "...OAuth2 <mark>auth</mark> flow...",
-    "score": 8.91,
-    "trust": {"status": "verified", "source-of-truth": true}
-  }
-]
-```
-
-<Tip>
-Add `status: verified` or `source-of-truth: true` to your page frontmatter to boost that page in trust-ranked results.
-</Tip>
-
-## Semantic search
-
-Vector similarity search using embeddings. Requires a vector search provider configured in `.kiwi/config.toml`.
-
-<ParamField body="query" type="string" required>
-  Natural language query.
-</ParamField>
-<ParamField body="limit" type="integer" default="10">
-  Maximum number of results to return.
-</ParamField>
-
-<CodeGroup>
-```bash POST
-curl -X POST 'http://localhost:3333/api/kiwi/search/semantic' \
-  -H "Content-Type: application/json" \
-  -d '{"query": "how does auth work?", "limit": 10}'
-```
-
-```bash GET
-curl 'http://localhost:3333/api/kiwi/search/semantic?query=how+does+auth+work&limit=10'
-```
-</CodeGroup>
-
-```json
-[
-  {
-    "path": "concepts/auth.md",
-    "title": "Authentication",
-    "snippet": "OAuth2 + JWT based authentication system...",
-    "similarity": 0.92
-  }
-]
-```
-
-<Note>
-Semantic search requires vector embeddings. Configure an embedder provider (OpenAI, Ollama, Cohere, etc.) in your `.kiwi/config.toml` under `[search.vector]`.
-</Note>
-
 ## Hybrid search
 
-Fuse FTS and semantic ranks with Reciprocal Rank Fusion. Degrades to lexical-only when no vector index exists.
+Fuse BM25 and vector rankings with Reciprocal Rank Fusion (RRF) on the same endpoint.
 
-<ParamField query="mode" type="string">
-  Set to `hybrid` to enable RRF fusion.
-</ParamField>
-<ParamField query="q" type="string" required>
-  Search query.
-</ParamField>
-<ParamField query="limit" type="integer" default="10">
-  Maximum number of results.
-</ParamField>
-<ParamField query="rrf_k" type="integer" default="60">
-  RRF constant. Higher values flatten rank differences.
+**`GET /api/kiwi/search?mode=hybrid`**
+
+Hybrid mode accepts `q`, `limit`, `offset`, `path_prefix`, and `boost` from [full-text search](#full-text-search), plus:
+
+<ParamField query="rrf_k" type="number" default="60">
+  RRF rank constant. Must be greater than 0. Smaller values let one engine's top hit dominate; larger values flatten rank differences.
 </ParamField>
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/search?mode=hybrid&q=payment+timeout&limit=10'
 ```
 
-```json
+<ResponseField name="mode" type="string">Always `hybrid`.</ResponseField>
+<ResponseField name="engines" type="string[]">
+  Engines that contributed: `["fts", "semantic"]`, or `["fts"]` when no vector index is configured. The request still succeeds with `200` in that case.
+</ResponseField>
+<ResponseField name="rrf_k" type="number">The RRF constant used.</ResponseField>
+<ResponseField name="results" type="object[]">
+  Each result has `path`, `matches`, `score` (the RRF score), `snippet`, `permalink`, `fts_rank`, and `semantic_rank`. A rank of `0` means that engine did not return the page.
+</ResponseField>
+
+```json Response
 {
   "query": "payment timeout",
+  "mode": "hybrid",
+  "limit": 10,
+  "offset": 0,
   "engines": ["fts", "semantic"],
+  "rrf_k": 60,
   "results": [
     {
       "path": "concepts/payments.md",
-      "title": "Payments",
       "score": 0.032,
+      "snippet": "...retries after a payment timeout...",
       "fts_rank": 1,
       "semantic_rank": 3
     }
@@ -159,9 +173,146 @@ curl 'http://localhost:3333/api/kiwi/search?mode=hybrid&q=payment+timeout&limit=
 }
 ```
 
+## Trust-ranked search
+
+Run the same BM25 search, then re-rank hard by trust signals in frontmatter.
+
+**`GET /api/kiwi/search/verified`**
+
+Compared with the default soft boost, `status: verified` pages get a 2x multiplier, `source-of-truth: true` pages 3x, `status: outdated` 0.3x, and `status: deprecated` 0.1x. Results are re-ranked, not filtered: every BM25 hit is still returned.
+
+<ParamField query="q" type="string" required>
+  Search query, using the same [syntax](#query-syntax) as full-text search.
+</ParamField>
+<ParamField query="limit" type="integer" default="50">
+  Maximum results. Capped at `200`.
+</ParamField>
+<ParamField query="offset" type="integer" default="0">
+  Number of results to skip.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/search/verified?q=auth'
+```
+
+The response has the same shape as [full-text search](#full-text-search).
+
+```json Response
+{
+  "query": "auth",
+  "limit": 50,
+  "offset": 0,
+  "results": [
+    {
+      "path": "concepts/auth.md",
+      "matches": [{ "line": 3, "text": "OAuth2 auth flow with refresh tokens." }],
+      "score": 8.91,
+      "snippet": "...OAuth2 <mark>auth</mark> flow..."
+    }
+  ]
+}
+```
+
+Returns `501` when the search backend is not SQLite.
+
+<Tip>
+Add `status: verified` or `source-of-truth: true` to a page's frontmatter to lift it in trust-ranked results.
+</Tip>
+
+## Semantic search
+
+Find pages by meaning using vector embeddings.
+
+**`GET /api/kiwi/search/semantic`** or **`POST /api/kiwi/search/semantic`**
+
+Send parameters as query parameters, or as a JSON body on `POST`. Body values win over query parameters.
+
+<ParamField body="query" type="string" required>
+  Natural-language query. On `GET`, pass it as `q`.
+</ParamField>
+<ParamField body="topK" type="integer" default="10">
+  Maximum results to return.
+</ParamField>
+<ParamField body="offset" type="integer" default="0">
+  Number of results to skip.
+</ParamField>
+<ParamField body="scope" type="string">
+  Keep only pages whose frontmatter `scope` equals this value.
+</ParamField>
+<ParamField body="modifiedAfter" type="string">
+  RFC 3339 timestamp. Keep only pages modified after it. Body only.
+</ParamField>
+
+<CodeGroup>
+```bash POST
+curl -X POST 'http://localhost:3333/api/kiwi/search/semantic' \
+  -H "Content-Type: application/json" \
+  -d '{"query": "how does auth work?", "topK": 5}'
+```
+
+```bash GET
+curl 'http://localhost:3333/api/kiwi/search/semantic?q=how+does+auth+work&topK=5'
+```
+</CodeGroup>
+
+<ResponseField name="query" type="string">The query as received.</ResponseField>
+<ResponseField name="topK" type="integer">The effective result cap.</ResponseField>
+<ResponseField name="offset" type="integer">The effective offset.</ResponseField>
+<ResponseField name="results" type="object[]">
+  Ranked chunks.
+  <Expandable title="result">
+    <ResponseField name="path" type="string">Page path.</ResponseField>
+    <ResponseField name="chunkIdx" type="integer">Index of the matching chunk within the page.</ResponseField>
+    <ResponseField name="score" type="number">Similarity score. Higher is closer.</ResponseField>
+    <ResponseField name="snippet" type="string">Text of the matching chunk.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json Response
+{
+  "query": "how does auth work?",
+  "topK": 5,
+  "offset": 0,
+  "results": [
+    {
+      "path": "concepts/auth.md",
+      "chunkIdx": 0,
+      "score": 0.92,
+      "snippet": "OAuth2 + JWT based authentication system..."
+    }
+  ]
+}
+```
+
+Returns `400` when no query is given or `modifiedAfter` is not RFC 3339. Returns `503` when semantic search is not enabled.
+
+<Note>
+Semantic search needs an embedder and vector store. Configure them under `[search.vector]` in `.kiwi/config.toml`. See [Configuration](/configuration#search).
+</Note>
+
 ## Context pack
 
-Retrieve pages and pack extracted sections into a token budget. The pack never summarizes. Overflow is listed so you can see what was dropped.
+Retrieve the most relevant pages and pack them, whole or by section, into a token budget.
+
+**`POST /api/kiwi/brief`**
+
+The pack uses hybrid retrieval and counts real BPE tokens. Content is never summarized or rewritten. Anything that did not fit is listed in `dropped` with its token cost, so you can fetch it explicitly or raise the budget.
+
+<ParamField body="query" type="string" required>
+  Retrieval query. You can also pass it as the `q` query parameter.
+</ParamField>
+<ParamField body="budget_tokens" type="integer" default="4000">
+  Hard token ceiling. A negative value returns an empty pack whose `dropped` list still names every candidate, which lets you ask what a query would cost.
+</ParamField>
+<ParamField body="max_pages" type="integer" default="20">
+  Maximum candidate pages considered before packing.
+</ParamField>
+<ParamField body="path_prefix" type="string">
+  Restrict retrieval to paths under this prefix.
+</ParamField>
+<ParamField body="encoding" type="string" default="cl100k_base">
+  BPE vocabulary used to count tokens.
+</ParamField>
 
 ```bash
 curl -X POST 'http://localhost:3333/api/kiwi/brief' \
@@ -169,47 +320,210 @@ curl -X POST 'http://localhost:3333/api/kiwi/brief' \
   -d '{"query": "how does auth work?", "budget_tokens": 4000, "max_pages": 20}'
 ```
 
-<ParamField body="query" type="string" required>
-  Retrieval query.
-</ParamField>
-<ParamField body="budget_tokens" type="integer">
-  Maximum tokens in the packed context.
-</ParamField>
-<ParamField body="max_pages" type="integer">
-  Cap on candidate pages before packing.
-</ParamField>
-<ParamField body="path_prefix" type="string">
-  Restrict retrieval to a directory.
-</ParamField>
+<ResponseField name="query" type="string">The query as received.</ResponseField>
+<ResponseField name="budget_tokens" type="integer">The effective budget.</ResponseField>
+<ResponseField name="used_tokens" type="integer">Tokens used by `items`.</ResponseField>
+<ResponseField name="tokenizer" type="string">Encoding used to count tokens.</ResponseField>
+<ResponseField name="candidates" type="integer">Pages retrieval offered before budgeting.</ResponseField>
+<ResponseField name="items" type="object[]">
+  Packed content in relevance order.
+  <Expandable title="item">
+    <ResponseField name="path" type="string">Page path.</ResponseField>
+    <ResponseField name="title" type="string">Page title, when known.</ResponseField>
+    <ResponseField name="heading" type="string">Section heading. Empty when the whole page is included.</ResponseField>
+    <ResponseField name="content" type="string">Verbatim page or section text.</ResponseField>
+    <ResponseField name="tokens" type="integer">Token count of `content`.</ResponseField>
+    <ResponseField name="score" type="number">Retrieval score.</ResponseField>
+    <ResponseField name="fts_rank" type="integer">Rank from full-text search, `0` if absent.</ResponseField>
+    <ResponseField name="semantic_rank" type="integer">Rank from semantic search, `0` if absent.</ResponseField>
+    <ResponseField name="partial" type="boolean">`true` when some of the page's sections were left out.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="dropped" type="object[]">
+  Content that did not make it in. Each entry has `path`, optional `heading`, `tokens`, `score`, and `reason`: `budget exhausted`, `page truncated to fit budget`, `page could not be read`, or `page has no content`.
+</ResponseField>
 
-## Metadata query
+```json Response
+{
+  "query": "how does auth work?",
+  "budget_tokens": 4000,
+  "used_tokens": 3712,
+  "tokenizer": "cl100k_base",
+  "items": [
+    {
+      "path": "concepts/auth.md",
+      "title": "Authentication",
+      "content": "# Authentication\n\nOAuth2 + JWT based authentication system...",
+      "tokens": 2140,
+      "score": 0.033,
+      "fts_rank": 1,
+      "semantic_rank": 1
+    }
+  ],
+  "dropped": [
+    { "path": "runbooks/sso-outage.md", "reason": "budget exhausted", "tokens": 1880, "score": 0.016 }
+  ],
+  "candidates": 7
+}
+```
 
-Query pages by their frontmatter fields using JSON path syntax.
+## Frontmatter query
 
-<ParamField query="where" type="string" required>
-  JSON path filter expression (e.g. `$.status=draft`).
+Filter pages by frontmatter values using JSON path expressions.
+
+**`GET /api/kiwi/meta`**
+
+Each filter is `<field><op><value>`, where `field` is a JSON path starting with `$.` (for example `$.status` or `$.tags[*]`). Operators are `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`, `LIKE`, and `NOT LIKE`.
+
+<ParamField query="where" type="string">
+  AND filter. Repeat the parameter to combine several, for example `where=$.status=draft&where=$.priority>2`.
+</ParamField>
+<ParamField query="or" type="string">
+  OR filter. Repeat for several alternatives.
+</ParamField>
+<ParamField query="scope" type="string">
+  Shorthand for `where=$.scope=<value>`.
 </ParamField>
 <ParamField query="sort" type="string">
-  JSON path to the field to sort by (e.g. `$.updated`).
+  JSON path to sort by, for example `$.updated`.
 </ParamField>
 <ParamField query="order" type="string" default="asc">
-  Sort order: `asc` or `desc`.
+  `asc` or `desc`.
+</ParamField>
+<ParamField query="limit" type="integer" default="50">
+  Maximum results. Capped at `200`.
+</ParamField>
+<ParamField query="offset" type="integer" default="0">
+  Number of results to skip.
 </ParamField>
 
 ```bash
-curl 'http://localhost:3333/api/kiwi/meta?where=$.status=draft&sort=$.updated&order=desc'
+curl -G 'http://localhost:3333/api/kiwi/meta' \
+  --data-urlencode 'where=$.status=draft' \
+  --data-urlencode 'sort=$.updated' \
+  --data-urlencode 'order=desc'
 ```
 
-```json
-[
-  {
-    "path": "concepts/billing.md",
-    "title": "Billing",
-    "metadata": {"status": "draft", "updated": "2026-04-20", "author": "agent:writer"}
-  }
-]
+<ResponseField name="count" type="integer">Number of results in this response.</ResponseField>
+<ResponseField name="limit" type="integer">The effective limit.</ResponseField>
+<ResponseField name="offset" type="integer">The effective offset.</ResponseField>
+<ResponseField name="results" type="object[]">
+  Each result has `path`, `frontmatter` (the full frontmatter object), and `permalink` when a public URL is configured.
+</ResponseField>
+
+```json Response
+{
+  "count": 1,
+  "limit": 50,
+  "offset": 0,
+  "results": [
+    {
+      "path": "concepts/billing.md",
+      "frontmatter": { "title": "Billing", "status": "draft", "updated": "2026-09-20" }
+    }
+  ]
+}
 ```
+
+Returns `400` for a malformed filter or a field that does not start with `$.`. Returns `501` when the search backend is not SQLite.
 
 <Tip>
-Combine metadata queries with the [DQL endpoint](/api/metadata) for more complex structured queries across your knowledge base.
+For projections, grouping, and sorting across many fields, use [DQL](/api/metadata#dql-query) instead.
 </Tip>
+
+## Similar pages
+
+Rank pages by how close their frontmatter is to a given page or to an inline field vector.
+
+**`GET /api/kiwi/similar`**
+
+Similarity uses Gower distance over the numeric and categorical fields named in a `[[similarity.profiles]]` block in `.kiwi/config.toml`. Pass `vector` to ask about a case that is not in the knowledge base yet.
+
+<ParamField query="path" type="string">
+  Page to find neighbors of. Required unless `vector` is set.
+</ParamField>
+<ParamField query="vector" type="string">
+  JSON object of field values, for example `{"format":"csv","stats.rows":12000}`. With `path`, these values override the page's own.
+</ParamField>
+<ParamField query="profile" type="string">
+  Similarity profile name. Optional when exactly one profile is configured.
+</ParamField>
+<ParamField query="k" type="integer" default="5">
+  Number of neighbors to return.
+</ParamField>
+
+```toml .kiwi/config.toml
+[[similarity.profiles]]
+name = "dataset"
+match = { kind = "dataset" }
+numeric = ["stats.rows", "stats.columns"]
+categorical = ["format", "license"]
+weights = { "format" = 2.0 }
+```
+
+```bash
+curl 'http://localhost:3333/api/kiwi/similar?path=datasets/sales-2025.md&k=3'
+```
+
+<ResponseField name="profile" type="string">Profile used.</ResponseField>
+<ResponseField name="query_path" type="string">The `path` you passed, if any.</ResponseField>
+<ResponseField name="query_vector" type="object">The resolved field vector that was compared.</ResponseField>
+<ResponseField name="fields" type="string[]">Fields in the profile.</ResponseField>
+<ResponseField name="candidate_count" type="integer">Pages compared.</ResponseField>
+<ResponseField name="truncated" type="boolean">`true` when the candidate set hit its cap, so ranking covers only part of the corpus.</ResponseField>
+<ResponseField name="neighbors" type="object[]">
+  Ranked neighbors.
+  <Expandable title="neighbor">
+    <ResponseField name="path" type="string">Page path.</ResponseField>
+    <ResponseField name="score" type="number">`1 - rank_distance`. Higher is more similar; results are ordered by it.</ResponseField>
+    <ResponseField name="distance" type="number">Gower distance over the fields both sides have.</ResponseField>
+    <ResponseField name="rank_distance" type="number">Distance that counts missing fields as maximally different.</ResponseField>
+    <ResponseField name="coverage" type="number">Weighted share of fields that were comparable.</ResponseField>
+    <ResponseField name="comparable_fields" type="integer">Fields both sides had.</ResponseField>
+    <ResponseField name="total_fields" type="integer">Fields in the profile.</ResponseField>
+    <ResponseField name="contributions" type="object[]">Per-field breakdown with `field`, `kind`, `distance`, `weight`, `skipped`, and the two values `a` and `b`.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json Response
+{
+  "profile": "dataset",
+  "query_path": "datasets/sales-2025.md",
+  "query_vector": { "format": "csv", "license": "cc-by", "stats.rows": 12000, "stats.columns": 14 },
+  "fields": ["stats.rows", "stats.columns", "format", "license"],
+  "candidate_count": 42,
+  "neighbors": [
+    {
+      "path": "datasets/sales-2024.md",
+      "score": 0.94,
+      "distance": 0.06,
+      "rank_distance": 0.06,
+      "coverage": 1,
+      "comparable_fields": 4,
+      "total_fields": 4,
+      "contributions": [
+        { "field": "format", "kind": "categorical", "distance": 0, "weight": 2, "skipped": false, "a": "csv", "b": "csv" }
+      ]
+    }
+  ]
+}
+```
+
+Returns `400` when neither `path` nor `vector` is given, the profile is unknown, `k` is not a positive integer, or `vector` is not a JSON object. Returns `503` when no similarity profiles are configured.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Search concepts" icon="magnifying-glass" href="/concepts/search">
+    How the three search tiers fit together.
+  </Card>
+  <Card title="Metadata and graph" icon="tags" href="/api/metadata">
+    DQL queries, aggregations, backlinks, and the link graph.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration#search">
+    Search engine and vector settings.
+  </Card>
+  <Card title="Analytics" icon="chart-line" href="/api/analytics">
+    Search analytics and failed queries.
+  </Card>
+</CardGroup>

@@ -1,90 +1,113 @@
 ---
 title: "Files as truth"
-description: "Why KiwiFS uses plain markdown files as the source of truth."
+description: "Every page is a plain markdown file on disk; indexes and history are built from those files."
 icon: "file-lines"
 ---
 
-In KiwiFS, every page is a **plain markdown file** with optional YAML frontmatter. There is no database, no proprietary format, no schema migration. The filesystem _is_ the database.
+In KiwiFS, every page is a plain markdown file with optional YAML frontmatter. The files on disk are the record. The search index, metadata index, and vector index are derived from them and can be rebuilt at any time with `kiwifs reindex`. There is no proprietary format and no schema migration.
 
-## Why files?
+## Why files
 
-- **Universal** — every language, tool, and agent can read and write files.
-- **Durable** — files outlast databases, SaaS tools, and proprietary formats.
-- **Diffable** — git gives you full history, blame, and merge for free.
-- **Inspectable** — `cat`, `grep`, `find`, `tree` work out of the box.
-- **Portable** — copy the directory to move your knowledge anywhere.
+- **Universal.** Every language, tool, and agent can read and write a file.
+- **Inspectable.** `cat`, `grep`, `find`, and your editor work out of the box.
+- **Diffable.** Git gives you history, blame, and merges.
+- **Durable.** Files outlast databases, SaaS tools, and proprietary formats.
+- **Portable.** Copy the folder to move your knowledge anywhere.
 
 ## Frontmatter as structured data
 
-Each file can include YAML frontmatter for structured metadata:
+YAML frontmatter turns a page into a record:
 
-```markdown
+```markdown concepts/authentication.md
 ---
 title: Authentication
 status: verified
 tags: [security, oauth]
-author: agent:docs-writer
+owner: platform-team
 updated: 2026-04-25
 ---
 
 # Authentication
 
-OAuth2 + JWT based authentication system...
+OAuth2 and JWT based authentication...
 ```
 
-KiwiFS indexes this frontmatter into SQLite, making it queryable via [DQL](/concepts/dql) and the [metadata API](/api/metadata).
+KiwiFS indexes frontmatter so you can query it with [DQL](/concepts/dql) and the [metadata API](/api/metadata), and validate it with [schemas](/concepts/schemas).
 
-## The `.kiwi/` directory
+## Layout of a knowledge base
 
-KiwiFS stores its configuration and internal data in a `.kiwi/` directory at the root of your knowledge base:
+`kiwifs init` creates the folder from a template. The default `kb` template looks like this:
 
 <Tree>
   <Tree.Folder name="knowledge" defaultOpen>
     <Tree.Folder name=".kiwi" defaultOpen>
       <Tree.File name="config.toml" />
-      <Tree.Folder name="comments" />
       <Tree.File name="playbook.md" />
-      <Tree.File name="SCHEMA.md" />
-      <Tree.Folder name="schemas">
-        <Tree.File name="runbook.json" />
-      </Tree.Folder>
-      <Tree.Folder name="templates">
-        <Tree.File name="concept.md" />
-        <Tree.File name="runbook.md" />
-      </Tree.Folder>
+      <Tree.File name="rules.md" />
+      <Tree.Folder name="schemas" />
+      <Tree.Folder name="templates" />
+      <Tree.Folder name="workflows" />
+      <Tree.Folder name="state" />
     </Tree.Folder>
+    <Tree.File name=".gitignore" />
+    <Tree.File name="SCHEMA.md" />
     <Tree.File name="index.md" />
-    <Tree.Folder name="pages" defaultOpen>
-      <Tree.File name="getting-started.md" />
-    </Tree.Folder>
-    <Tree.Folder name="episodes">
-      <Tree.File name="example-episode.md" />
-    </Tree.Folder>
+    <Tree.File name="playbook.md" />
+    <Tree.Folder name="getting-started" />
+    <Tree.Folder name="guides" />
+    <Tree.Folder name="reference" />
+    <Tree.Folder name="troubleshooting" />
+    <Tree.Folder name="faq" />
   </Tree.Folder>
 </Tree>
 
-## Git versioning
+| Path | Holds |
+| --- | --- |
+| `SCHEMA.md`, `index.md` | Agent-facing layout and entry page. See [Agent playbook](/concepts/agent-playbook). |
+| `.kiwi/config.toml` | Server configuration. See [Configuration](/configuration). |
+| `.kiwi/playbook.md`, `.kiwi/rules.md` | Agent instructions served by `kiwi_context` |
+| `.kiwi/schemas/`, `.kiwi/templates/`, `.kiwi/workflows/` | Frontmatter schemas, page templates, workflow definitions |
+| `.kiwi/state/` | Rebuildable indexes. Ignored by git. |
 
-When `versioning = "git"` (the default), every write — via REST, MCP, NFS, or filesystem — creates a git commit. The commit author is set from the `X-Actor` header or MCP `actor` parameter.
+As KiwiFS runs, `.kiwi/` can also gain `comments/`, `views/`, `drafts/`, and `eval/`. Other templates (`wiki`, `memory`, `runbook`, `adr`, `research`, and more) ship different page folders.
 
-```bash
-$ git log --oneline
-e4f5g6h agent:docs-writer update concepts/auth.md
-a1b2c3d agent:importer    create concepts/auth.md
+<Note>
+Paths under `.kiwi/` are not reachable through the file API, except `.kiwi/rules.md` and `.kiwi/playbook.md`.
+</Note>
+
+## Every write is versioned
+
+Writes through REST, MCP, NFS, S3, WebDAV, FUSE, or straight to disk all pass through one pipeline: write the file, commit it, update the indexes, and notify connected clients. With the default `git` strategy, each write is a commit authored by the writer (`X-Actor` over REST, `actor` over MCP).
+
+```bash Terminal
+$ git log --format='%h %an  %s'
+e4f5g6h agent:docs-writer  agent:docs-writer: concepts/auth.md
+a1b2c3d agent:importer     agent:importer: concepts/auth.md
 ```
 
-This gives you:
-- **Full history** for every page
-- **Blame** to trace which agent wrote which line
-- **Diff** between any two versions
-- **Rollback** to any previous state
+That gives you full history, blame for every line, diffs between any two versions, and rollback. See [Versioning](/concepts/versioning).
 
-## Implications
+## What this means in practice
 
-Because files are the source of truth:
+1. **Backup** is `git push` or `rsync`. KiwiFS can push to a remote on a schedule.
+2. **Import** writes files; **export** reads them.
+3. **Migration** is copying a folder.
+4. **Other tools** can work on the same files: git, editors, scripts. KiwiFS notices direct edits and indexes them.
+5. **No lock-in.** If you stop using KiwiFS, your markdown stays readable.
 
-1. **Backup** is `git push` or `rsync`.
-2. **Import** adds files; **export** reads them.
-3. **Migration** is copying a directory.
-4. **Multiple tools** can operate on the same knowledge base (KiwiFS, git, editors, scripts).
-5. **No vendor lock-in** — if you stop using KiwiFS, your markdown files remain.
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Versioning" icon="code-branch" href="/concepts/versioning">
+    git, copy-on-write, or none.
+  </Card>
+  <Card title="Agent interface" icon="robot" href="/concepts/agent-interface">
+    How agents read and write the files.
+  </Card>
+  <Card title="Backup and sync" icon="cloud-arrow-up" href="/deploy/backup-sync">
+    Push to a git remote automatically.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Every `.kiwi/config.toml` key.
+  </Card>
+</CardGroup>

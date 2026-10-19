@@ -1,14 +1,21 @@
 ---
 title: "Schemas"
-description: "Manage JSON Schema definitions for frontmatter validation."
+description: "List, read, and save the JSON Schemas that validate page frontmatter."
 icon: "shield-check"
 ---
 
-<Note>
-Enable enforcement with `[schema] enforce = true` in config. See [Schema Validation](/concepts/schemas) for the full concept.
-</Note>
+A schema is a JSON Schema file at `.kiwi/schemas/<type>.json`. When enforcement is on, every markdown write is checked against the schema named by the page's discriminator field (`type` by default), and invalid writes return `422`. See [Schemas](/concepts/schemas) for how validation works.
 
-## List schema types
+```toml .kiwi/config.toml
+[schema]
+enforce = true
+discriminator = "type"     # frontmatter field that picks the schema
+enforce_level = "reject"   # or "warn" to log violations and allow the write
+```
+
+## List schemas
+
+Return the type names that have a schema file.
 
 ```http
 GET /api/kiwi/schemas
@@ -18,37 +25,53 @@ GET /api/kiwi/schemas
 curl 'http://localhost:3333/api/kiwi/schemas'
 ```
 
+Returns a JSON array of type names. The array is empty when `.kiwi/schemas/` does not exist.
+
 ```json
-["runbook", "concept", "episode"]
+["concept", "episode", "runbook"]
 ```
 
 ## Get a schema
+
+Return one schema document.
 
 ```http
 GET /api/kiwi/schemas/:type
 ```
 
 <ParamField path="type" type="string" required>
-  Schema type name (matches the frontmatter `type` field).
+  Type name. Letters, digits, `-`, and `_` only.
 </ParamField>
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/schemas/runbook'
 ```
 
-Returns the raw JSON Schema document.
+Returns `400` for an invalid type name and `404` if no schema exists. The response is the stored JSON Schema.
 
-## Create or update a schema
+```json
+{
+  "type": "object",
+  "required": ["title", "status", "owner"],
+  "properties": {
+    "title": { "type": "string" },
+    "status": { "type": "string", "enum": ["draft", "reviewed", "verified"] },
+    "owner": { "type": "string" }
+  }
+}
+```
+
+## Save a schema
+
+Create or replace a schema. The body is the JSON Schema document. The validator reloads right away, so the next write uses the new schema.
 
 ```http
 PUT /api/kiwi/schemas/:type
 ```
 
 <ParamField path="type" type="string" required>
-  Schema type name.
+  Type name. Letters, digits, `-`, and `_` only.
 </ParamField>
-
-The request body is a raw JSON Schema document.
 
 ```bash
 curl -X PUT 'http://localhost:3333/api/kiwi/schemas/runbook' \
@@ -64,4 +87,26 @@ curl -X PUT 'http://localhost:3333/api/kiwi/schemas/runbook' \
   }'
 ```
 
-When `[schema] enforce = true`, schema changes trigger a reload so subsequent writes use the updated schema immediately.
+Returns `400` for an invalid type name or a body that isn't JSON.
+
+<ResponseField name="status" type="string">Always `ok`.</ResponseField>
+<ResponseField name="type" type="string">Type name saved.</ResponseField>
+
+```json
+{ "status": "ok", "type": "runbook" }
+```
+
+<Note>
+Schema files live under `.kiwi/` and are written directly, not through the write pipeline, so saving a schema does not create a git commit.
+</Note>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Schemas concepts" icon="shield-check" href="/concepts/schemas">
+    Discriminators, enforcement levels, and error format.
+  </Card>
+  <Card title="Files" icon="file" href="/api/files">
+    Writes that schemas validate.
+  </Card>
+</CardGroup>

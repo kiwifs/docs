@@ -1,138 +1,121 @@
 ---
 title: "Document export"
-description: "Render markdown to PDF, HTML, slides, or a static site."
+description: "Render pages or folders to PDF, HTML, slide decks, and static sites."
 icon: "file-pdf"
 ---
 
-Beyond JSONL and CSV, KiwiFS can **render** markdown into deliverable formats using Pandoc, Marp, MkDocs, and Typst tooling (bundled in the Docker image). The web UI also supports in-browser PDF export via Typst without server-side dependencies.
+Document export turns markdown into files you can hand to people: a PDF report, a standalone HTML page, a slide deck, or a documentation site. Export one page, or a whole folder compiled into a book.
 
-## Endpoint
+There are two ways to export:
 
-```http
-POST /api/kiwi/export/document
-Content-Type: application/json
-```
+- **From the web UI**, any page can be saved as a PDF in the browser, with nothing installed on the server.
+- **From the CLI, REST API, or MCP**, KiwiFS runs Pandoc, Marp, or MkDocs on the server for every format and option.
 
-## Request body
+## Export a page from the web UI
 
-<ParamField body="format" type="string" required>
-  Output format: `pdf`, `html`, `slides`, `site`, or `mkdocs`.
-</ParamField>
+Open a page, click the page actions menu, and choose **Export as PDF**. The web UI compiles the PDF in your browser with Typst. Wiki links print as their link text, and embeds such as `![[diagram.png]]` are left out.
 
-<ParamField body="path" type="string" required>
-  File or directory under the knowledge root to render.
-</ParamField>
+The same menu has **Export as Markdown**, which downloads the page's source file.
 
-<ParamField body="theme" type="string">
-  Theme name for HTML/PDF output.
-</ParamField>
+<Note>
+The browser loads the Typst compiler from the jsDelivr CDN the first time you export, so the browser needs internet access.
+</Note>
 
-<ParamField body="self_contained" type="boolean" default="false">
-  Produce a single-file HTML with embedded assets.
-</ParamField>
-
-<ParamField body="bibliography" type="string">
-  BibTeX path for citations.
-</ParamField>
-
-<ParamField body="csl_style" type="string">
-  Citation style preset: `apa`, `ieee`, `chicago`, `vancouver`, or `harvard`.
-</ParamField>
-
-<ParamField body="pdf_engine" type="string">
-  PDF engine: `typst` or `xelatex` (default: auto-detect).
-</ParamField>
-
-<ParamField body="slide_format" type="string">
-  Slide format (Marp).
-</ParamField>
-
-<ParamField body="site_name" type="string">
-  Static site title (for `site` format).
-</ParamField>
-
-<ParamField body="site_url" type="string">
-  Canonical site URL.
-</ParamField>
-
-<ParamField body="repo_url" type="string">
-  Edit-on-GitHub style link for the generated site.
-</ParamField>
-
-## Examples
+## Server-side export
 
 <Tabs>
   <Tab title="CLI">
-    ```bash
-    kiwifs export --format pdf --path docs/report.md --output report.pdf --theme paper
-    kiwifs export --format html --path concepts/ --self-contained --output site.html
-    kiwifs export --format slides --path talks/intro.md --output slides.html
-    kiwifs export --format site --path docs/ --site-name "My Wiki" --output docs-site.zip
-    kiwifs export --format mkdocs --path docs/ --site-name "My Wiki" --output docs-project/
+    ```bash Terminal
+    kiwifs export --format pdf --path docs/report.md --theme paper -o report.pdf
+    kiwifs export --format pdf --path handbook/ -o handbook.pdf
+    kiwifs export --format html --path concepts/auth.md --self-contained -o auth.html
+    kiwifs export --format slides --path talks/intro.md --slide-format pdf -o intro.pdf
+    kiwifs export --format site --path docs/ --site-name "My Wiki" -o docs-site.zip
     ```
+
+    Without `-o`, the file is named after the input, such as `report.pdf`. The CLI shares its `--root`, `--path`, and `--output` flags with [data export](/export/overview).
   </Tab>
   <Tab title="REST">
-    ```bash
-    curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
-      -H 'Content-Type: application/json' \
-      -d '{"format":"pdf","path":"pages/report.md"}' \
+    ```bash Terminal
+    curl -X POST http://localhost:3333/api/kiwi/export/document \
+      -H "Content-Type: application/json" \
+      -d '{"format": "pdf", "path": "docs/report.md", "theme": "paper"}' \
       -o report.pdf
     ```
 
-    ```bash
-    curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
-      -H 'Content-Type: application/json' \
-      -d '{"format":"html","path":"concepts/","self_contained":true}' \
-      -o site.html
+    The response is the rendered file, with a matching `Content-Type` and a `Content-Disposition: attachment` file name.
+  </Tab>
+  <Tab title="MCP">
+    ```json kiwi_export_document
+    { "format": "pdf", "path": "docs/report.md", "theme": "paper" }
     ```
 
-    ```bash
-    curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
-      -H 'Content-Type: application/json' \
-      -d '{"format":"slides","path":"talks/intro.md","slide_format":"marp"}' \
-      -o intro.pdf
-    ```
+    The tool writes the file to a temporary path on the server and returns that path. Small HTML results come back inline. It works in local mode (`kiwifs mcp --root`) only.
   </Tab>
 </Tabs>
 
-<Note>
-The response streams the rendered artifact with an appropriate `Content-Type`. Large exports may take up to **five minutes** server-side.
-</Note>
+Rendering stops after five minutes.
 
-## MCP
+## Formats and required tools
 
-**`kiwi_export_document`** accepts the same options for agent-driven publishing workflows.
+| Format | Output | Needs on the server |
+| --- | --- | --- |
+| `pdf` | PDF | Pandoc, plus Typst or XeLaTeX |
+| `html` | HTML page | Pandoc |
+| `slides` | HTML, PDF, or PPTX deck from [Marp](https://marp.app) markdown | Marp CLI. PDF and PPTX also need Chromium. |
+| `site` | ZIP of a built MkDocs site | MkDocs |
+| `mkdocs` (CLI only) | An MkDocs project folder with `mkdocs.yml` | Nothing |
 
-## Format details
-
-<AccordionGroup>
-  <Accordion title="PDF (Typst or XeLaTeX)">
-    Uses Typst by default for fast compilation. Falls back to XeLaTeX via Pandoc when Typst is unavailable. The web UI also provides in-browser PDF export via a bundled Typst WASM compiler — no server-side tools required.
-  </Accordion>
-  <Accordion title="MkDocs project">
-    The `mkdocs` format generates a complete MkDocs project directory with `mkdocs.yml`, navigation, and theme configuration. Build the static site with `mkdocs build` or preview with `mkdocs serve`.
-  </Accordion>
-  <Accordion title="Slides (Marp)">
-    Renders Marp-formatted markdown into HTML, PDF, or PPTX slides. Use `slide_format` to control the output type.
-  </Accordion>
-  <Accordion title="Static site">
-    The `site` format produces a ready-to-deploy static site as a ZIP archive, with navigation generated from the directory structure.
-  </Accordion>
-</AccordionGroup>
-
-## Docker requirement
+For PDF, KiwiFS uses Typst when it's installed and falls back to XeLaTeX. Over REST and MCP, `mkdocs` and `docs` are aliases for `site`.
 
 <Warning>
-Server-side PDF (via Pandoc/Typst CLI) and site generation depend on external tools bundled in the official Docker image. Bare-metal installs may need Pandoc and related dependencies installed separately. In-browser PDF export via the web UI works without these dependencies.
+The KiwiFS Docker image includes Pandoc, Marp CLI, Chromium, and MkDocs, but not Typst or XeLaTeX. Server-side PDF export in the container fails with `no PDF engine available` until you add one, for example in a derived image. In-browser PDF export from the web UI works either way.
 </Warning>
 
-## Related documentation
+## Options
+
+| CLI flag | REST and MCP field | Description |
+| --- | --- | --- |
+| `--path` | `path` | Page or folder to export (required) |
+| `--theme` | `theme` | `paper`, `modern`, `minimal`, `dark`, or `presentation` |
+| `--self-contained` | `self_contained` | Embed images, CSS, and fonts in the HTML |
+| `--bibliography` | `bibliography` | `.bib` or CSL JSON file for citations |
+| `--csl` | `csl_style` | Citation style name |
+| `--crossref` | `crossref` | Number figures, tables, and equations. Needs `pandoc-crossref`. |
+| `--pdf-engine` | `pdf_engine` | `typst` or `xelatex` |
+| `--slide-format` | `slide_format` | `html` (default), `pdf`, or `pptx` |
+| `--site-name` | `site_name` | Site title for `site` and `mkdocs` |
+| `--site-url` | `site_url` | Canonical site URL |
+| `--repo-url` | `repo_url` | Repository link shown on the site |
+| | `metadata` | Extra Pandoc metadata as string key-value pairs (REST only) |
+
+KiwiFS looks for the citation style as `.kiwi/references/<name>.csl`, then `<name>.csl` at the knowledge root. Put the CSL file for `apa`, `ieee`, or any other style in one of those places. Without a matching file, Pandoc uses its default style.
+
+## Export a folder as a book
+
+When `path` is a folder, KiwiFS stitches its pages into one document with a table of contents. It orders pages by:
+
+1. The `parts` list in a `_book.yaml` file in the folder, if there is one.
+2. Otherwise, an `order` or `nav_order` frontmatter field, then a numeric file name prefix such as `01-intro.md`, then the file name.
+
+```yaml handbook/_book.yaml
+title: Engineering handbook
+author: Platform team
+parts:
+  - intro.md
+  - onboarding.md
+  - on-call.md
+```
+
+`_book.yaml` can also set `date`, `lang`, `theme`, and `template`.
+
+## Related
 
 <CardGroup cols={2}>
-  <Card title="Export overview" icon="upload" href="/export/overview">
-    JSONL, CSV, and Parquet export.
+  <Card title="Data export" icon="upload" href="/export/overview">
+    JSONL, CSV, and Parquet.
   </Card>
-  <Card title="Import/export API" icon="arrows-rotate" href="/api/import-export">
-    REST reference.
+  <Card title="Publishing" icon="globe" href="/concepts/publishing">
+    Share pages on the web without exporting.
   </Card>
 </CardGroup>

@@ -1,155 +1,346 @@
 ---
 title: "Canvas"
-description: "List, read, write, patch, query, and auto-layout .canvas.json files."
+description: "List, read, write, patch, query, lay out, and generate JSON Canvas files."
 icon: "diagram-project"
 ---
 
-Base path: `http://localhost:3333/api/kiwi`.
+Canvases are [JSON Canvas](https://jsoncanvas.org) documents stored as `.canvas.json` files in the knowledge base. Every write goes through the normal write pipeline, so each change is a git commit and broadcasts an SSE event. See [Canvas](/concepts/canvas) for the data model.
 
-Canvas paths must end with **`.canvas.json`**.
+Every endpoint that takes a `path` rejects paths that don't end in `.canvas.json` with `400`.
 
 ## List canvases
 
-```http
-GET /canvases
-```
-
-```json
-{ "canvases": ["maps/site.canvas.json", "research/ideas.canvas.json"] }
-```
-
-## Read canvas
+Return every `.canvas.json` file in the knowledge base.
 
 ```http
-GET /canvas?path=maps/site.canvas.json
+GET /api/kiwi/canvases
 ```
 
-Returns the raw JSON document with `Content-Type: application/json`.
-
-## Write canvas
-
-```http
-PUT /canvas?path=maps/site.canvas.json
-Content-Type: application/json
+```bash
+curl 'http://localhost:3333/api/kiwi/canvases'
 ```
 
-Body must parse as JSON with **`nodes`** and **`edges`** arrays (empty arrays are allowed). Invalid JSON returns **`400`**.
-
-## Patch canvas
-
-Apply a batch of atomic operations without replacing the full document. If any operation fails, the whole batch is rejected.
-
-```http
-PATCH /canvas?path=maps/site.canvas.json
-Content-Type: application/json
-```
+<ResponseField name="canvases" type="array">
+  One entry per canvas file. Empty array when there are none.
+  <Expandable title="properties">
+    <ResponseField name="path" type="string">Path relative to the knowledge root.</ResponseField>
+    <ResponseField name="name" type="string">File name without the `.canvas.json` suffix.</ResponseField>
+  </Expandable>
+</ResponseField>
 
 ```json
 {
-  "operations": [
-    { "op": "add_node", "node": { "id": "n1", "type": "file", "x": 0, "y": 0, "data": { "path": "concepts/auth.md" } } },
-    { "op": "update_node", "id": "n1", "node": { "x": 120 } },
-    { "op": "remove_node", "id": "n2" },
-    { "op": "add_edge", "edge": { "id": "e1", "fromNode": "n1", "toNode": "n3" } },
-    { "op": "update_edge", "id": "e1", "edge": { "label": "depends on" } },
-    { "op": "remove_edge", "id": "e1" }
+  "canvases": [
+    { "path": "maps/site.canvas.json", "name": "site" },
+    { "path": "research/ideas.canvas.json", "name": "ideas" }
   ]
 }
 ```
 
-Supported `op` values: `add_node`, `update_node`, `remove_node`, `add_edge`, `update_edge`, `remove_edge`.
+## Read a canvas
 
-<ResponseField name="nodes_added" type="integer">Nodes inserted.</ResponseField>
-<ResponseField name="nodes_updated" type="integer">Nodes merged in place.</ResponseField>
-<ResponseField name="nodes_removed" type="integer">Nodes deleted (connected edges removed too).</ResponseField>
-<ResponseField name="edges_added" type="integer">Edges inserted.</ResponseField>
-<ResponseField name="edges_updated" type="integer">Edges merged in place.</ResponseField>
-<ResponseField name="edges_removed" type="integer">Edges deleted.</ResponseField>
-
-## Delete canvas
+Return the raw canvas document.
 
 ```http
-DELETE /canvas?path=maps/site.canvas.json
-```
-
-## Query canvas nodes
-
-```http
-GET /canvas/query?path=maps/site.canvas.json&q=auth&type=file&connected=n1&nodes_only=true
+GET /api/kiwi/canvas
 ```
 
 <ParamField query="path" type="string" required>
   Canvas file path.
 </ParamField>
 
-<ParamField query="q" type="string">
-  Filter nodes by label or metadata text.
-</ParamField>
-
-<ParamField query="type" type="string">
-  Filter by node type.
-</ParamField>
-
-<ParamField query="connected" type="string">
-  Return nodes connected to the given node ID.
-</ParamField>
-
-<ParamField query="nodes_only" type="boolean" default="false">
-  Return only nodes.
-</ParamField>
-
-<ParamField query="edges_only" type="boolean" default="false">
-  Return only edges.
-</ParamField>
-
-## Auto-layout
-
-Reposition existing nodes in a canvas using a layout algorithm. This operates on the current canvas content only — it does not generate new nodes from the wiki-link graph (use `POST /canvas/generate` for that).
-
-```http
-POST /canvas/auto-layout?path=maps/site.canvas.json
-Content-Type: application/json
+```bash
+curl 'http://localhost:3333/api/kiwi/canvas?path=maps/site.canvas.json'
 ```
 
-```json
-{ "layout": "dot" }
-```
-
-<ParamField query="path" type="string" required>
-  Canvas file to update in place.
-</ParamField>
-
-<ParamField body="layout" type="string" default="dot">
-  Graphviz engine: `dot`, `neato`, `fdp`, or `circo`.
-</ParamField>
-
-## Generate from link graph
-
-```http
-POST /canvas/generate
-Content-Type: application/json
-```
+Returns the stored JSON as-is with `Content-Type: application/json`. Returns `404` if the file does not exist and `500` if it is not a valid canvas.
 
 ```json
 {
-  "path": "auto/graph.canvas.json",
-  "layout": "hierarchical",
-  "folder": "concepts/",
-  "colorize": true
+  "nodes": [
+    { "id": "n1", "type": "file", "file": "concepts/auth.md", "x": 0, "y": 0, "width": 400, "height": 300 },
+    { "id": "n2", "type": "text", "text": "Open questions", "x": 480, "y": 0, "width": 240, "height": 120 }
+  ],
+  "edges": [
+    { "id": "e1", "fromNode": "n1", "toNode": "n2", "label": "see" }
+  ]
 }
 ```
 
-- `path` — output file; default `canvas.canvas.json`. A `.canvas.json` suffix is added if missing.
-- `layout` — `hierarchical` (default), `radial`, `force`, or `circular`.
-- `folder` — optional prefix; only edges whose endpoints live under this folder are included.
-- `colorize` — boolean, default `true`.
+## Write a canvas
 
-Returns **`503`** if the link index is unavailable.
+Create or replace a canvas. The body is the full JSON Canvas document.
 
-<Note>
-`POST /canvas/generate` and `PATCH /canvas` are REST-only. MCP exposes `kiwi_canvas_list`, `kiwi_canvas_read`, and `kiwi_canvas_write` — not generate or patch.
-</Note>
+```http
+PUT /api/kiwi/canvas
+```
 
-## MCP parity
+<ParamField query="path" type="string" required>
+  Canvas file path.
+</ParamField>
+<ParamField header="X-Actor" type="string" default="system">
+  Git commit author attribution.
+</ParamField>
+<ParamField body="nodes" type="object[]" required>
+  JSON Canvas nodes. An empty array is allowed.
+</ParamField>
+<ParamField body="edges" type="object[]" required>
+  JSON Canvas edges. An empty array is allowed.
+</ParamField>
 
-`kiwi_canvas_list`, `kiwi_canvas_read`, `kiwi_canvas_write` — see [MCP](/concepts/mcp).
+```bash
+curl -X PUT 'http://localhost:3333/api/kiwi/canvas?path=maps/site.canvas.json' \
+  -H "Content-Type: application/json" \
+  -H "X-Actor: agent:mapper" \
+  -d '{"nodes":[{"id":"n1","type":"file","file":"concepts/auth.md","x":0,"y":0,"width":400,"height":300}],"edges":[]}'
+```
+
+Returns `400` if the body is not JSON with `nodes` and `edges` arrays.
+
+<ResponseField name="path" type="string">Canvas path that was written.</ResponseField>
+<ResponseField name="etag" type="string">Git blob hash of the new content.</ResponseField>
+
+```json
+{ "path": "maps/site.canvas.json", "etag": "3f2a9c1e8b7d6a5f4e3d2c1b0a9f8e7d6c5b4a39" }
+```
+
+## Patch a canvas
+
+Apply a batch of node and edge operations without sending the whole document. The batch is atomic: if any operation fails, nothing is written. If the canvas does not exist yet, the operations apply to an empty canvas.
+
+```http
+PATCH /api/kiwi/canvas
+```
+
+<ParamField query="path" type="string" required>
+  Canvas file path.
+</ParamField>
+<ParamField header="X-Actor" type="string" default="system">
+  Git commit author attribution.
+</ParamField>
+<ParamField body="operations" type="object[]" required>
+  Operations, applied in order. Must not be empty.
+  <Expandable title="properties">
+    <ParamField body="op" type="string" required>
+      One of `add_node`, `update_node`, `remove_node`, `add_edge`, `update_edge`, `remove_edge`.
+    </ParamField>
+    <ParamField body="id" type="string">
+      Target ID for `update_*` and `remove_*`. For `update_*` you can omit it and put `id` inside `node` or `edge` instead.
+    </ParamField>
+    <ParamField body="node" type="object">
+      Full node for `add_node`, or the fields to merge for `update_node`.
+    </ParamField>
+    <ParamField body="edge" type="object">
+      Full edge for `add_edge`, or the fields to merge for `update_edge`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+```bash
+curl -X PATCH 'http://localhost:3333/api/kiwi/canvas?path=maps/site.canvas.json' \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operations": [
+      { "op": "add_node", "node": { "id": "n3", "type": "file", "file": "concepts/oauth.md", "x": 0, "y": 400, "width": 400, "height": 300 } },
+      { "op": "update_node", "id": "n1", "node": { "x": 120 } },
+      { "op": "add_edge", "edge": { "id": "e2", "fromNode": "n1", "toNode": "n3", "label": "depends on" } },
+      { "op": "remove_node", "id": "n2" }
+    ]
+  }'
+```
+
+Returns `400` for an unparseable body or an empty `operations` array, and `422` when an operation is invalid (unknown `op`, duplicate ID on add, or unknown ID on update or remove). Removing a node also removes every edge connected to it.
+
+<ResponseField name="path" type="string">Canvas path.</ResponseField>
+<ResponseField name="etag" type="string">Git blob hash of the new content.</ResponseField>
+<ResponseField name="applied" type="object">
+  Counts of what changed.
+  <Expandable title="properties">
+    <ResponseField name="nodes_added" type="integer">Nodes inserted.</ResponseField>
+    <ResponseField name="nodes_updated" type="integer">Nodes merged in place.</ResponseField>
+    <ResponseField name="nodes_removed" type="integer">Nodes deleted.</ResponseField>
+    <ResponseField name="edges_added" type="integer">Edges inserted.</ResponseField>
+    <ResponseField name="edges_updated" type="integer">Edges merged in place.</ResponseField>
+    <ResponseField name="edges_removed" type="integer">Edges deleted, including edges removed with a node.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{
+  "path": "maps/site.canvas.json",
+  "etag": "9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+  "applied": {
+    "nodes_added": 1,
+    "nodes_updated": 1,
+    "nodes_removed": 1,
+    "edges_added": 1,
+    "edges_updated": 0,
+    "edges_removed": 1
+  }
+}
+```
+
+## Delete a canvas
+
+Delete a canvas file and record the deletion as a git commit.
+
+```http
+DELETE /api/kiwi/canvas
+```
+
+<ParamField query="path" type="string" required>
+  Canvas file path.
+</ParamField>
+<ParamField header="X-Actor" type="string" default="system">
+  Git commit author attribution.
+</ParamField>
+
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/canvas?path=maps/site.canvas.json'
+```
+
+Returns `404` if the canvas does not exist.
+
+<ResponseField name="deleted" type="string">Path that was deleted.</ResponseField>
+
+```json
+{ "deleted": "maps/site.canvas.json" }
+```
+
+## Query canvas nodes
+
+Filter the nodes and edges of one canvas.
+
+```http
+GET /api/kiwi/canvas/query
+```
+
+<ParamField query="path" type="string" required>
+  Canvas file path.
+</ParamField>
+<ParamField query="q" type="string">
+  Case-insensitive substring match against a node's `id`, `text`, `file`, and `url`, and an edge's `id` and `label`. Edges touching a matched node are also returned.
+</ParamField>
+<ParamField query="type" type="string">
+  Node type: `text`, `file`, `link`, or `group`.
+</ParamField>
+<ParamField query="connected" type="string">
+  Node ID. Returns that node and every edge whose `fromNode` or `toNode` is that ID.
+</ParamField>
+<ParamField query="nodes_only" type="boolean" default="false">
+  Omit edges from the result.
+</ParamField>
+<ParamField query="edges_only" type="boolean" default="false">
+  Omit nodes from the result.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/canvas/query?path=maps/site.canvas.json&connected=n1'
+```
+
+Returns `404` if the canvas does not exist.
+
+<ResponseField name="nodes" type="object[]">Matching JSON Canvas nodes.</ResponseField>
+<ResponseField name="edges" type="object[]">Matching JSON Canvas edges.</ResponseField>
+
+```json
+{
+  "nodes": [
+    { "id": "n1", "type": "file", "file": "concepts/auth.md", "x": 120, "y": 0, "width": 400, "height": 300 }
+  ],
+  "edges": [
+    { "id": "e2", "fromNode": "n1", "toNode": "n3", "label": "depends on" }
+  ]
+}
+```
+
+## Auto-layout a canvas
+
+Reposition the existing nodes of a canvas with a Graphviz layout engine and save the result. This does not add nodes; use [generate](#generate-a-canvas-from-the-link-graph) to build a canvas from wiki links.
+
+```http
+POST /api/kiwi/canvas/auto-layout
+```
+
+<ParamField query="path" type="string" required>
+  Canvas file to lay out in place.
+</ParamField>
+<ParamField header="X-Actor" type="string" default="system">
+  Git commit author attribution.
+</ParamField>
+<ParamField body="layout" type="string" default="dot">
+  Graphviz engine: `dot`, `neato`, `fdp`, or `circo`. The body is optional.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/canvas/auto-layout?path=maps/site.canvas.json' \
+  -H "Content-Type: application/json" \
+  -d '{"layout": "neato"}'
+```
+
+Returns `404` if the canvas does not exist.
+
+<ResponseField name="path" type="string">Canvas path.</ResponseField>
+<ResponseField name="etag" type="string">Git blob hash of the new content.</ResponseField>
+<ResponseField name="node_count" type="integer">Nodes in the canvas.</ResponseField>
+<ResponseField name="edge_count" type="integer">Edges in the canvas.</ResponseField>
+
+```json
+{ "path": "maps/site.canvas.json", "etag": "c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5", "node_count": 2, "edge_count": 1 }
+```
+
+## Generate a canvas from the link graph
+
+Build a canvas with one file node per page and one edge per wiki link, lay it out, and write it to disk. Existing content at the output path is replaced.
+
+```http
+POST /api/kiwi/canvas/generate
+```
+
+<ParamField header="X-Actor" type="string" default="system">
+  Git commit author attribution.
+</ParamField>
+<ParamField body="path" type="string" default="canvas.canvas.json">
+  Output file. `.canvas.json` is appended if missing.
+</ParamField>
+<ParamField body="layout" type="string" default="hierarchical">
+  `hierarchical`, `radial`, `force`, or `circular`. Unknown values fall back to `hierarchical`.
+</ParamField>
+<ParamField body="folder" type="string">
+  Path prefix. Only links whose source and target both start with this prefix become edges.
+</ParamField>
+<ParamField body="colorize" type="boolean" default="true">
+  Color nodes by detected link community.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/canvas/generate' \
+  -H "Content-Type: application/json" \
+  -d '{"path": "maps/concepts", "layout": "radial", "folder": "concepts/"}'
+```
+
+Returns `503` if the link index is unavailable.
+
+<ResponseField name="path" type="string">Canvas path that was written.</ResponseField>
+<ResponseField name="etag" type="string">Git blob hash of the new content.</ResponseField>
+<ResponseField name="node_count" type="integer">Nodes generated.</ResponseField>
+<ResponseField name="edge_count" type="integer">Edges generated.</ResponseField>
+
+```json
+{ "path": "maps/concepts.canvas.json", "etag": "0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b", "node_count": 42, "edge_count": 97 }
+```
+
+## MCP equivalents
+
+MCP exposes `kiwi_canvas_list`, `kiwi_canvas_read`, and `kiwi_canvas_write`. Patch, query, auto-layout, and generate are REST-only.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Canvas concepts" icon="diagram-project" href="/concepts/canvas">
+    Node types, edges, and how canvases render in the web UI.
+  </Card>
+  <Card title="MCP tools" icon="plug" href="/concepts/mcp">
+    The full list of MCP tools, including the canvas tools.
+  </Card>
+</CardGroup>

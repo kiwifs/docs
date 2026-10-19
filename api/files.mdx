@@ -1,235 +1,352 @@
 ---
 title: "Files"
-description: "Read, write, delete, and bulk-manage files through the KiwiFS REST API."
+description: "Read, write, patch, append, rename, upload, and serve files through the KiwiFS REST API."
 icon: "file"
 ---
 
-## Directory tree
+File endpoints are the core of the API. Every write goes through the write pipeline: it lands on disk, becomes a git commit, updates the search index, and is broadcast to SSE subscribers.
 
-Retrieve the directory tree as a JSON array.
+All paths below are relative to `http://localhost:3333/api/kiwi` unless they start with `/raw`. File paths in `?path=` are relative to the knowledge root; paths that escape the root or point into hidden directories return `400`.
+
+## Get the directory tree
+
+Returns the folder hierarchy as a nested object, up to 20 levels deep.
+
+**`GET /tree`**
 
 <ParamField query="path" type="string" default="/">
-  Root path to list. Omit to list the entire knowledge base.
+  Folder to start from.
 </ParamField>
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/tree?path=concepts'
 ```
 
-<ResponseField name="response" type="array">
-  Array of tree nodes.
-  <ResponseField name="path" type="string">Full path relative to root.</ResponseField>
-  <ResponseField name="name" type="string">File or directory name.</ResponseField>
-  <ResponseField name="isDir" type="boolean">Whether this node is a directory.</ResponseField>
-  <ResponseField name="size" type="integer">File size in bytes (0 for directories).</ResponseField>
-  <ResponseField name="children" type="array">Nested tree nodes (directories only).</ResponseField>
-</ResponseField>
+<ResponseField name="path" type="string">Path relative to the root.</ResponseField>
+<ResponseField name="name" type="string">File or folder name.</ResponseField>
+<ResponseField name="isDir" type="boolean">`true` for folders.</ResponseField>
+<ResponseField name="size" type="integer">File size in bytes. Omitted for folders.</ResponseField>
+<ResponseField name="permalink" type="string">Public URL for the file. Present only for files when a public URL is configured.</ResponseField>
+<ResponseField name="children" type="object[]">Nested entries with the same shape. Omitted when empty.</ResponseField>
 
-```json
-[
-  {
-    "path": "concepts",
-    "name": "concepts",
-    "isDir": true,
-    "size": 0,
-    "children": [
-      {"path": "concepts/auth.md", "name": "auth.md", "isDir": false, "size": 1420, "children": null}
-    ]
-  }
-]
+```json Response
+{
+  "path": "concepts",
+  "name": "concepts",
+  "isDir": true,
+  "children": [
+    {
+      "path": "concepts/auth.md",
+      "name": "auth.md",
+      "isDir": false,
+      "size": 1420,
+      "permalink": "https://wiki.example.com/page/concepts/auth.md"
+    }
+  ]
+}
 ```
+
+Returns `404` if the folder does not exist.
 
 ## Read a file
 
-Retrieve raw markdown content. The response includes an `ETag` header containing the git blob SHA for optimistic locking.
+Returns the raw file bytes with an `ETag` you can use for [conditional writes](/api/overview#optimistic-concurrency).
+
+**`GET /file`**
 
 <ParamField query="path" type="string" required>
-  File path relative to the knowledge root.
+  File path.
 </ParamField>
-
-```bash
-curl -i 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md'
-```
-
-```
-HTTP/1.1 200 OK
-Content-Type: text/markdown
-ETag: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
-
-# Authentication
-
-OAuth2 + JWT based authentication system...
-```
-
-## Read a symlink target
-
-When a path in the knowledge root is a symbolic link, resolve its target without following into arbitrary filesystem paths outside the guard:
-
-```http
-GET /api/kiwi/readlink?path=link/to/page.md
-```
-
-Returns **plain text** body with the symlink target. **`404`** when the path does not exist; **`400`** when the path exists but is not a symlink.
-
-## Write a file
-
-Create or update a file. The request body is raw markdown. KiwiFS creates a git commit for each write.
-
-<ParamField query="path" type="string" required>
-  File path relative to the knowledge root.
+<ParamField query="metadata_only" type="boolean" default="false">
+  Return only the parsed frontmatter as a JSON object.
 </ParamField>
-<ParamField header="X-Actor" type="string">
-  Git commit author attribution (e.g. `agent:my-agent`).
+<ParamField query="resolve_links" type="boolean" default="false">
+  Rewrite wiki links to absolute URLs. Requires a configured public URL.
 </ParamField>
-<ParamField header="X-Provenance" type="string">
-  Lineage tracking (e.g. `run:run-249`).
+<ParamField query="source" type="string" default="api">
+  Label stored with the page view in [analytics](/api/analytics). Also accepted as the `X-Kiwi-Source` header.
 </ParamField>
-<ParamField header="If-Match" type="string">
-  ETag from a previous read. If the file has changed since your read, the server returns `409 Conflict`.
+<ParamField header="If-None-Match" type="string">
+  ETag from an earlier read. Returns `304` when it still matches.
+</ParamField>
+<ParamField header="If-Modified-Since" type="string">
+  HTTP date. Returns `304` when the file has not changed since.
 </ParamField>
 
 <CodeGroup>
-```bash Create a new file
-curl -X PUT 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
-  -H "Content-Type: text/markdown" \
-  -H "X-Actor: agent:docs-writer" \
-  -d '# Authentication
-
-OAuth2 + JWT based authentication system.'
+```bash Content
+curl -i 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md'
 ```
 
-```bash Update with optimistic locking
-curl -X PUT 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
-  -H "Content-Type: text/markdown" \
-  -H "X-Actor: agent:docs-writer" \
-  -H "If-Match: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2" \
-  -d '# Authentication (updated)
-
-Revised content here.'
+```bash Frontmatter only
+curl 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md&metadata_only=true'
 ```
 </CodeGroup>
 
-<Warning>
-If you pass `If-Match` and the file has been modified since your read, the server returns `409 Conflict` with an error message. Fetch the latest version, merge your changes, and retry.
-</Warning>
+```http Response
+HTTP/1.1 200 OK
+Content-Type: text/markdown; charset=utf-8
+ETag: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+Last-Modified: Sun, 19 Oct 2026 09:30:00 GMT
+Cache-Control: no-cache
+X-Permalink: https://wiki.example.com/page/concepts/auth.md
 
-## Delete a file
+---
+title: Authentication
+status: verified
+---
+# Authentication
 
-Delete a file and create a git commit recording the deletion.
+OAuth2 + JWT based authentication system.
+```
+
+Response headers:
+
+| Header | Meaning |
+|---|---|
+| `ETag` | Quoted git blob hash of the content |
+| `Last-Modified` | File modification time |
+| `X-Permalink` | Public URL, when a public URL is configured |
+| `X-File-Type` | `symlink` when the path is a symbolic link |
+
+Returns `404` if the file does not exist.
+
+## Write a file
+
+Creates or replaces a file. The request body is the full file content, up to 32 MB.
+
+**`PUT /file`**
 
 <ParamField query="path" type="string" required>
-  File path to delete.
+  File path. Parent folders are created as needed.
+</ParamField>
+<ParamField header="If-Match" type="string">
+  ETag the file must still have. Returns `409` on mismatch.
+</ParamField>
+<ParamField header="X-Actor" type="string" default="anonymous">
+  Commit author.
+</ParamField>
+<ParamField header="X-Provenance" type="string">
+  `type:id` pair appended to the page's `derived-from` frontmatter list, for example `run:run-249`.
+</ParamField>
+<ParamField header="Content-Type" type="string">
+  Send `application/x-symlink` to create a symbolic link whose target is the body.
+</ParamField>
+
+<CodeGroup>
+```bash Create or replace
+curl -X PUT 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
+  -H "Content-Type: text/markdown" \
+  -H "X-Actor: agent:docs-writer" \
+  --data-binary @auth.md
+```
+
+```bash Conditional write
+curl -X PUT 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
+  -H "Content-Type: text/markdown" \
+  -H "X-Actor: agent:docs-writer" \
+  -H 'If-Match: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"' \
+  --data-binary @auth.md
+```
+
+```bash Create a symlink
+curl -X PUT 'http://localhost:3333/api/kiwi/file?path=latest.md' \
+  -H "Content-Type: application/x-symlink" \
+  -d 'reports/2026-10.md'
+```
+</CodeGroup>
+
+<ResponseField name="path" type="string">Path written.</ResponseField>
+<ResponseField name="etag" type="string">New ETag (also in the `ETag` header).</ResponseField>
+
+```json Response
+{"path": "concepts/auth.md", "etag": "c3d4e5f6a7b8c3d4e5f6a7b8c3d4e5f6a7b8c3d4"}
+```
+
+A symlink write returns `{"path": "latest.md", "type": "symlink"}`.
+
+| Status | When |
+|---|---|
+| `409` | `If-Match` mismatch, denied workflow transition, rejected by a write hook, or the file is append-only |
+| `413` | Body over 32 MB |
+| `422` | Content fails the [schema](/api/schemas) for its type |
+
+## Patch frontmatter
+
+Merges fields into a page's YAML frontmatter and leaves the body byte-for-byte unchanged. Two equivalent routes exist.
+
+<Tabs>
+  <Tab title="PATCH /file/frontmatter">
+    The body wraps the fields in a `fields` object.
+
+    ```bash
+    curl -X PATCH 'http://localhost:3333/api/kiwi/file/frontmatter?path=decisions/adr-12.md' \
+      -H "Content-Type: application/json" \
+      -H "X-Field-Manager: agent:reviewer" \
+      -d '{"fields": {"reviewed_by": "alice", "status": "accepted"}}'
+    ```
+  </Tab>
+  <Tab title="PATCH /file?merge=frontmatter">
+    The body is the field map itself. `merge=frontmatter` is required; other values return `400`.
+
+    ```bash
+    curl -X PATCH 'http://localhost:3333/api/kiwi/file?path=runbooks/high-cpu.md&merge=frontmatter' \
+      -H "Content-Type: application/json" \
+      -H 'If-Match: "abc123..."' \
+      -d '{"last_executed": "2026-10-19", "execution_count": 5}'
+    ```
+  </Tab>
+</Tabs>
+
+<ParamField query="path" type="string" required>
+  Markdown file to update. Must already exist.
+</ParamField>
+<ParamField query="force" type="boolean" default="false">
+  Take over keys that another field manager owns.
+</ParamField>
+<ParamField header="If-Match" type="string">
+  ETag the file must still have.
+</ParamField>
+<ParamField header="X-Field-Manager" type="string">
+  Name that owns the keys you set. Another manager changing an owned key gets `409` unless it sends `force=true`.
+</ParamField>
+<ParamField header="X-Actor" type="string" default="anonymous">
+  Commit author.
+</ParamField>
+
+```json Response
+{"path": "decisions/adr-12.md", "etag": "d4e5f6a7..."}
+```
+
+When a key belongs to another manager, nothing is written and the response lists the conflicts:
+
+```json 409 Conflict
+{
+  "error": "decisions/adr-12.md: status (managed by agent:triage); force to take them over",
+  "conflicts": [{"key": "status", "manager": "agent:triage"}]
+}
+```
+
+Returns `400` for a non-markdown file or an empty field map, and `404` if the file does not exist.
+
+## Append to a file
+
+Adds content to the end of a file without a read-modify-write cycle. Creates the file if it does not exist.
+
+**`POST /file/append`**
+
+<ParamField query="path" type="string" required>
+  File path.
+</ParamField>
+<ParamField query="separator" type="string" default="\n">
+  Inserted between the existing content and the new content.
+</ParamField>
+<ParamField header="X-Actor" type="string" default="anonymous">
+  Commit author.
 </ParamField>
 
 ```bash
-curl -X DELETE 'http://localhost:3333/api/kiwi/file?path=concepts/auth.md' \
+curl -X POST 'http://localhost:3333/api/kiwi/file/append?path=log/agent.md' \
+  -H "X-Actor: agent:logger" \
+  --data-binary $'## Entry 42\n\nNew finding from run 249.'
+```
+
+```json Response
+{"path": "log/agent.md", "etag": "b2c3d4e5..."}
+```
+
+Use append for agent logs, episodic memory, and append-only files. The body limit is 32 MB.
+
+## Delete a file
+
+Deletes a file and records the deletion as a commit.
+
+**`DELETE /file`**
+
+<ParamField query="path" type="string" required>
+  File path.
+</ParamField>
+<ParamField header="X-Actor" type="string" default="anonymous">
+  Commit author.
+</ParamField>
+
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/file?path=concepts/old.md' \
   -H "X-Actor: agent:cleanup"
 ```
 
+```json Response
+{"deleted": "concepts/old.md"}
+```
+
+Returns `404` if the file does not exist.
+
 ## Bulk write
 
-Write multiple files in a single git commit. This is more efficient than individual writes and keeps your git history clean.
+Writes several files in one git commit. If any file fails a check, nothing is written.
 
-<ParamField header="X-Actor" type="string">
-  Git commit author attribution.
+**`POST /bulk`**
+
+<ParamField body="files" type="object[]" required>
+  Files to write.
+  <Expandable title="file">
+    <ParamField body="path" type="string" required>File path.</ParamField>
+    <ParamField body="content" type="string" required>Full file content.</ParamField>
+    <ParamField body="if_match" type="string">ETag this file must still have. One mismatch fails the whole batch with `409`.</ParamField>
+  </Expandable>
+</ParamField>
+<ParamField body="actor" type="string">
+  Commit author. Falls back to `X-Actor`.
+</ParamField>
+<ParamField body="message" type="string">
+  Commit message.
+</ParamField>
+<ParamField header="X-Provenance" type="string">
+  `type:id` pair added to every file's `derived-from` list.
 </ParamField>
 
 ```bash
 curl -X POST 'http://localhost:3333/api/kiwi/bulk' \
   -H "Content-Type: application/json" \
-  -H "X-Actor: agent:importer" \
   -d '{
+    "actor": "agent:importer",
+    "message": "Import billing concepts",
     "files": [
-      {"path": "concepts/auth.md", "content": "# Authentication\n\nOAuth2 flow."},
       {"path": "concepts/billing.md", "content": "# Billing\n\nStripe integration."},
       {"path": "concepts/users.md", "content": "# Users\n\nUser management."}
     ]
   }'
 ```
 
-<Tip>
-Use bulk writes when importing data or making batch updates. All files are committed atomically in a single git commit.
-</Tip>
+<ResponseField name="count" type="integer">Number of files written.</ResponseField>
+<ResponseField name="files" type="object[]">`path` and new `etag` for each file.</ResponseField>
 
-## Upload assets
-
-Upload binary files (images, PDFs, etc.) as multipart form data.
-
-```bash
-curl -X POST 'http://localhost:3333/api/kiwi/assets' \
-  -F "file=@diagram.png" \
-  -H "X-Actor: agent:uploader"
+```json Response
+{
+  "count": 2,
+  "files": [
+    {"path": "concepts/billing.md", "etag": "e5f6a7b8..."},
+    {"path": "concepts/users.md", "etag": "f6a7b8c9..."}
+  ]
+}
 ```
-
-The response returns the asset path you can reference in markdown:
-
-```json
-{"path": "assets/diagram.png"}
-```
-
-## Table of contents
-
-Get the heading outline for a file.
-
-<ParamField query="path" type="string" required>
-  File path to extract headings from.
-</ParamField>
-
-```bash
-curl 'http://localhost:3333/api/kiwi/toc?path=concepts/auth.md'
-```
-
-```json
-[
-  {"level": 1, "text": "Authentication", "slug": "authentication"},
-  {"level": 2, "text": "OAuth2 flow", "slug": "oauth2-flow"},
-  {"level": 2, "text": "JWT tokens", "slug": "jwt-tokens"}
-]
-```
-
-## Append to a file
-
-Append content to an existing file without reading it first.
-
-```http
-POST /api/kiwi/file/append
-```
-
-<ParamField query="path" type="string" required>
-  File path to append to.
-</ParamField>
-<ParamField query="separator" type="string" default="\n">
-  String inserted between existing content and new content.
-</ParamField>
-
-```bash
-curl -X POST 'http://localhost:3333/api/kiwi/file/append?path=log/agent.md' \
-  -H "X-Actor: agent:logger" \
-  -d '## Entry 42
-
-New finding from run 249.'
-```
-
-```json
-{"path": "log/agent.md", "etag": "b2c3d4e5f6..."}
-```
-
-<Tip>
-Append is useful for agent logs, episodic memory, and audit trails where you want to add content without read-modify-write cycles.
-</Tip>
 
 ## Rename a file
 
-Rename or move a file. Wiki links pointing to the old path are automatically updated.
+Moves a file and rewrites every wiki link and markdown link that points to it, in one commit.
 
-```http
-POST /api/kiwi/rename
-```
+**`POST /rename`**
 
-<ParamField body="from" type="string" required>Old file path.</ParamField>
-<ParamField body="to" type="string" required>New file path.</ParamField>
+<ParamField body="from" type="string" required>Current path.</ParamField>
+<ParamField body="to" type="string" required>New path. Must not exist unless `overwrite=true`.</ParamField>
 <ParamField query="update_links" type="boolean" default="true">
-  Rewrite wiki links in other files that point to the old path.
+  Set `false` to move the file and leave references as written.
+</ParamField>
+<ParamField query="overwrite" type="boolean" default="false">
+  Replace an existing destination, like `rename(2)`. Meant for protocol clients that save by writing a temp file and renaming it over the original.
+</ParamField>
+<ParamField header="X-Actor" type="string" default="anonymous">
+  Commit author.
 </ParamField>
 
 ```bash
@@ -238,25 +355,33 @@ curl -X POST 'http://localhost:3333/api/kiwi/rename' \
   -d '{"from": "concepts/auth.md", "to": "concepts/authentication.md"}'
 ```
 
-```json
+<ResponseField name="from" type="string">Original path.</ResponseField>
+<ResponseField name="to" type="string">New path.</ResponseField>
+<ResponseField name="etag" type="string">ETag of the moved file.</ResponseField>
+<ResponseField name="updated_links" type="string[]">Other pages whose links were rewritten. Omitted when none changed.</ResponseField>
+
+```json Response
 {
   "from": "concepts/auth.md",
   "to": "concepts/authentication.md",
   "etag": "c3d4e5f6...",
-  "updated_links": 8
+  "updated_links": ["concepts/users.md", "runbooks/login-outage.md"]
 }
 ```
 
-## Rename a directory
+Returns `404` if the source does not exist and `409` if the destination exists or a link could not be kept pointing at the file.
 
-Move an entire directory and update all internal links.
+## Rename a folder
 
-```http
-POST /api/kiwi/rename-dir
-```
+Moves a folder, rewrites links into it from elsewhere, and fixes relative links inside it, in one commit.
 
-<ParamField body="from" type="string" required>Old directory path.</ParamField>
-<ParamField body="to" type="string" required>New directory path.</ParamField>
+**`POST /rename-dir`**
+
+<ParamField body="from" type="string" required>Current folder.</ParamField>
+<ParamField body="to" type="string" required>New folder. No destination file may exist.</ParamField>
+<ParamField query="update_links" type="boolean" default="true">
+  Set `false` to leave references as written.
+</ParamField>
 
 ```bash
 curl -X POST 'http://localhost:3333/api/kiwi/rename-dir' \
@@ -264,84 +389,236 @@ curl -X POST 'http://localhost:3333/api/kiwi/rename-dir' \
   -d '{"from": "concepts", "to": "docs/concepts"}'
 ```
 
-```json
-{"from": "concepts", "to": "docs/concepts", "renamed": 15}
+```json Response
+{
+  "from": "concepts",
+  "to": "docs/concepts",
+  "renamed": 15,
+  "updated_links": ["index.md", "runbooks/onboarding.md"]
+}
 ```
 
-## Templates
+`renamed` is the number of files moved. For multi-file moves and merges with a review step, see [Refactor](/api/refactor).
 
-List and read page templates stored in `.kiwi/templates/`.
+## Upload an asset
 
-### List templates
+Uploads an image, video, audio file, or PDF as multipart form data and returns a ready-to-paste markdown link.
+
+**`POST /assets`**
+
+<ParamField query="path" type="string">
+  Folder to store the file in, for example `assets/diagrams`. Defaults to the root.
+</ParamField>
+<ParamField body="file" type="file" required>
+  The file (multipart field name `file`). Hidden names starting with `.` are rejected.
+</ParamField>
+<ParamField header="X-Actor" type="string" default="anonymous">
+  Commit author.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/assets?path=assets' \
+  -H "X-Actor: agent:uploader" \
+  -F "file=@diagram.png"
+```
+
+<ResponseField name="path" type="string">Stored path.</ResponseField>
+<ResponseField name="markdown" type="string">Embed (`![]()`) for images, video, and audio; a link for other types.</ResponseField>
+<ResponseField name="contentType" type="string">Detected MIME type.</ResponseField>
+<ResponseField name="size" type="integer">Size in bytes.</ResponseField>
+<ResponseField name="etag" type="string">ETag of the stored file.</ResponseField>
+
+```json Response
+{
+  "path": "assets/diagram.png",
+  "markdown": "![diagram](/raw/assets/diagram.png)",
+  "contentType": "image/png",
+  "size": 48213,
+  "etag": "0a1b2c3d..."
+}
+```
+
+The default limit is 100 MiB and the default allowlist covers common image, video, and audio types plus PDF. Override both with `[assets] max_file_size` and `allowed_types`. Too large returns `413`; a type outside the allowlist returns `415`.
+
+## Serve a raw file
+
+Serves file bytes at a stable URL for `<img>`, `<video>`, and `<iframe>` tags. The web UI uses it for every embedded asset.
+
+**`GET /raw/{path}`** (also **`GET /api/kiwi/raw/{path}`** and **`GET /api/kiwi/{space}/raw/{path}`** for non-primary spaces)
+
+<ParamField path="path" type="string" required>
+  File path, URL-escaped per segment.
+</ParamField>
+<ParamField query="exp" type="string">
+  Expiry from [`GET /raw-sign`](#sign-a-raw-file-url).
+</ParamField>
+<ParamField query="sig" type="string">
+  Signature from [`GET /raw-sign`](#sign-a-raw-file-url).
+</ParamField>
+
+```bash
+curl -O 'http://localhost:3333/raw/assets/diagram.png' \
+  -H "Authorization: Bearer $KIWI_API_KEY"
+```
+
+When auth is on, a request needs one of:
+
+- An `Authorization` header that passes normal auth (key scopes apply to the file path).
+- A valid `exp` and `sig` pair. An invalid or expired signature returns `403`.
+- A target that is already public: a branding logo or favicon, a page with `visibility: public` or that is published, or an asset next to such a page.
+
+Spaces with `visibility = "public"` or `"unlisted"` serve raw files without credentials. Responses include `X-Content-Type-Options: nosniff`, and SVGs get a restrictive `Content-Security-Policy`. Use [`GET /file`](#read-a-file) instead when you need an `ETag`.
+
+## Sign a raw file URL
+
+Returns a short-lived `/raw/` URL that works without an `Authorization` header, for clients that can't send one.
+
+**`GET /raw-sign`**
+
+<ParamField query="path" type="string" required>
+  File path.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/raw-sign?path=assets/diagram.png' \
+  -H "Authorization: Bearer $KIWI_API_KEY"
+```
+
+<ResponseField name="path" type="string">Normalized path.</ResponseField>
+<ResponseField name="url" type="string">Signed URL, relative to the server root.</ResponseField>
+<ResponseField name="expires" type="string">Expiry time (RFC 3339).</ResponseField>
+
+```json Response
+{
+  "path": "assets/diagram.png",
+  "url": "/raw/assets/diagram.png?exp=1792400400&sig=Zk3x...",
+  "expires": "2026-10-19T10:00:00Z"
+}
+```
+
+A signed URL stays valid for 30 to 60 minutes. Signatures are per space and do not survive a server restart.
+
+## Get a table of contents
+
+Returns a page's headings with anchor slugs.
+
+**`GET /toc`**
+
+<ParamField query="path" type="string" required>
+  Markdown file.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/toc?path=concepts/auth.md'
+```
+
+```json Response
+{
+  "path": "concepts/auth.md",
+  "headings": [
+    {"level": 1, "text": "Authentication", "slug": "authentication"},
+    {"level": 2, "text": "OAuth2 flow", "slug": "oauth2-flow"},
+    {"level": 2, "text": "JWT tokens", "slug": "jwt-tokens"}
+  ]
+}
+```
+
+## Resolve wiki links
+
+Rewrites `[[wiki links]]` in a markdown string to absolute URLs, for rendering content outside KiwiFS.
+
+**`POST /resolve-links`**
+
+<ParamField body="content" type="string" required>
+  Markdown to rewrite.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/resolve-links' \
+  -H "Content-Type: application/json" \
+  -d '{"content": "See [[auth]] and [[billing]]."}'
+```
+
+```json Response
+{"content": "See [auth](https://wiki.example.com/page/concepts/auth.md) and [billing](https://wiki.example.com/page/concepts/billing.md)."}
+```
+
+Without a configured public URL, the content comes back unchanged. To resolve links while reading a file, use `GET /file?resolve_links=true`.
+
+## List page templates
+
+Returns the markdown templates in `.kiwi/templates/`, sorted by name.
+
+**`GET /templates`**
 
 ```bash
 curl 'http://localhost:3333/api/kiwi/templates'
 ```
 
-```json
-["runbook", "decision", "episode", "concept"]
-```
-
-### Read a template
-
-```bash
-curl 'http://localhost:3333/api/kiwi/templates?name=runbook'
-```
-
-```json
-{"name": "runbook", "content": "---\ntype: runbook\ntitle: \nstatus: draft\n---\n\n# Title\n\n## Steps\n\n1. ..."}
-```
-
-## Patch frontmatter
-
-Update YAML frontmatter without rewriting the markdown body. The body is preserved byte-for-byte.
-
-<Tabs>
-  <Tab title="PATCH /file?merge=frontmatter">
-    Send a JSON object of fields to merge.
-
-    ```bash
-    curl -X PATCH 'http://localhost:3333/api/kiwi/file?path=runbooks/high-cpu.md&merge=frontmatter' \
-      -H "Content-Type: application/json" \
-      -H "If-Match: \"abc123\"" \
-      -d '{"status": "published", "execution_count": 2}'
-    ```
-  </Tab>
-  <Tab title="PATCH /file/frontmatter">
-    Same merge with an explicit `fields` object.
-
-    ```bash
-    curl -X PATCH 'http://localhost:3333/api/kiwi/file/frontmatter?path=adr.md' \
-      -H "Content-Type: application/json" \
-      -d '{"fields": {"reviewed_by": "alice"}}'
-    ```
-  </Tab>
-</Tabs>
-
-<ParamField query="path" type="string" required>
-  Markdown file to update.
-</ParamField>
-
-<Info>
-Send `If-Match` with the current ETag to refuse stale writes. A conflict returns `409`.
-</Info>
-
-## Resolve wiki links
-
-Resolve `[[wiki-links]]` to their canonical file paths and permalinks.
-
-```bash
-curl -X POST 'http://localhost:3333/api/kiwi/resolve-links' \
-  -H "Content-Type: application/json" \
-  -d '{"links": ["auth", "billing", "nonexistent"]}'
-```
-
-```json
+```json Response
 {
-  "resolved": {
-    "auth": {"path": "concepts/auth.md", "title": "Authentication"},
-    "billing": {"path": "concepts/billing.md", "title": "Billing"}
-  },
-  "unresolved": ["nonexistent"]
+  "templates": [
+    {"name": "decision", "path": ".kiwi/templates/decision.md"},
+    {"name": "runbook", "path": ".kiwi/templates/runbook.md"}
+  ]
 }
 ```
+
+Returns an empty `templates` array when the folder does not exist. See [Templates](/guides/templates).
+
+## Read a page template
+
+Returns one template's content.
+
+**`GET /template`**
+
+<ParamField query="name" type="string" required>
+  Template name without `.md`.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/template?name=runbook'
+```
+
+```json Response
+{"name": "runbook", "content": "---\ntype: runbook\nstatus: draft\n---\n\n# Title\n\n## Steps\n\n1. ..."}
+```
+
+Returns `404` if the template does not exist and `400` for a name containing `/`, `\`, or `..`.
+
+## Read a symlink target
+
+Returns the target of a symbolic link as plain text, without following it.
+
+**`GET /readlink`**
+
+<ParamField query="path" type="string" required>
+  Symlink path.
+</ParamField>
+
+```bash
+curl 'http://localhost:3333/api/kiwi/readlink?path=latest.md'
+```
+
+```text Response
+reports/2026-10.md
+```
+
+Returns `404` if the path does not exist and `400` if it is not a symlink.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Versioning" icon="code-branch" href="/api/versioning">
+    History, diff, and blame for any file.
+  </Card>
+  <Card title="Utilities" icon="screwdriver-wrench" href="/api/utilities">
+    Peek, sections, lint, and more.
+  </Card>
+  <Card title="Drafts" icon="code-pull-request" href="/api/drafts">
+    Stage file changes on a branch before merging.
+  </Card>
+  <Card title="Wiki links" icon="link" href="/concepts/wiki-links">
+    How links resolve and get rewritten on rename.
+  </Card>
+</CardGroup>

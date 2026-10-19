@@ -1,223 +1,134 @@
 ---
 title: "KiwiFS Cloud"
-description: "Connect to hosted KiwiFS workspaces — authentication, REST API, MCP, and CLI setup."
+description: "Connect agents and the kiwifs CLI to a hosted KiwiFS Cloud workspace."
 icon: "cloud"
 ---
 
-[KiwiFS Cloud](https://app.kiwifs.com) is the hosted version of KiwiFS. It handles workspace provisioning, authentication, billing, and multi-tenant routing so you can skip deployment and go straight to building.
+[KiwiFS Cloud](https://app.kiwifs.com) is the hosted version of KiwiFS. It runs the server, backups, TLS, and sign-in for you, so you can skip deployment. Each workspace is a KiwiFS knowledge base with the same MCP tools as a self-hosted server.
 
-## How it works
+This page covers connecting to a Cloud workspace from your agents and the `kiwifs` CLI. For self-hosting, start with the [Quickstart](/quickstart).
 
-```
-Your agent / app                   KiwiFS Cloud
-─────────────────                  ──────────────────────
-kiwi_sk_* or OAuth  ──────────▶   api.kiwifs.com (proxy)
-                                        │
-                                        ▼
-                                   KiwiFS instance
-                                   (your workspace)
-```
+## Connect an MCP client
 
-Cloud authenticates your request and forwards it to the KiwiFS instance that backs your workspace. All self-hosted KiwiFS features — REST, MCP, search, versioning, drafts, and more — are available through the cloud proxy.
+Each workspace has an MCP endpoint:
 
-## Authentication
-
-<Tabs>
-<Tab title="API Key">
-Every workspace has a `kiwi_sk_*` API key. Pass it as a Bearer token:
-
-```bash
-curl https://api.kiwifs.com/api/workspaces/eng-handbook/file?path=README.md \
-  -H "Authorization: Bearer $KIWI_API_KEY"
-```
-
-Get your key from **Settings → API Key** in the workspace UI, or via the CLI:
-
-```bash
-kiwifs login
-kiwifs connect eng-handbook
-```
-</Tab>
-<Tab title="MCP OAuth 2.1">
-For interactive agent sessions (Claude Desktop, Cursor, etc.), KiwiFS Cloud supports MCP OAuth 2.1 with PKCE. The agent opens a browser window for login — no API key needed.
-
-MCP clients that support OAuth will automatically discover the flow via `WWW-Authenticate` headers.
-</Tab>
-</Tabs>
-
-## REST API
-
-Base URL: `https://api.kiwifs.com/api/workspaces/{slug}`
-
-The cloud proxy exposes the same endpoints as self-hosted KiwiFS. Key endpoints:
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/tree` | List workspace files |
-| `GET` | `/file?path=README.md` | Read a file |
-| `PUT` | `/file?path=README.md` | Create or update a file |
-| `DELETE` | `/file?path=README.md` | Delete a file |
-| `GET` | `/search?q=auth` | Full-text search |
-| `POST` | `/search/semantic` | Vector search |
-| `GET` | `/query?q=TABLE ...` | DQL query |
-| `GET` | `/versions?path=...` | Git history |
-| `GET` | `/context` | Agent playbook + schema |
-
-<CodeGroup>
-```bash curl
-curl "https://api.kiwifs.com/api/workspaces/eng-handbook/file?path=README.md" \
-  -H "Authorization: Bearer $KIWI_API_KEY"
-```
-
-```javascript JavaScript
-const res = await fetch(
-  "https://api.kiwifs.com/api/workspaces/eng-handbook/file?path=README.md",
-  { headers: { Authorization: `Bearer ${process.env.KIWI_API_KEY}` } }
-);
-const content = await res.text();
-```
-
-```python Python
-import os, requests
-
-res = requests.get(
-    "https://api.kiwifs.com/api/workspaces/eng-handbook/file",
-    params={"path": "README.md"},
-    headers={"Authorization": f"Bearer {os.environ['KIWI_API_KEY']}"},
-)
-content = res.text
-```
-</CodeGroup>
-
-For the full endpoint reference, see the [REST API documentation](/api/overview). All endpoints documented there work under the cloud base URL.
-
-## MCP
-
-The MCP endpoint for a cloud workspace is:
-
-```
+```text
 https://api.kiwifs.com/api/workspaces/{slug}/mcp
 ```
 
+Authenticate with your workspace API key, which you find in the workspace settings at [app.kiwifs.com](https://app.kiwifs.com).
+
 <Tabs>
-<Tab title="Interactive (OAuth)">
-For agents that support MCP OAuth (Claude Desktop, Cursor, etc.):
+  <Tab title="CLI (recommended)">
+    `kiwifs connect` prints a ready-to-paste config, or writes it into your client's config file:
 
-```json
-{
-  "mcpServers": {
-    "kiwi": {
-      "url": "https://api.kiwifs.com/api/workspaces/eng-handbook/mcp"
-    }
-  }
-}
-```
+    ```bash Terminal
+    export KIWI_API_KEY=kiwi_sk_...
+    kiwifs connect my-workspace                  # print config
+    kiwifs connect my-workspace --write cursor   # write to Cursor
+    kiwifs connect my-workspace --write auto     # write to every detected client
+    ```
 
-The agent will open a browser login flow on first connection.
-</Tab>
-<Tab title="CI / Headless (API key)">
-For environments without a browser:
+    Restart the client afterwards.
+  </Tab>
+  <Tab title="URL clients">
+    For clients that support remote MCP servers (Cursor, Claude Code, Windsurf, VS Code, and others):
 
-```json
-{
-  "mcpServers": {
-    "kiwi": {
-      "url": "https://api.kiwifs.com/api/workspaces/eng-handbook/mcp",
-      "headers": {
-        "Authorization": "Bearer kiwi_sk_..."
+    ```json mcp.json
+    {
+      "mcpServers": {
+        "kiwi": {
+          "url": "https://api.kiwifs.com/api/workspaces/my-workspace/mcp",
+          "headers": { "Authorization": "Bearer ${env:KIWI_API_KEY}" }
+        }
       }
     }
-  }
-}
-```
-</Tab>
-<Tab title="CLI shortcut">
-Generate and write MCP config automatically:
+    ```
+  </Tab>
+  <Tab title="Claude Desktop">
+    Claude Desktop runs MCP servers over stdio, so bridge to the workspace with `kiwifs mcp --remote`:
 
-```bash
-kiwifs login
-kiwifs connect eng-handbook
-```
-
-This writes the appropriate config to your MCP client's config file.
-</Tab>
+    ```json claude_desktop_config.json
+    {
+      "mcpServers": {
+        "kiwi": {
+          "command": "kiwifs",
+          "args": [
+            "mcp",
+            "--remote", "https://api.kiwifs.com/api/workspaces/my-workspace",
+            "--api-key", "kiwi_sk_..."
+          ]
+        }
+      }
+    }
+    ```
+  </Tab>
 </Tabs>
 
-All 71 MCP tools are available through the cloud endpoint. See [MCP tool reference](/concepts/mcp).
-
-## CLI setup
-
-```bash
-# Authenticate with KiwiFS Cloud
-kiwifs login
-
-# Generate MCP config for a workspace
-kiwifs connect <workspace-slug>
-
-# Check who you're logged in as
-kiwifs whoami
-
-# Log out
-kiwifs logout
-```
-
-`kiwifs connect` detects your MCP client (Claude Desktop, Cursor, etc.) and writes the appropriate config file.
-
-## API key management
-
-| Operation | How |
-|-----------|-----|
-| View key | **Settings → API Key** in workspace UI |
-| Rotate key | **Settings → API Key → Rotate** or `POST /api/workspaces/{slug}/rotate-key` |
-| Scope | Keys are scoped to a single workspace |
-| Format | `kiwi_sk_` followed by 32 URL-safe characters |
-
 <Warning>
-API keys are shown once on creation or rotation. Store them securely — KiwiFS Cloud stores only a hash and cannot recover the plaintext.
+Treat the API key like a password. `kiwifs connect` without `--write` prints a config that reads the key from `KIWI_API_KEY`, which is safe to commit. `--write` embeds the key in the client's config file.
 </Warning>
 
-## Public workspaces
-
-Workspaces can be set to `public` or `unlisted` visibility. Public workspaces expose read-only endpoints without authentication:
+## kiwifs connect
 
 ```bash
-# Public tree
-GET /api/workspaces/{slug}/public/tree
-
-# Public file read
-GET /api/workspaces/{slug}/public/file?path=README.md
-
-# Public search (public workspaces only)
-GET /api/workspaces/{slug}/public/search?q=auth
-
-# Published page (any visibility)
-GET /api/workspaces/{slug}/public/page/{path}
+kiwifs connect <workspace-slug> [flags]
 ```
 
-## Differences from self-hosted
+<AccordionGroup>
+  <Accordion title="Flags">
+    | Flag | Default | Description |
+    | --- | --- | --- |
+    | `--key` | `KIWI_API_KEY` | Workspace API key. If unset, the CLI uses your `kiwifs login` session to fetch it. |
+    | `--write` | — | Write the config to `cursor`, `claude-code`, `windsurf`, `claude-desktop`, or `auto` (every detected client) |
+    | `--project` | `false` | Write to the project config (`.cursor/mcp.json` or `.mcp.json`) instead of the global one |
+    | `--host` | `https://api.kiwifs.com` | API host |
+  </Accordion>
+  <Accordion title="Config files it writes">
+    | Client | Global config | Project config |
+    | --- | --- | --- |
+    | `cursor` | `~/.cursor/mcp.json` | `.cursor/mcp.json` |
+    | `claude-code` | `~/.claude/settings.json` | `.mcp.json` |
+    | `windsurf` | `~/.codeium/windsurf/mcp_config.json` | — |
+    | `claude-desktop` | `claude_desktop_config.json` in the Claude app folder | — |
 
-| Feature | Self-hosted | Cloud |
-|---------|------------|-------|
-| Auth | configurable (none, apikey, perspace, OIDC) | API key + MCP OAuth 2.1 |
-| Base URL | `http://host:3333/api/kiwi` | `https://api.kiwifs.com/api/workspaces/{slug}` |
-| Multi-space | `X-Kiwi-Space` header or URL prefix | one workspace per slug |
-| Alternate protocols | NFS, S3, WebDAV, FUSE | MCP and REST only |
-| OpenAPI spec | `/api/openapi.json` | not exposed (use self-hosted spec) |
-| Billing | N/A | managed via Settings → Billing |
+    Existing entries in those files are kept; only the `kiwi` server entry is added or replaced.
+  </Accordion>
+</AccordionGroup>
+
+## Sign in from the CLI
+
+`kiwifs login` uses the OAuth device flow: the CLI shows a code, you confirm it in your browser, and the CLI stores a session in `~/.kiwifs/credentials.json`. After that, `kiwifs connect` works without `--key`.
+
+```bash Terminal
+kiwifs login     # sign in through your browser
+kiwifs whoami    # show the signed-in account
+kiwifs logout    # remove stored credentials
+```
+
+## Cloud and self-hosted compared
+
+| | Self-hosted | Cloud |
+| --- | --- | --- |
+| Runs on | Your machine, Docker, or Kubernetes | Managed by KiwiFS |
+| Auth | `none`, `apikey`, `perspace`, or `oidc` | Workspace API key or browser sign-in |
+| MCP endpoint | `http://host:3333/mcp`, or `kiwifs mcp` over stdio | `https://api.kiwifs.com/api/workspaces/{slug}/mcp` |
+| NFS, S3, WebDAV | Available with `kiwifs serve` flags | Not available |
+| Workspaces | One server, one or more [spaces](/concepts/multi-space) | One workspace per slug |
 
 ## Related
 
 <CardGroup cols={2}>
-  <Card title="API overview" icon="terminal" href="/api/overview">
-    Full REST API reference (endpoints work the same on cloud).
-  </Card>
   <Card title="MCP" icon="plug" href="/concepts/mcp">
-    71 MCP tools and client setup.
+    The MCP tools your agent gets.
   </Card>
   <Card title="Agent playbook" icon="book-open" href="/concepts/agent-playbook">
-    Agent onboarding with kiwi_context.
+    How agents onboard with `kiwi_context`.
   </Card>
   <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Self-hosted quickstart for local development.
+    Run KiwiFS yourself.
+  </Card>
+  <Card title="Authentication" icon="key" href="/guides/auth-tokens">
+    Auth for self-hosted servers.
   </Card>
 </CardGroup>

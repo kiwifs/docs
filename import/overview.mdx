@@ -1,87 +1,122 @@
 ---
-title: "Data Import"
-description: "Import data from 18 sources into your KiwiFS knowledge base."
+title: "Data import"
+description: "Turn rows, records, and documents from 21 sources into markdown pages with frontmatter."
 icon: "download"
 ---
 
-KiwiFS can import data from databases, files, and SaaS platforms — converting each row/record into a markdown page with structured frontmatter.
+Every imported record becomes one markdown page. Fields land in frontmatter, so you can search, filter, and query them with [DQL](/concepts/dql) right away. Imports go through the normal write pipeline, so each page is versioned and indexed like any other edit.
 
-```bash
-kiwifs import --from <source> [options] --root ./knowledge
+```bash Terminal
+kiwifs import --from <source> [flags] --root ./knowledge
 ```
 
 ## Supported sources
 
 <CardGroup cols={3}>
-  <Card title="PostgreSQL" icon="database" href="/import/databases">
-    `--from postgres`
+  <Card title="Databases" icon="database" href="/import/databases">
+    `postgres`, `mysql`, `sqlite`, `mongodb`, `firestore`, `dynamodb`, `redis`, `elasticsearch`
   </Card>
-  <Card title="MySQL" icon="database" href="/import/databases">
-    `--from mysql`
+  <Card title="Files" icon="file-csv" href="/import/files">
+    `csv`, `json`, `jsonl`, `yaml`, `excel`, `bibtex`, `markdown`
   </Card>
-  <Card title="SQLite" icon="database" href="/import/databases">
-    `--from sqlite`
+  <Card title="Apps and wikis" icon="cloud-arrow-down" href="/import/saas">
+    `notion`, `airtable`, `gsheets`, `obsidian`, `confluence`
   </Card>
-  <Card title="MongoDB" icon="database" href="/import/databases">
-    `--from mongodb`
+  <Card title="Croissant" icon="table-list" href="/import/croissant">
+    `croissant` dataset metadata from Kaggle, Hugging Face, and others
   </Card>
-  <Card title="CSV" icon="file-csv" href="/import/files">
-    `--from csv`
+  <Card title="Airbyte" icon="rotate" href="/import/airbyte">
+    Airbyte connectors through Docker or Airbyte Cloud
   </Card>
-  <Card title="JSON" icon="file-code" href="/import/files">
-    `--from json`
-  </Card>
-  <Card title="YAML" icon="file-code" href="/import/files">
-    `--from yaml`
-  </Card>
-  <Card title="Excel" icon="file-excel" href="/import/files">
-    `--from excel`
-  </Card>
-  <Card title="Notion" icon="n" href="/import/saas">
-    `--from notion`
-  </Card>
-  <Card title="Airtable" icon="table" href="/import/saas">
-    `--from airtable`
-  </Card>
-  <Card title="Google Sheets" icon="table" href="/import/saas">
-    `--from gsheets`
-  </Card>
-  <Card title="Firestore" icon="fire" href="/import/databases">
-    `--from firestore`
+  <Card title="Documents" icon="file-pdf" href="/import/connections#ingest-documents">
+    PDF, DOCX, PPTX, and more through MarkItDown
   </Card>
 </CardGroup>
 
-Plus: JSONL, Obsidian vaults, Confluence exports, DynamoDB, Redis, Elasticsearch, and [Croissant](/import/croissant) dataset metadata.
+## Where each source is available
 
-## Key features
+The CLI supports every source. The REST API, the web UI import wizard, and the `kiwi_import` MCP tool support a subset.
 
-- **Idempotent** — re-importing the same data skips unchanged records
-- **Column filtering** — `--columns "name,email,status"` to include only specific fields
-- **Dry run** — `--dry-run` to preview what would be imported
-- **Limit** — `--limit 100` to import a subset
-- **Custom queries** — `--query "SELECT * FROM users WHERE active = true"`
+| Source | CLI | REST `POST /import` | MCP `kiwi_import` |
+| --- | --- | --- | --- |
+| `postgres`, `mysql`, `sqlite`, `mongodb`, `firestore` | Yes | Yes | Yes |
+| `csv`, `json`, `jsonl` | Yes | Yes | Yes |
+| `notion`, `airtable` | Yes | Yes | Yes |
+| `markdown`, `obsidian`, `bibtex`, `croissant` | Yes | Yes | No |
+| `yaml`, `excel`, `gsheets`, `confluence` | Yes | No | No |
+| `dynamodb`, `redis`, `elasticsearch` | Yes | No | No |
+| Airbyte connectors (`firebase-rtdb`, ...) | No | Yes | No |
 
-For HTTP APIs that **browse** schemas, **preview** rows, and manage **saved connections**, see [Browse, preview, and saved connections](/import/connections) and [Import and export](/api/import-export#import-browse).
+<Note>
+REST and MCP imports read file and directory paths on the machine that runs KiwiFS, not on the caller's machine. To send a file from your machine, use `POST /api/kiwi/import/upload`. The `kiwi_import` MCP tool only works in local mode (`kiwifs mcp --root`).
+</Note>
 
-For **Airbyte** Docker and Cloud sync, see [Airbyte import](/import/airbyte).
+## Common flags
 
-## How it works
+These flags work with every source.
 
-Each record becomes a markdown file with frontmatter:
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--from` | | Source type (required) |
+| `--root`, `-r` | `./knowledge` | Knowledge root to write into |
+| `--prefix` | Source name | Folder for the imported pages |
+| `--id-column` | Auto-detect | Field whose value becomes the file name |
+| `--columns` | All | Comma-separated fields to keep |
+| `--limit` | `0` (no limit) | Maximum records to import |
+| `--dry-run` | `false` | Count what would be imported without writing |
 
-```markdown
+The default `--prefix` is the source's name: the table or collection, the file name without its extension, the vault folder name, `notion`, or `redis`.
+
+## How records become pages
+
+KiwiFS writes each record to `<prefix>/<id>.md`. The `<id>` is the `--id-column` value, the table's primary key, or an `id` or `_id` field. Without any of those it falls back to the row number.
+
+```markdown users/42.md
 ---
-_imported_at: "2026-04-25T18:46:15Z"
+_imported_at: "2026-10-19T18:46:15Z"
 _source: users
 _source_id: pg:users:42
-name: Jane Doe
 email: jane@example.com
+name: Jane Doe
 role: admin
 ---
 
 # Jane Doe
 
-> Auto-imported from users (row pg:users:42)
+| Field | Value |
+|-------|-------|
+| email | jane@example.com |
+| name | Jane Doe |
+| role | admin |
 ```
 
-The `_source_id` field enables idempotent re-imports — KiwiFS compares field values and skips records that haven't changed.
+The page title comes from a `title` or `name` field, falling back to the ID. Sources that already produce markdown (`markdown`, `obsidian`, `confluence`, `bibtex`, `croissant`) keep their own body and frontmatter. KiwiFS adds the `_source`, `_source_id`, and `_imported_at` fields to it.
+
+### Re-imports
+
+Imports are idempotent. When a page with the same `_source_id` exists and its fields are unchanged, KiwiFS skips it. Changed records are rewritten, and new records are created.
+
+```text Output
+Imported 12 records, skipped 40
+```
+
+## Generate a schema from a sample
+
+For `csv`, `json`, and `jsonl` files, `--infer-schema` samples up to 100 rows and prints a JSON Schema instead of importing. Add `--save-schema` to also write it to `.kiwi/schemas/<name>.json` under the current directory.
+
+```bash Terminal
+kiwifs import --from csv --file people.csv --infer-schema --save-schema
+```
+
+See [Schemas](/concepts/schemas) for how KiwiFS validates frontmatter against these files.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Browse, preview, and sync" icon="link" href="/import/connections">
+    Preview rows, save connections, and schedule auto-sync.
+  </Card>
+  <Card title="Import API" icon="arrows-rotate" href="/api/import-export">
+    REST reference for every import endpoint.
+  </Card>
+</CardGroup>

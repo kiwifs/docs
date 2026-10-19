@@ -1,0 +1,185 @@
+---
+title: "Data and query widgets"
+sidebarTitle: "Data and queries"
+description: "Live DQL tables, structured records you can query, kanban boards, and per-reader progress trackers."
+icon: "database"
+---
+
+These blocks connect a page to the rest of the knowledge base: they run DQL queries when the page is viewed, or hold structured records that other pages can query.
+
+## kiwi-query
+
+Runs a DQL query when the page is viewed and renders the result as a table or list. Rows link to their pages.
+
+````markdown
+```kiwi-query
+TABLE title, status, priority
+FROM "tasks"
+WHERE status != "done"
+SORT priority DESC
+```
+````
+
+The body is a [DQL](/concepts/dql) query. An older key-value form still works when every line is one of `from`, `where`, `sort`, `order`, `limit`, or `columns`:
+
+````markdown
+```kiwi-query
+from: tasks/
+where: $.status = open
+sort: $.priority
+order: desc
+limit: 20
+columns: path, status, priority
+```
+````
+
+## kiwi-data
+
+Structured records rather than code. The web UI shows them as a table with a kind badge, and the server indexes them so DQL can query them with `FROM RECORDS "<kind>"`.
+
+````markdown
+```kiwi-data
+kind: dataset-schema
+records:
+  - name: target
+    dtype: float
+    missing-rate: 0.116
+  - name: id
+    dtype: int
+    missing-rate: 0
+```
+````
+
+```sql DQL
+TABLE name, dtype, missing-rate
+FROM RECORDS "dataset-schema"
+WHERE missing-rate > 0.1
+```
+
+Three body shapes work:
+
+| Shape | Kind comes from |
+| --- | --- |
+| `kind:` plus a `records:` list | The `kind:` key. |
+| A mapping with `kind:` and other keys | The `kind:` key. The other keys become a single record. |
+| A bare list of records | The opening line: ` ```kiwi-data dataset-schema ` or ` ```kiwi-data kind=dataset-schema `. |
+
+A `kind:` in the body wins over the opening line.
+
+<AccordionGroup>
+  <Accordion title="Querying records">
+    - Field names resolve against the record first, then fall back to the owning page's frontmatter. Force one side with the `record.` or `page.` prefix, for example `record.status`.
+    - Each row also has `_kind`, `_block` (which `kiwi-data` block on the page), and `_record` (position within the block). Rows default to document order.
+    - `FROM RECORDS "<kind>" IN "folder/"` limits the query to a folder.
+  </Accordion>
+  <Accordion title="Indexing and errors">
+    - Records refresh on every write. After upgrading from a version without `kiwi-data`, run `kiwifs reindex` once to index older pages.
+    - A block is capped at 256 KB.
+    - A block that fails to parse (bad YAML, no kind, no records) is skipped and logged, and the rest of the page still indexes. The web UI shows the raw source with the parser's message.
+  </Accordion>
+  <Accordion title="Animating records with a table fence">
+    A [`table`](/widgets/data-structures#table) fence with `fromData: <kind>` renders the records of a `kiwi-data` block on the same page, so a walkthrough and its dataset share one source.
+  </Accordion>
+</AccordionGroup>
+
+## kiwi-kanban
+
+A drag-and-drop board from YAML columns, or from a DQL query grouped by a field. Dragging a card reorders the board in the browser and doesn't change the file. Use the copy button to export the prioritized list.
+
+````markdown
+```kiwi-kanban
+title: Sprint planning
+columns:
+  - name: Now
+    color: "#22c55e"
+    cards:
+      - id: auth
+        title: Fix auth token refresh
+        tags: [backend, critical]
+  - name: Next
+    color: "#3b82f6"
+    cards:
+      - id: search
+        title: Add semantic search
+        tags: [backend]
+export:
+  format: markdown
+  copyLabel: Copy prioritized list
+```
+````
+
+<Note>
+Start each card with `- id:`. The YAML parser only recognizes a new card on an `id` line.
+</Note>
+
+To build the board from pages, give a `query:` and a `groupBy:` column. Each distinct value becomes a lane, and any `columns:` you declare fix the lane order and colors:
+
+````markdown
+```kiwi-kanban
+query: |
+  TABLE title, status, priority FROM "tasks"
+groupBy: status
+columns:
+  - name: todo
+    color: "#f59e0b"
+  - name: in-progress
+  - name: done
+```
+````
+
+A query card takes its title from the `title` or `name` column (falling back to the file name), and also reads `tags`, `description` or `summary`, `priority`, and `assignee` or `owner`.
+
+<Accordion title="kiwi-kanban keys">
+
+| Key | Description |
+| --- | --- |
+| `title` | Heading above the board. |
+| `columns` | Lanes: `{name, color?, cards?}`. |
+| `columns[].cards` | `{id, title, tags?, description?, priority?, assignee?}`. |
+| `query` | DQL query whose rows become cards. Requires `groupBy`. |
+| `groupBy` | Result column whose value picks a card's lane. |
+| `export.format` | `markdown` or `json`. |
+| `export.copyLabel` | Label for the copy button. |
+
+</Accordion>
+
+For boards that change page frontmatter when you drag a card, use the workflow board in the web UI. See [Workflows](/concepts/workflows).
+
+## Progress tracker
+
+A ` ```widget:tracker ` block tracks progress through a course or problem set. It lists the pages in every top-level folder whose name starts with a number (`01-arrays/`, `02-trees/`, ...) as a collapsible section, skipping files that start with `_`. Readers check pages off and bookmark them, and their progress is saved per reader under the state name you choose.
+
+````markdown
+```widget:tracker
+state: leetcode-progress
+modes:
+  - id: tags
+    label: Tags
+    fields: [tags]
+  - id: companies
+    label: Companies
+    fields: [companies]
+```
+````
+
+- `state` names the saved progress, so two trackers with the same name share it. A body that is just a name, such as `leetcode-progress`, works too. The default is `progress`.
+- `modes` adds a toggle that switches which frontmatter fields show as chips on each row. The default is one `tags` mode.
+
+Sections start collapsed. The chips shown under each page's title come from `[ui.tags] banner` in `.kiwi/config.toml`.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="DQL" icon="database" href="/concepts/dql">
+    The query language, including `FROM RECORDS`.
+  </Card>
+  <Card title="Charts and plots" icon="chart-line" href="/widgets/charts">
+    `kiwi-chart` draws a DQL result as a chart.
+  </Card>
+  <Card title="Workflows" icon="bars-progress" href="/concepts/workflows">
+    State machines behind the workflow board.
+  </Card>
+  <Card title="Croissant import" icon="file-import" href="/import/croissant">
+    Dataset schemas imported as `kiwi-data` blocks.
+  </Card>
+</CardGroup>

@@ -1,27 +1,91 @@
 ---
 title: "Draft spaces"
-description: "Git-backed staging branches so agents can prepare changes before merging to the live knowledge base."
+description: "Stage edits on a private git branch, review the diff, then merge or discard them as a unit."
 icon: "code-branch"
 ---
 
-Draft spaces are **isolated worktrees** tied to your knowledge repository. Each draft has its own branch: agents read and write files inside the draft without touching the main tree until you **merge** or **discard**.
+A draft space is a private copy of your knowledge base where an agent can write freely. Nothing in a draft touches the live pages until you merge it, and discarding it leaves no trace. Use drafts when a batch of edits should be reviewed and published together.
 
-## When to use drafts
+- An agent session that should not publish half-finished work.
+- A batch of edits you want to review as one diff.
+- Several agents working in parallel, each in its own draft.
 
-- Long-running agent sessions that should not publish partial work.
-- Reviewing a batch of edits as a single diff before one merge commit.
-- Parallel agents each with their own draft (subject to server limits).
+Each draft is a git branch named `draft/<id>` with its own worktree under `.kiwi/drafts/`. Drafts need the `git` versioning strategy and a repository with at least one commit.
+
+## Turn on drafts
+
+Drafts are off by default on the server.
+
+```toml .kiwi/config.toml
+[drafts]
+enabled = true
+max_active = 10   # default
+```
+
+Without this, draft endpoints return `501` with `drafts not enabled`. The in-process MCP server (`kiwifs mcp --root`) has drafts available without this setting.
 
 ## Lifecycle
 
-1. **Create** a draft — server allocates an ID and a git branch.
-2. **Read / write / delete / tree** inside the draft using the draft API or MCP tools (`kiwi_draft_*`).
-3. **Diff** against the main branch to see what would change.
-4. **Merge** to apply all draft changes to the live knowledge base (with normal indexing and versioning), or **discard** to delete the draft branch.
+<Steps>
+  <Step title="Create">
+    Create a draft and keep its `id`. Creation fails with `409` when `max_active` drafts already exist.
+  </Step>
+  <Step title="Write">
+    Read, write, delete, and list files inside the draft. Each write commits to the draft branch. Draft writes are not indexed, searchable, or broadcast to the web UI.
+  </Step>
+  <Step title="Review">
+    Diff the draft against the main branch to see exactly what would change.
+  </Step>
+  <Step title="Merge or discard">
+    Merge fast-forwards the main branch to the draft, so its commits land in history unchanged and the file watcher indexes the new content. If the main branch moved since the draft was created, merge fails with `409`. Discard deletes the branch and worktree.
+  </Step>
+</Steps>
 
-If the server returns `501` / "drafts not enabled", this process was started without a draft manager. Use the same KiwiFS version and configuration template as the HTTP server that advertises draft APIs.
+## Use drafts
 
-## Related documentation
+<Tabs>
+  <Tab title="REST">
+    ```bash Terminal
+    # Create
+    curl -X POST 'http://localhost:3333/api/kiwi/drafts' -H 'X-Actor: agent:writer'
 
-- [Drafts REST API](/api/drafts)
-- [MCP](/concepts/mcp) — `kiwi_draft_create`, `kiwi_draft_list`, `kiwi_draft_read`, `kiwi_draft_write`, `kiwi_draft_diff`, `kiwi_draft_merge`, `kiwi_draft_discard`
+    # Write a file inside draft a1b2c3
+    curl -X PUT 'http://localhost:3333/api/kiwi/drafts/a1b2c3/file?path=concepts/auth.md' \
+      --data-binary @auth.md
+
+    # Review, then merge
+    curl 'http://localhost:3333/api/kiwi/drafts/a1b2c3/diff'
+    curl -X POST 'http://localhost:3333/api/kiwi/drafts/a1b2c3/merge'
+    ```
+
+    Also: `GET /drafts`, `GET /drafts/{id}`, `GET` and `DELETE /drafts/{id}/file`, `GET /drafts/{id}/tree`, and `DELETE /drafts/{id}` to discard.
+  </Tab>
+  <Tab title="MCP">
+    | Tool | Purpose |
+    | --- | --- |
+    | `kiwi_draft_create` | Start a draft |
+    | `kiwi_draft_list` | List active drafts |
+    | `kiwi_draft_read` | Read a file inside a draft |
+    | `kiwi_draft_write` | Write a file inside a draft |
+    | `kiwi_draft_diff` | Diff a draft against main |
+    | `kiwi_draft_merge` | Merge a draft |
+    | `kiwi_draft_discard` | Delete a draft |
+  </Tab>
+</Tabs>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Drafts API" icon="code" href="/api/drafts">
+    Every draft endpoint and response.
+  </Card>
+  <Card title="Versioning" icon="code-branch" href="/concepts/versioning">
+    How commits and history work.
+  </Card>
+  <Card title="Task claims" icon="lock" href="/concepts/claims">
+    Lease a path so agents do not edit the same page at once.
+  </Card>
+  <Card title="MCP" icon="plug" href="/concepts/mcp">
+    Connect an agent to KiwiFS.
+  </Card>
+</CardGroup>

@@ -1,274 +1,693 @@
 ---
 title: "Import and export"
-description: "REST import (including browse, preview, saved connections, and file ingest) and export formats."
+description: "Pull data from databases, files, and SaaS tools into pages, and stream your knowledge base out as JSONL, CSV, Parquet, or rendered documents."
 icon: "arrows-rotate"
 ---
 
-## Import
+Every import turns source rows or files into markdown pages with frontmatter and writes them through the normal write pipeline, so they are committed to git, indexed, and broadcast like any other write. Exports read the same files back out. All paths below are relative to `http://localhost:3333/api/kiwi`.
 
-Bulk import data into your knowledge base. The import endpoint accepts the same source configuration options as the `kiwifs import` CLI command.
+A typical import has three steps:
 
-```bash
+<Steps>
+  <Step title="Browse">
+    For databases, list tables or collections with [`POST /import/browse`](#browse-tables-and-collections).
+  </Step>
+  <Step title="Preview">
+    Render sample pages with [`POST /import/preview`](#preview-an-import) and get suggested field mappings from [`POST /import/infer-fields`](#infer-field-mappings). Nothing is written.
+  </Step>
+  <Step title="Import">
+    Send the same body to [`POST /import`](#run-an-import). The server saves the connection (without secrets) so you can re-run it later.
+  </Step>
+</Steps>
+
+## Run an import
+
+Import records from a source and write one markdown page per record.
+
+**`POST /api/kiwi/import`**
+
+`from` selects the source. The other fields depend on the source (see [Sources](#sources)). `/import/preview` and `/import/infer-fields` accept the same body.
+
+<ParamField body="from" type="string" required>
+  Source type, for example `postgres`, `csv`, or `obsidian`.
+</ParamField>
+<ParamField body="path" type="string">
+  Directory on the server to read from. Required for `markdown` and `obsidian`.
+</ParamField>
+<ParamField body="file" type="string">
+  File on the server to read from. Required for `csv`, `json`, `jsonl`, and `bibtex`. Also accepted by `croissant`.
+</ParamField>
+<ParamField body="url" type="string">
+  Croissant metadata URL, as an alternative to `file`.
+</ParamField>
+<ParamField body="dsn" type="string">
+  Connection string for `postgres` and `mysql`. Also accepted as the URI for `mongodb`.
+</ParamField>
+<ParamField body="uri" type="string">
+  Connection URI for `mongodb`.
+</ParamField>
+<ParamField body="db" type="string">
+  SQLite database file path. Required for `sqlite`.
+</ParamField>
+<ParamField body="table" type="string">
+  Table to import from `postgres`, `mysql`, or `sqlite`. SQL sources need either `table` or `query`.
+</ParamField>
+<ParamField body="query" type="string">
+  SQL query to run instead of reading a whole table.
+</ParamField>
+<ParamField body="database" type="string">
+  Database name. Required for `mongodb`.
+</ParamField>
+<ParamField body="collection" type="string">
+  Collection name. Required for `mongodb` and `firestore`.
+</ParamField>
+<ParamField body="project" type="string">
+  Google Cloud project ID. Required for `firestore`.
+</ParamField>
+<ParamField body="credentials" type="object">
+  Service account JSON for `firestore`. Never stored.
+</ParamField>
+<ParamField body="database_id" type="string">
+  Notion database ID. Required for `notion`.
+</ParamField>
+<ParamField body="base_id" type="string">
+  Airtable base ID. Required for `airtable`.
+</ParamField>
+<ParamField body="table_id" type="string">
+  Airtable table ID. Required for `airtable`.
+</ParamField>
+<ParamField body="api_key" type="string">
+  API key for `notion` or `airtable`. Falls back to the `NOTION_API_KEY` or `AIRTABLE_API_KEY` environment variable. Never stored.
+</ParamField>
+<ParamField body="prefix" type="string">
+  Directory to write pages into. Defaults to the source name.
+</ParamField>
+<ParamField body="id_column" type="string">
+  Field used as the page filename. Defaults to the source's primary key.
+</ParamField>
+<ParamField body="columns" type="string[]">
+  Only keep these fields in frontmatter.
+</ParamField>
+<ParamField body="field_mappings" type="object[]">
+  Rename, retype, or skip fields. Each entry is `{"source", "target", "type", "skip"}`, where `type` is `string`, `number`, `boolean`, or `date`. When you send any mapping, unmapped fields are dropped.
+</ParamField>
+<ParamField body="dry_run" type="boolean" default="false">
+  Count what would be written without writing anything.
+</ParamField>
+<ParamField body="limit" type="integer" default="0">
+  Stop after this many records. `0` means no limit.
+</ParamField>
+<ParamField body="via" type="string">
+  Force a connector path: `builtin`, `airbyte` (local Docker), or `airbyte-cloud`. Leave empty to pick automatically.
+</ParamField>
+<ParamField body="airbyte_config" type="object">
+  Raw Airbyte connector config. Sending it routes the import through Airbyte.
+</ParamField>
+<ParamField body="airbyte_image" type="string">
+  Override the Airbyte Docker image.
+</ParamField>
+<ParamField body="streams" type="string[]">
+  Airbyte streams to sync. Defaults to all streams.
+</ParamField>
+<ParamField header="X-Actor" type="string" default="api-import">
+  Git commit author for the imported pages.
+</ParamField>
+
+<CodeGroup>
+```bash Postgres table
 curl -X POST 'http://localhost:3333/api/kiwi/import' \
-  -H "Content-Type: application/json" \
-  -H "X-Actor: agent:importer" \
+  -H 'Content-Type: application/json' \
+  -H 'X-Actor: agent:importer' \
   -d '{
-    "source": "postgres",
-    "connection": "postgres://user:pass@localhost:5432/mydb",
-    "query": "SELECT id, title, body FROM articles WHERE updated_at > '\''2026-01-01'\''",
-    "mapping": {
-      "path": "articles/{{id}}.md",
-      "title": "{{title}}",
-      "content": "{{body}}"
-    }
+    "from": "postgres",
+    "dsn": "postgres://user:pass@localhost:5432/mydb",
+    "table": "articles",
+    "prefix": "articles",
+    "id_column": "slug",
+    "columns": ["title", "status", "updated_at"]
   }'
 ```
 
-```json
-{"imported": 42, "skipped": 0, "archived": 3, "errors": []}
+```bash Obsidian vault
+curl -X POST 'http://localhost:3333/api/kiwi/import' \
+  -H 'Content-Type: application/json' \
+  -d '{"from": "obsidian", "path": "/data/vaults/research", "prefix": "research"}'
 ```
+
+```bash CSV with field mappings
+curl -X POST 'http://localhost:3333/api/kiwi/import' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "from": "csv",
+    "file": "/data/exports/customers.csv",
+    "prefix": "customers",
+    "id_column": "id",
+    "field_mappings": [
+      {"source": "company_name", "target": "title"},
+      {"source": "mrr", "type": "number"},
+      {"source": "internal_notes", "skip": true}
+    ]
+  }'
+```
+</CodeGroup>
 
 <ResponseField name="imported" type="integer">Pages created or updated.</ResponseField>
-<ResponseField name="skipped" type="integer">Rows unchanged since last import.</ResponseField>
-<ResponseField name="archived" type="integer">Pages tombstoned with `_archived_at` during a full sync (when source rows disappear).</ResponseField>
-<ResponseField name="errors" type="array">Per-row error messages.</ResponseField>
+<ResponseField name="skipped" type="integer">Records whose page was already up to date.</ResponseField>
+<ResponseField name="archived" type="integer">Pages marked with `_archived_at` because their source row disappeared. Omitted when zero.</ResponseField>
+<ResponseField name="errors" type="string[]">Per-record error messages.</ResponseField>
 
-<AccordionGroup>
-  <Accordion title="Source types">
-    | Source | Config value | Description |
-    |---|---|---|
-    | PostgreSQL | `postgres` | Import from PostgreSQL queries |
-    | MySQL | `mysql` | Import from MySQL queries |
-    | MongoDB | `mongodb` | Import from MongoDB collections |
-    | SQLite | `sqlite` | Import from SQLite databases |
-    | CSV | `csv` | Import from CSV files |
-    | JSON | `json` | Import from JSON or JSONL files |
-    | Notion | `notion` | Import from Notion workspace |
-    | Airtable | `airtable` | Import from Airtable bases |
-    | Google Sheets | `gsheets` | Import from Google Sheets |
-    | Confluence | `confluence` | Import from Confluence spaces |
-    | Obsidian | `obsidian` | Import from Obsidian vaults |
-    | DynamoDB | `dynamodb` | Import from DynamoDB tables |
-    | Redis | `redis` | Import from Redis keys |
-    | Elasticsearch | `elasticsearch` | Import from Elasticsearch indices |
-    | Firestore | `firestore` | Import from Google Firestore |
-    | YAML | `yaml` | Import from YAML files |
-    | Excel | `excel` | Import from `.xlsx` spreadsheets |
-    | Markdown | `markdown` | Import from a folder of `.md` files |
-  </Accordion>
-  <Accordion title="Mapping template syntax">
-    Use double-brace templates to map source fields to KiwiFS file paths and frontmatter:
-
-    ```json
-    {
-      "path": "concepts/{{slug}}.md",
-      "title": "{{name}}",
-      "content": "{{body}}",
-      "frontmatter": {
-        "source": "postgres",
-        "source_id": "{{id}}",
-        "status": "draft"
-      }
-    }
-    ```
-  </Accordion>
-</AccordionGroup>
-
-<Warning>
-Large imports can take time. The endpoint responds synchronously. For very large datasets, consider using the CLI `kiwifs import` command with progress output.
-</Warning>
-
-## Upload file for import
-
-Upload a file to the server for import processing.
-
-```http
-POST /import/upload
-Content-Type: multipart/form-data
+```json Response
+{"imported": 42, "skipped": 3, "archived": 1, "errors": []}
 ```
 
-The uploaded file is stored temporarily and can be referenced by subsequent `POST /import` calls.
+Returns `400` when `from` or a required source field is missing or the source type is unknown, and `500` when the import fails.
 
-## List supported sources
+<Note>
+`path`, `file`, and `db` are paths on the **server's** filesystem. To import a file from your own machine, use [`POST /import/upload`](#upload-a-file-and-import-it).
+</Note>
 
-```http
-GET /import/sources
+The request is synchronous. For syncable sources (`postgres`, `mysql`, `mongodb`, `firestore`, `notion`, `airtable`, `firebase-rtdb`), a run without `dry_run` or `limit` is a full sync: pages whose source rows no longer exist are archived. A successful import also saves its settings as a [connection](#saved-connections) and turns on hourly auto-sync for syncable sources.
+
+### Sources
+
+| `from` | Required fields |
+|---|---|
+| `markdown` | `path` |
+| `obsidian` | `path` (the vault folder) |
+| `csv` | `file` |
+| `json`, `jsonl` | `file` |
+| `bibtex` | `file` |
+| `croissant` | `file` or `url` |
+| `sqlite` | `db`, plus `table` or `query` |
+| `postgres` | `dsn`, plus `table` or `query` |
+| `mysql` | `dsn`, plus `table` or `query` |
+| `mongodb` | `uri` (or `dsn`), `database`, `collection` |
+| `firestore` | `project`, `collection`, optional `credentials` |
+| `notion` | `database_id`, `api_key` |
+| `airtable` | `base_id`, `table_id`, `api_key` |
+| `firebase-rtdb` and other Airbyte connectors | `airbyte_config` (needs Docker or an Airbyte Cloud key) |
+
+For Excel and YAML files, use the `kiwifs import` CLI. See [Import overview](/import/overview) for source-specific guides.
+
+## Upload a file and import it
+
+Upload a local file and import, preview, or infer fields from it in one request.
+
+**`POST /api/kiwi/import/upload`** (`multipart/form-data`)
+
+<ParamField body="file" type="file" required>
+  The data file. Maximum 256 MB.
+</ParamField>
+<ParamField body="from" type="string" required>
+  One of `csv`, `json`, `jsonl`, `bibtex`, or `sqlite`. Excel and YAML uploads are accepted by the form but not yet imported; use the `kiwifs import` CLI for those.
+</ParamField>
+<ParamField body="mode" type="string" default="import">
+  `import` writes pages, `preview` returns the first 5 rendered records, and `infer-fields` returns suggested field mappings.
+</ParamField>
+<ParamField body="prefix" type="string">
+  Target directory. Defaults to the uploaded filename without its extension.
+</ParamField>
+<ParamField body="id_column" type="string">
+  Field used as the page filename.
+</ParamField>
+<ParamField body="field_mappings" type="string">
+  Field mappings as a JSON-encoded array, in the same shape as `POST /import`.
+</ParamField>
+<ParamField body="table" type="string">
+  Table name for `sqlite`. A `sqlite` upload needs either `table` or `query`.
+</ParamField>
+<ParamField body="query" type="string">
+  SQL query for `sqlite`.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/import/upload' \
+  -H 'X-Actor: agent:importer' \
+  -F 'file=@customers.csv' \
+  -F 'from=csv' \
+  -F 'id_column=id' \
+  -F 'mode=preview'
 ```
 
-Returns the list of supported import source types and their required configuration fields.
+The response depends on `mode`: the [import response](#run-an-import), the [preview response](#preview-an-import), or the [infer-fields response](#infer-field-mappings). Returns `400` for an unsupported `from` and `413` when the file is over 256 MB.
 
-```json
-["postgres", "mysql", "sqlite", "mongodb", "firestore", "dynamodb", "redis", "elasticsearch", "csv", "json", "jsonl", "yaml", "excel", "notion", "airtable", "gsheets", "obsidian", "confluence", "markdown"]
+## List sources
+
+List the source types this server can import from, and whether Airbyte connectors are available.
+
+**`GET /api/kiwi/import/sources`**
+
+```bash
+curl 'http://localhost:3333/api/kiwi/import/sources'
 ```
 
-## Import browse
+<ResponseField name="builtin" type="string[]">Sources handled natively by KiwiFS.</ResponseField>
+<ResponseField name="airbyte" type="string[] | null">Airbyte connector sources. `null` when neither Docker nor an Airbyte Cloud key is available.</ResponseField>
+<ResponseField name="docker_available" type="boolean">Whether a Docker daemon is reachable for local Airbyte connectors.</ResponseField>
+<ResponseField name="cloud_key_present" type="boolean">Whether an Airbyte Cloud API key is configured.</ResponseField>
 
-List **tables or collections** for a source before you run a full import. Same base URL prefix: `http://localhost:3333/api/kiwi`.
-
-```http
-POST /import/browse
-Content-Type: application/json
+```json Response
+{
+  "builtin": ["markdown", "obsidian", "csv", "json", "jsonl", "excel", "yaml", "bibtex", "croissant", "sqlite", "postgres", "mysql", "mongodb", "firestore"],
+  "airbyte": ["firebase-rtdb", "notion", "airtable"],
+  "docker_available": true,
+  "cloud_key_present": false
+}
 ```
 
-Body fields depend on `from` (same family as `POST /import`):
+The order of the lists is not guaranteed.
 
-| `from` | Required fields (typical) |
-|--------|----------------------------|
-| `postgres` | `dsn` |
-| `mysql` | `dsn` |
-| `mongodb` | `uri` (or `dsn`), `database` |
-| `firestore` | `project`, optional `credentials` JSON |
+## Browse tables and collections
 
-```json
-{ "from": "postgres", "dsn": "postgres://user:pass@localhost:5432/db" }
+List the tables or collections in a database before you import.
+
+**`POST /api/kiwi/import/browse`**
+
+<ParamField body="from" type="string" required>
+  `postgres`, `mysql`, `mongodb`, or `firestore`.
+</ParamField>
+<ParamField body="dsn" type="string">
+  Connection string for `postgres` and `mysql`.
+</ParamField>
+<ParamField body="uri" type="string">
+  Connection URI for `mongodb`. `dsn` also works.
+</ParamField>
+<ParamField body="database" type="string">
+  Database name. Required for `mongodb`.
+</ParamField>
+<ParamField body="project" type="string">
+  Project ID. Required for `firestore`.
+</ParamField>
+<ParamField body="credentials" type="object">
+  Service account JSON for `firestore`.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/import/browse' \
+  -H 'Content-Type: application/json' \
+  -d '{"from": "postgres", "dsn": "postgres://user:pass@localhost:5432/mydb"}'
 ```
 
-```json
-{ "tables": [{ "name": "articles" }, { "name": "comments" }] }
+<ResponseField name="tables" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="name" type="string">Table or collection name.</ResponseField>
+    <ResponseField name="estimated_count" type="integer">Approximate row count, when the database reports one.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json Response
+{"tables": [{"name": "articles", "estimated_count": 1280}, {"name": "comments", "estimated_count": 9400}]}
 ```
 
-Unsupported `from` values return **`400`** when browse is not implemented for that source.
+Returns `400` for other source types or when the connection fails.
 
-## Import preview
+## Preview an import
 
-Fetch sample rows **without writing** pages. Uses the same JSON shape as `POST /import`, plus optional `limit` (default **5**, max **20**).
+Render the first few records as pages without writing anything.
 
-```http
-POST /import/preview
-Content-Type: application/json
+**`POST /api/kiwi/import/preview`**
+
+Takes the same body as [`POST /import`](#run-an-import), including `path` for `markdown` and `obsidian` and `query` for SQL sources, plus:
+
+<ParamField body="limit" type="integer" default="5">
+  Number of records to preview. Values outside 1–20 fall back to 5.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/import/preview' \
+  -H 'Content-Type: application/json' \
+  -d '{"from": "obsidian", "path": "/data/vaults/research", "limit": 3}'
 ```
 
-```json
+<ResponseField name="records" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="path" type="string">Page path the record would be written to.</ResponseField>
+    <ResponseField name="frontmatter" type="object">Frontmatter the page would get, including `_source` and `_source_id`.</ResponseField>
+    <ResponseField name="body_preview" type="string">Page body after the frontmatter, cut at 800 characters.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json Response
 {
   "records": [
     {
-      "path": "postgres/acme.md",
-      "frontmatter": { "_source": "postgres", "_source_id": "...", "title": "Acme" },
-      "body_preview": "# Acme\n\n> Auto-imported from postgres (row ...)"
+      "path": "research/reading-list.md",
+      "frontmatter": {"_source": "obsidian", "_source_id": "reading-list.md", "tags": ["papers"]},
+      "body_preview": "# Reading list\n\n- [[Attention is all you need]]\n..."
     }
   ]
 }
 ```
 
-## Import connections
+## Infer field mappings
 
-When a connection store is enabled, the server persists **metadata only** (never secrets). Re-runs require credentials in the request body.
+Sample up to 100 records and suggest a field mapping with detected types.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/import/connections` | List saved connections (empty array if disabled). |
-| `POST` | `/import/connections` | Save or update metadata (`from`, `name`, `dsn`, `uri`, `table`, `collection`, `database`, `database_id`, `base_id`, `table_id`, `project`, `prefix`, `id_column`, `columns`, last-run stats, etc.). |
-| `DELETE` | `/import/connections/:id` | Remove a connection. **`204`**. |
-| `POST` | `/import/connections/:id/run` | Run import again. Body may include `credentials` and/or `api_key` for that run only. Response matches `POST /import`: `{ "imported", "skipped", "archived", "errors" }`. |
-| `POST` | `/import/connections/:id/sync` | Enable, pause, or change auto-sync interval. Body: `{ "enabled": true, "interval": "1h" }`. |
+**`POST /api/kiwi/import/infer-fields`**
 
-## Ingest from files
+Takes the same body as [`POST /import/preview`](#preview-an-import), including `path` and `query`. `prefix`, `columns`, `field_mappings`, and `limit` are ignored.
 
-Convert supported office and document formats to markdown (MarkItDown pipeline).
-
-```http
-POST /ingest
-Content-Type: application/json
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/import/infer-fields' \
+  -H 'Content-Type: application/json' \
+  -d '{"from": "postgres", "dsn": "postgres://user:pass@localhost:5432/mydb", "query": "SELECT * FROM articles"}'
 ```
 
-```json
+<ResponseField name="fields" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="source" type="string">Field name in the source.</ResponseField>
+    <ResponseField name="target" type="string">Suggested frontmatter key.</ResponseField>
+    <ResponseField name="type" type="string">Detected type: `string`, `number`, `date`, or `boolean`.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json Response
 {
-  "file": "/tmp/report.pdf",
-  "split_mode": "single",
-  "prefix": "imports/",
-  "extract_keywords": true,
-  "max_keywords": 10,
-  "convert_crossrefs": false,
-  "actor": "ingest-bot"
+  "fields": [
+    {"source": "published_at", "target": "published_at", "type": "date"},
+    {"source": "title", "target": "title", "type": "string"},
+    {"source": "views", "target": "views", "type": "number"}
+  ]
 }
 ```
 
-- `file` must use an extension the server accepts for MarkItDown.
-- `split_mode` defaults to `single`.
+Fields whose names start with `_` are left out. Edit the result as needed and pass it as `field_mappings` to preview or import.
 
-## Export
+## Saved connections
 
-Export your knowledge base in structured formats.
+A connection is the non-secret part of an import: source, table, prefix, columns, and sync settings. KiwiFS saves one automatically after each successful `POST /import` (one per source and prefix) and keeps them in `.kiwi/state/imports.json`. Credentials and API keys are never stored, so you send them again when you re-run a connection that needs them.
 
-<ParamField query="format" type="string" required>
-  Output format: `jsonl`, `csv`, or `parquet`.
-</ParamField>
-<ParamField query="path" type="string">
-  Scope export to a subdirectory (e.g. `concepts`).
-</ParamField>
-<ParamField query="columns" type="string">
-  Comma-separated frontmatter fields to include as columns.
-</ParamField>
-<ParamField query="include-content" type="boolean" default="false">
-  Include the full markdown body in the export.
-</ParamField>
-<ParamField query="include-links" type="boolean" default="false">
-  Include outgoing wiki links for each page.
-</ParamField>
-<ParamField query="include-embeddings" type="boolean" default="false">
-  Include vector embeddings (if available).
-</ParamField>
-<ParamField query="limit" type="integer">
-  Maximum number of pages to export.
-</ParamField>
+### Connection object
 
-<CodeGroup>
-```bash Export as JSONL
-curl 'http://localhost:3333/api/kiwi/export?format=jsonl&path=concepts&include-content=true'
+<ResponseField name="id" type="string">Connection ID (UUID).</ResponseField>
+<ResponseField name="from" type="string">Source type.</ResponseField>
+<ResponseField name="name" type="string">Display name, for example `postgres:articles`.</ResponseField>
+<ResponseField name="prefix" type="string">Target directory.</ResponseField>
+<ResponseField name="dsn, uri, table, collection, database, database_id, base_id, table_id, project, id_column, columns" type="various">Source settings, as sent on import.</ResponseField>
+<ResponseField name="last_run" type="string">RFC 3339 time of the last run.</ResponseField>
+<ResponseField name="last_stats" type="object">`imported`, `skipped`, `archived`, and `errors` from the last run.</ResponseField>
+<ResponseField name="created_at" type="string">RFC 3339 creation time.</ResponseField>
+<ResponseField name="sync_enabled" type="boolean">Whether auto-sync is on.</ResponseField>
+<ResponseField name="sync_interval" type="string">Go duration such as `5m`, `1h`, or `24h`.</ResponseField>
+<ResponseField name="next_sync" type="string">RFC 3339 time of the next scheduled sync.</ResponseField>
+<ResponseField name="sync_status" type="string">`idle`, `running`, or `error`.</ResponseField>
+<ResponseField name="sync_error" type="string">Last sync error, if any.</ResponseField>
+<ResponseField name="via, airbyte_image, streams" type="various">Airbyte settings, when the import ran through Airbyte.</ResponseField>
+
+## List connections
+
+List saved import connections.
+
+**`GET /api/kiwi/import/connections`**
+
+```bash
+curl 'http://localhost:3333/api/kiwi/import/connections'
 ```
 
-```bash Export as CSV
-curl 'http://localhost:3333/api/kiwi/export?format=csv&columns=title,status,updated&path=concepts'
+Returns an array of [connection objects](#connection-object), or `[]` when the connection store is unavailable.
+
+```json Response
+[
+  {
+    "id": "6f1c2a4e-8b0d-4c1e-9a77-2f3b5d9e1c40",
+    "from": "postgres",
+    "name": "postgres:articles",
+    "dsn": "postgres://user:pass@localhost:5432/mydb",
+    "table": "articles",
+    "prefix": "articles",
+    "last_run": "2026-10-19T14:02:11Z",
+    "last_stats": {"imported": 42, "skipped": 3},
+    "created_at": "2026-10-12T09:30:00Z",
+    "sync_enabled": true,
+    "sync_interval": "1h",
+    "next_sync": "2026-10-19T15:02:11Z",
+    "sync_status": "idle"
+  }
+]
 ```
 
-```bash Export with links and embeddings
-curl 'http://localhost:3333/api/kiwi/export?format=jsonl&include-content=true&include-links=true&include-embeddings=true'
-```
-</CodeGroup>
+<Warning>
+`dsn` and `uri` are saved exactly as sent, including any password inside them.
+</Warning>
 
-### JSONL output
+## Save a connection
 
-Each line is a JSON object representing one page:
+Create or update a connection without running an import.
 
-```json
-{"path":"concepts/auth.md","title":"Authentication","status":"verified","content":"# Authentication\n\nOAuth2 + JWT...","links":["users","billing"]}
-{"path":"concepts/billing.md","title":"Billing","status":"draft","content":"# Billing\n\nStripe integration...","links":["users"]}
-```
+**`POST /api/kiwi/import/connections`**
 
-### CSV output
+The body is a [connection object](#connection-object). `from` is required, and `name` defaults to `from`. Include `id` to update an existing connection or omit it to create one.
 
-```csv
-path,title,status,updated
-concepts/auth.md,Authentication,verified,2026-04-25
-concepts/billing.md,Billing,draft,2026-04-20
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/import/connections' \
+  -H 'Content-Type: application/json' \
+  -d '{"from": "notion", "name": "Notion roadmap", "database_id": "a1b2c3d4e5f6", "prefix": "roadmap"}'
 ```
 
-<Tip>
-Use JSONL export with `include-content=true` to create backups or to feed your knowledge base into external pipelines.
-</Tip>
+Returns `200` with the saved connection, including its `id`. Returns `400` without `from` and `503` when the connection store is unavailable.
 
-## Document export
+## Delete a connection
 
-Render markdown to PDF, HTML, slides, or a static site:
+Remove a saved connection. Pages it imported are not touched.
 
-```http
-POST /export/document
-Content-Type: application/json
+**`DELETE /api/kiwi/import/connections/:id`**
+
+```bash
+curl -X DELETE 'http://localhost:3333/api/kiwi/import/connections/6f1c2a4e-8b0d-4c1e-9a77-2f3b5d9e1c40'
 ```
 
-See [Document export](/export/documents) for the full request body and examples.
+Returns `204` on success and `404` for an unknown ID.
+
+## Run a connection
+
+Re-run a saved connection's import.
+
+**`POST /api/kiwi/import/connections/:id/run`**
+
+<ParamField path="id" type="string" required>Connection ID.</ParamField>
+<ParamField body="credentials" type="object">Service account JSON for this run only (`firestore`).</ParamField>
+<ParamField body="api_key" type="string">API key for this run only (`notion`, `airtable`).</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/import/connections/6f1c2a4e-8b0d-4c1e-9a77-2f3b5d9e1c40/run' \
+  -H 'Content-Type: application/json' \
+  -d '{"api_key": "secret_abc123"}'
+```
+
+Returns the same body as [`POST /import`](#run-an-import) and updates `last_run` and `last_stats`. Returns `404` for an unknown ID.
+
+## Configure auto-sync
+
+Turn auto-sync on or off for a connection, or change its interval.
+
+**`POST /api/kiwi/import/connections/:id/sync`**
+
+<ParamField path="id" type="string" required>Connection ID.</ParamField>
+<ParamField body="enabled" type="boolean">Turn auto-sync on or off. Omit to keep the current state.</ParamField>
+<ParamField body="interval" type="string">Go duration such as `15m`, `1h`, or `24h`. Invalid values fall back to `1h`.</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/import/connections/6f1c2a4e-8b0d-4c1e-9a77-2f3b5d9e1c40/sync' \
+  -H 'Content-Type: application/json' \
+  -d '{"enabled": true, "interval": "6h"}'
+```
+
+Returns the updated [connection object](#connection-object) with `next_sync` rescheduled. Returns `404` for an unknown ID.
+
+<Note>
+Scheduled syncs run without credentials, so they only work for sources that don't need any at run time, such as a `postgres` DSN that includes its password.
+</Note>
+
+## Sync status
+
+List every connection with auto-sync enabled.
+
+**`GET /api/kiwi/import/sync/status`**
+
+```bash
+curl 'http://localhost:3333/api/kiwi/import/sync/status'
+```
+
+Returns an array of [connection objects](#connection-object) where `sync_enabled` is `true`. Check `sync_status` and `sync_error` for failures.
 
 ## Airbyte endpoints
 
-| Method | Path |
-| --- | --- |
-| `POST` | `/import/airbyte/spec` |
-| `POST` | `/import/airbyte/check` |
-| `POST` | `/import/airbyte/discover` |
-| `POST` | `/import/airbyte-cloud/check` |
-| `POST` | `/import/airbyte-cloud/discover` |
-| `GET` | `/import/airbyte-cloud/connections` |
-| `POST` | `/import/airbyte-cloud/sync` |
-| `GET` | `/import/sync/status` |
+Configure Airbyte connectors, locally through Docker or through Airbyte Cloud. Airbyte Cloud needs `airbyte_api_key` and `airbyte_workspace_id` under `[import]` in `.kiwi/config.toml`, or the `AIRBYTE_API_KEY` and `AIRBYTE_WORKSPACE_ID` environment variables.
 
-See [Airbyte import](/import/airbyte).
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `POST` | `/import/airbyte/spec` | `from` or `airbyte_image` | Connector config schema. Without Docker but with a Cloud key: `{"mode": "cloud", "message"}`. |
+| `POST` | `/import/airbyte/check` | `from` or `airbyte_image`, `config` | Connection check result. Needs Docker. |
+| `POST` | `/import/airbyte/discover` | `from` or `airbyte_image`, `config` | Stream catalog. Needs Docker. |
+| `POST` | `/import/airbyte-cloud/check` | `from`, `config` | Check result plus the temporary `source_id`. |
+| `POST` | `/import/airbyte-cloud/discover` | `source_id` | `{"streams": [...]}` |
+| `GET` | `/import/airbyte-cloud/connections` | none | `{"connections": [...]}` for the workspace. |
+| `POST` | `/import/airbyte-cloud/sync` | `connection_id` | Triggered job details. |
+
+The local endpoints return `503` when Docker is not running. The Cloud endpoints return `503` without an API key and `502` when Airbyte Cloud rejects the request.
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/import/airbyte/check' \
+  -H 'Content-Type: application/json' \
+  -d '{"from": "notion", "config": {"credentials": {"auth_type": "token", "token": "secret_abc123"}}}'
+```
+
+See [Airbyte import](/import/airbyte) for the full walkthrough.
+
+## Ingest a document
+
+Convert a PDF, Office file, image, or other document to markdown and write it as one or more pages.
+
+**`POST /api/kiwi/ingest`**
+
+<ParamField body="file" type="string" required>
+  Path to the file on the server. Supported extensions: `pdf`, `docx`, `pptx`, `xlsx`, `html`, `htm`, `csv`, `json`, `xml`, `epub`, `jpg`, `jpeg`, `png`, `gif`, `bmp`, `tiff`, `mp3`, `wav`, `m4a`, `zip`.
+</ParamField>
+<ParamField body="split_mode" type="string" default="single">
+  `single` writes one page. `sections` writes one page per heading when the document has more than one section.
+</ParamField>
+<ParamField body="prefix" type="string">
+  Directory for the output pages. Defaults to `imports/<file-name-slug>/`.
+</ParamField>
+<ParamField body="extract_keywords" type="boolean" default="false">
+  Extract keywords for each section.
+</ParamField>
+<ParamField body="max_keywords" type="integer" default="10">
+  Keywords to extract per section.
+</ParamField>
+<ParamField body="convert_crossrefs" type="boolean" default="false">
+  Turn references like "see Section 2.1" into wiki links.
+</ParamField>
+<ParamField body="actor" type="string" default="kiwi-ingest">
+  Git commit author.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/ingest' \
+  -H 'Content-Type: application/json' \
+  -d '{"file": "/data/inbox/q3-report.pdf", "split_mode": "sections", "extract_keywords": true}'
+```
+
+<ResponseField name="source_file" type="string">The input file.</ResponseField>
+<ResponseField name="format" type="string">Detected input format.</ResponseField>
+<ResponseField name="total_sections" type="integer">Sections found in the converted document.</ResponseField>
+<ResponseField name="output_files" type="string[]">Pages written.</ResponseField>
+<ResponseField name="top_keywords" type="string[]">Extracted keywords, when requested.</ResponseField>
+
+```json Response
+{
+  "source_file": "/data/inbox/q3-report.pdf",
+  "format": "pdf",
+  "total_sections": 3,
+  "output_files": ["imports/q3-report/summary.md", "imports/q3-report/revenue.md", "imports/q3-report/outlook.md"],
+  "top_keywords": ["revenue", "churn", "pipeline"]
+}
+```
+
+Returns `400` for a missing `file` or an unsupported extension.
+
+## Export pages
+
+Stream every markdown page, or the pages under a path, as JSONL, CSV, or Parquet.
+
+**`GET /api/kiwi/export`**
+
+<ParamField query="format" type="string" default="jsonl">
+  `jsonl`, `csv`, or `parquet`.
+</ParamField>
+<ParamField query="path" type="string">
+  Only export pages whose path starts with this prefix, for example `concepts/`.
+</ParamField>
+<ParamField query="columns" type="string">
+  Comma-separated frontmatter fields to use as CSV columns. Without it, columns are detected from the first page.
+</ParamField>
+<ParamField query="include_content" type="boolean" default="false">
+  Include the full markdown file in `content`.
+</ParamField>
+<ParamField query="include_links" type="boolean" default="false">
+  Include outgoing (`links_out`) and incoming (`links_in`) wiki links.
+</ParamField>
+<ParamField query="include_embeddings" type="boolean" default="false">
+  Include vector chunks. Not supported with `parquet`.
+</ParamField>
+<ParamField query="limit" type="integer" default="0">
+  Maximum pages to export. `0` means no limit.
+</ParamField>
+
+<CodeGroup>
+```bash JSONL with content
+curl 'http://localhost:3333/api/kiwi/export?format=jsonl&path=concepts/&include_content=true' > concepts.jsonl
+```
+
+```bash CSV with chosen columns
+curl 'http://localhost:3333/api/kiwi/export?format=csv&columns=title,status,updated' > pages.csv
+```
+
+```bash Parquet
+curl 'http://localhost:3333/api/kiwi/export?format=parquet' > pages.parquet
+```
+</CodeGroup>
+
+The response streams with `Content-Type` set to `application/x-ndjson`, `text/csv`, or `application/vnd.apache.parquet`. Each JSONL line is one page:
+
+<ResponseField name="path" type="string">Page path.</ResponseField>
+<ResponseField name="frontmatter" type="object">Parsed frontmatter.</ResponseField>
+<ResponseField name="word_count" type="integer">Words in the body.</ResponseField>
+<ResponseField name="content" type="string">Full file, with `include_content=true`.</ResponseField>
+<ResponseField name="links_out" type="string[]">Outgoing wiki links, with `include_links=true`.</ResponseField>
+<ResponseField name="links_in" type="string[]">Pages linking here, with `include_links=true`.</ResponseField>
+<ResponseField name="embeddings" type="object[]">`chunk_idx`, `text`, and `vector` for each chunk, with `include_embeddings=true`.</ResponseField>
+
+```json concepts.jsonl
+{"path":"concepts/auth.md","frontmatter":{"title":"Authentication","status":"verified"},"word_count":412,"links_out":["users","billing"],"links_in":["concepts/users.md"]}
+{"path":"concepts/billing.md","frontmatter":{"title":"Billing","status":"draft"},"word_count":230}
+```
+
+CSV output always starts with a `path` column:
+
+```csv pages.csv
+path,title,status,updated
+concepts/auth.md,Authentication,verified,2026-10-02
+concepts/billing.md,Billing,draft,2026-09-20
+```
+
+Returns `400` for an unknown `format`, a negative `limit`, or `include_embeddings` with `parquet`.
+
+## Export a document
+
+Render a page or folder to PDF, HTML, slides, or a static site and download the result.
+
+**`POST /api/kiwi/export/document`**
+
+<ParamField body="format" type="string" required>
+  `pdf`, `html`, `slides`, or `site`.
+</ParamField>
+<ParamField body="path" type="string" required>
+  File or directory to render.
+</ParamField>
+
+```bash
+curl -X POST 'http://localhost:3333/api/kiwi/export/document' \
+  -H 'Content-Type: application/json' \
+  -d '{"format": "pdf", "path": "reports/q3.md"}' \
+  -o q3.pdf
+```
+
+The response is the rendered file with a `Content-Disposition: attachment` header. Rendering times out after 5 minutes. See [Document export](/export/documents) for theme, bibliography, slide, and site options.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Import overview" icon="file-import" href="/import/overview">
+    Source guides and the `kiwifs import` CLI.
+  </Card>
+  <Card title="Saved connections" icon="plug" href="/import/connections">
+    Re-running imports and auto-sync.
+  </Card>
+  <Card title="Airbyte import" icon="cloud-arrow-down" href="/import/airbyte">
+    Docker and Airbyte Cloud connectors.
+  </Card>
+  <Card title="Export overview" icon="file-export" href="/export/overview">
+    Formats and when to use each.
+  </Card>
+</CardGroup>

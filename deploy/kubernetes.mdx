@@ -1,15 +1,18 @@
 ---
 title: "Kubernetes"
-description: "Deploy KiwiFS on Kubernetes."
+description: "Run KiwiFS in a cluster with persistent storage, config, secrets, and health probes."
 icon: "dharmachakra"
 ---
 
-This guide covers deploying KiwiFS to a Kubernetes cluster with persistent storage, configuration, and health checks.
+KiwiFS runs on Kubernetes as a single-replica Deployment backed by a PersistentVolumeClaim. The project doesn't ship a Helm chart, so this page gives plain manifests you can adapt.
 
-## Basic deployment
+<Warning>
+Run exactly one KiwiFS pod per knowledge root. KiwiFS serializes writes inside one process and takes an exclusive lock on the data directory, so a second pod on the same volume fails to start.
+</Warning>
 
-Create a Deployment and Service to run KiwiFS in your cluster.
+## Deployment, Service, and storage
 
+<CodeGroup>
 ```yaml kiwifs-deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -19,6 +22,8 @@ metadata:
     app: kiwifs
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: kiwifs
@@ -29,8 +34,8 @@ spec:
     spec:
       containers:
         - name: kiwifs
-          image: kiwifs:latest
-          args: ["serve", "--root", "/data", "--port", "3333"]
+          image: ameliaanhlam/kiwifs:0.19.78
+          args: ["serve", "--root", "/data", "--port", "3333", "--host", "0.0.0.0"]
           ports:
             - containerPort: 3333
               name: http
@@ -78,10 +83,6 @@ spec:
   type: ClusterIP
 ```
 
-## Persistent storage
-
-Use a PersistentVolumeClaim to store your knowledge base across pod restarts and rescheduling.
-
 ```yaml kiwifs-pvc.yaml
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -93,19 +94,22 @@ spec:
   resources:
     requests:
       storage: 10Gi
-  storageClassName: standard
+```
+</CodeGroup>
+
+```bash Terminal
+kubectl apply -f kiwifs-pvc.yaml -f kiwifs-deployment.yaml -f kiwifs-service.yaml
 ```
 
-<Warning>
-Use `ReadWriteOnce` access mode. KiwiFS manages its own concurrency and should not have multiple pods writing to the same volume simultaneously.
-</Warning>
+`strategy: Recreate` stops the old pod before starting the new one, so an upgrade never has two pods competing for the volume. On first start, KiwiFS initializes an empty volume as a new knowledge base.
 
-## Configuration
+The image runs as the non-root user `kiwi`. If the volume isn't writable by that user, set `securityContext.fsGroup` on the pod to the user's group ID, which `docker run --rm --entrypoint id ameliaanhlam/kiwifs` prints.
 
-### ConfigMap
+## Configuration and secrets
 
-Store your KiwiFS configuration in a ConfigMap and mount it into the pod.
+Keep `config.toml` in a ConfigMap and secrets in a Secret. `config.toml` can read secrets from environment variables with `${VAR}`, which you then fill from the Secret.
 
+<CodeGroup>
 ```yaml kiwifs-configmap.yaml
 apiVersion: v1
 kind: ConfigMap
@@ -118,26 +122,64 @@ data:
 
     [versioning]
     strategy = "git"
-
-    [async]
-    enabled = true
+    async_commit = true
     batch_window_ms = 200
     batch_max_size = 50
+
+    [auth]
+    type = "apikey"
+    api_key = "${KIWI_API_KEY}"
+
+    [search.vector]
+    enabled = true
+
+    [search.vector.embedder]
+    provider = "openai"
+    model = "text-embedding-3-small"
+    api_key = "${OPENAI_API_KEY}"
+
+    [search.vector.store]
+    provider = "pgvector"
+    dsn = "${KIWI_PGVECTOR_DSN}"
 ```
 
-Add the ConfigMap volume to your Deployment.
+```yaml kiwifs-secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kiwifs-secrets
+type: Opaque
+stringData:
+  KIWI_API_KEY: "your-secret-api-key"
+  OPENAI_API_KEY: "sk-..."
+  KIWI_PGVECTOR_DSN: "postgres://user:pass@pgvector:5432/kiwi?sslmode=disable"
+```
+</CodeGroup>
 
-```yaml
+Mount only the file, with `subPath`, so the rest of `/data/.kiwi` stays on the writable volume. Because the config file already exists, KiwiFS skips its first-start initialization, so run `kiwifs init` in an init container. It only creates files that are missing.
+
+```yaml kiwifs-deployment.yaml (excerpt)
 spec:
   template:
     spec:
+      initContainers:
+        - name: init
+          image: ameliaanhlam/kiwifs:0.19.78
+          args: ["init", "--root", "/data"]
+          volumeMounts:
+            - name: knowledge
+              mountPath: /data
       containers:
         - name: kiwifs
+          envFrom:
+            - secretRef:
+                name: kiwifs-secrets
           volumeMounts:
             - name: knowledge
               mountPath: /data
             - name: config
-              mountPath: /data/.kiwi
+              mountPath: /data/.kiwi/config.toml
+              subPath: config.toml
       volumes:
         - name: knowledge
           persistentVolumeClaim:
@@ -147,192 +189,107 @@ spec:
             name: kiwifs-config
 ```
 
-### Secrets
-
-Store sensitive values like API keys and connection strings in a Secret.
-
-```yaml kiwifs-secret.yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: kiwifs-secrets
-type: Opaque
-stringData:
-  api-key: "your-secret-api-key"
-  openai-api-key: "sk-..."
-  pgvector-dsn: "postgres://user:pass@pgvector:5432/kiwi?sslmode=disable"
-```
-
-Reference the Secret as environment variables in the Deployment.
-
-```yaml
-spec:
-  template:
-    spec:
-      containers:
-        - name: kiwifs
-          args: ["serve", "--root", "/data", "--auth", "apikey"]
-          env:
-            - name: KIWIFS_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: kiwifs-secrets
-                  key: api-key
-            - name: OPENAI_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: kiwifs-secrets
-                  key: openai-api-key
-            - name: KIWI_PGVECTOR_DSN
-              valueFrom:
-                secretKeyRef:
-                  name: kiwifs-secrets
-                  key: pgvector-dsn
-```
-
-## Health check probes
-
-KiwiFS exposes three health endpoints.
-
-| Endpoint | Purpose | Use as |
-|----------|---------|--------|
-| `/health` | General health status | Informational |
-| `/healthz` | Liveness check | `livenessProbe` |
-| `/readyz` | Readiness check | `readinessProbe` |
-
-The liveness probe restarts the pod if KiwiFS becomes unresponsive. The readiness probe removes the pod from service endpoints until it finishes initializing and indexing.
-
-```yaml
-livenessProbe:
-  httpGet:
-    path: /healthz
-    port: http
-  initialDelaySeconds: 5
-  periodSeconds: 10
-  failureThreshold: 3
-readinessProbe:
-  httpGet:
-    path: /readyz
-    port: http
-  initialDelaySeconds: 3
-  periodSeconds: 5
-  failureThreshold: 2
-```
-
-## NFS export for native volume mounts
-
-KiwiFS includes a userspace NFSv3 server. You can use it to expose your knowledge base as a native NFS volume to other pods in the cluster.
+KiwiFS reads `config.toml` at startup. A `subPath` mount doesn't pick up ConfigMap edits, so restart the Deployment after changing it with `kubectl rollout restart deployment/kiwifs`.
 
 <Note>
-The NFS server runs entirely in userspace. It does not require privileged mode or host kernel NFS support.
+KiwiFS only reads a few environment variables directly: `KIWI_BACKUP_REMOTE`, `KIWI_BACKUP_INTERVAL`, `KIWI_BACKUP_REBASE_BEFORE_PUSH`, and `KIWI_PUBLIC_URL`. Everything else, including API keys, must be referenced from `config.toml`.
 </Note>
 
-### Step 1: Enable NFS on the KiwiFS pod
+## Health probes
 
-Add the `--nfs` flag and expose port 2049.
+| Endpoint | Behavior | Use as |
+|----------|----------|--------|
+| `/health` | Always `200` with `{"status": "ok"}` | Informational |
+| `/healthz` | `200` with status, uptime, and version while the process serves HTTP | `livenessProbe` |
+| `/readyz` | `200` when storage is reachable and every enabled protocol listener (NFS, S3, WebDAV) is up, otherwise `503` | `readinessProbe` |
 
-```yaml
-spec:
-  template:
+Health endpoints don't require authentication, even when auth is on.
+
+## NFS for other pods
+
+KiwiFS includes a userspace NFSv3 server, so other pods can mount the knowledge base as a native volume. It doesn't need privileged mode or kernel NFS support.
+
+<Steps>
+  <Step title="Enable NFS on the KiwiFS pod">
+    ```yaml
+    containers:
+      - name: kiwifs
+        args: ["serve", "--root", "/data", "--nfs", "--nfs-allow", "10.0.0.0/8"]
+        ports:
+          - containerPort: 3333
+            name: http
+          - containerPort: 2049
+            name: nfs
+    ```
+
+    By default NFS accepts localhost only. Set `--nfs-allow` to the CIDRs your nodes mount from, since the kubelet performs the mount from the node.
+  </Step>
+  <Step title="Expose the NFS port">
+    ```yaml kiwifs-nfs-service.yaml
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: kiwifs-nfs
     spec:
-      containers:
-        - name: kiwifs
-          args:
-            - "serve"
-            - "--root"
-            - "/data"
-            - "--nfs"
-            - "--nfs-allow"
-            - "10.0.0.0/8"
-          ports:
-            - containerPort: 3333
-              name: http
-            - containerPort: 2049
-              name: nfs
-```
-
-Create a Service for the NFS port.
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: kiwifs-nfs
-spec:
-  selector:
-    app: kiwifs
-  ports:
-    - port: 2049
-      targetPort: nfs
-      protocol: TCP
-  type: ClusterIP
-```
-
-### Step 2: Mount from other pods
-
-Other pods can mount the NFS export as a standard NFS volume.
-
-```yaml
-spec:
-  volumes:
-    - name: knowledge
-      nfs:
-        server: kiwifs-nfs
-        path: /
-  containers:
-    - name: app
-      volumeMounts:
+      selector:
+        app: kiwifs
+      ports:
+        - port: 2049
+          targetPort: nfs
+          protocol: TCP
+      type: ClusterIP
+    ```
+  </Step>
+  <Step title="Mount it from another pod">
+    ```yaml
+    spec:
+      volumes:
         - name: knowledge
-          mountPath: /knowledge
-          readOnly: true
-```
+          nfs:
+            server: 10.96.12.34   # ClusterIP of kiwifs-nfs
+            path: /
+      containers:
+        - name: app
+          volumeMounts:
+            - name: knowledge
+              mountPath: /knowledge
+              readOnly: true
+    ```
+
+    Nodes often can't resolve cluster DNS names, so use the Service's ClusterIP as `server`.
+  </Step>
+</Steps>
 
 <Tip>
-Use `readOnly: true` on consumer pods to prevent accidental writes. Route all writes through the KiwiFS HTTP API instead.
+Mount NFS read-only in consumer pods and send writes through the REST API or MCP, so every change gets a commit and an index update.
 </Tip>
 
-## Multi-space setup
+See [Alternate protocols](/guides/alternate-protocols) for S3 and WebDAV, which you expose the same way on ports `3334` and `3335`.
 
-Run multiple knowledge spaces by mounting separate PVCs and registering them with the `--space` flag.
+## Multiple spaces
+
+Serve several knowledge bases from one pod by mounting a volume per space and registering each with `--space name=path`.
 
 ```yaml
-spec:
-  template:
-    spec:
-      containers:
-        - name: kiwifs
-          args:
-            - "serve"
-            - "--root"
-            - "/data/default"
-            - "--space"
-            - "team=/data/team"
-            - "--space"
-            - "docs=/data/docs"
-          volumeMounts:
-            - name: default-data
-              mountPath: /data/default
-            - name: team-data
-              mountPath: /data/team
-            - name: docs-data
-              mountPath: /data/docs
-      volumes:
-        - name: default-data
-          persistentVolumeClaim:
-            claimName: kiwifs-default
-        - name: team-data
-          persistentVolumeClaim:
-            claimName: kiwifs-team
-        - name: docs-data
-          persistentVolumeClaim:
-            claimName: kiwifs-docs
+containers:
+  - name: kiwifs
+    args:
+      - "serve"
+      - "--root=/data/default"
+      - "--space=team=/data/team"
+      - "--space=docs=/data/docs"
+    volumeMounts:
+      - name: default-data
+        mountPath: /data/default
+      - name: team-data
+        mountPath: /data/team
+      - name: docs-data
+        mountPath: /data/docs
 ```
 
-Each space operates independently with its own directory, versioning history, and search index.
+Each space has its own files, history, and search index, served under `/api/kiwi/<name>/...`. See [Multi-space](/concepts/multi-space).
 
 ## Ingress
-
-Expose KiwiFS outside the cluster with an Ingress resource.
 
 ```yaml kiwifs-ingress.yaml
 apiVersion: networking.k8s.io/v1
@@ -340,7 +297,8 @@ kind: Ingress
 metadata:
   name: kiwifs
   annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-body-size: "256m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
 spec:
   rules:
     - host: kiwi.example.com
@@ -359,6 +317,15 @@ spec:
       secretName: kiwifs-tls
 ```
 
-<Tip>
-Set `proxy-body-size` high enough to handle file uploads. The default nginx limit of 1MB is too low for most knowledge bases.
-</Tip>
+Raise `proxy-body-size` for file uploads, which the import endpoint accepts up to 256 MB, and `proxy-read-timeout` for document exports, which can take up to five minutes. The web UI and API expect to be served from the root path.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Docker" icon="docker" href="/deploy/docker">
+    Image contents, environment variables, and Compose.
+  </Card>
+  <Card title="Backup sync" icon="code-branch" href="/deploy/backup-sync">
+    Push history to a git remote on a schedule.
+  </Card>
+</CardGroup>

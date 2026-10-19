@@ -1,142 +1,163 @@
 ---
 title: "Spaces admin"
-description: "List, create, and remove knowledge spaces on a multi-space KiwiFS server."
+description: "List, inspect, create, and remove knowledge spaces on a running KiwiFS server."
 icon: "server"
 ---
 
-When KiwiFS runs with a **space manager**, space administration lives at `/api/spaces` (not under `/api/kiwi/`).
+Every KiwiFS server runs a space manager, so these routes exist even when you serve a single folder. They live at `/api/spaces` and `/api/init-templates`, outside `/api/kiwi/`. Per-space file APIs stay at `/api/kiwi/...` or `/api/kiwi/{space}/...`; see [Multi-space](/concepts/multi-space) for routing.
 
-<Info>
-Per-space file APIs remain at `/api/kiwi/...` or `/api/kiwi/{space}/...`. See [Multi-space](/concepts/multi-space) for routing rules.
-</Info>
+<Warning>
+KiwiFS does not apply `[auth]` to `/api/spaces` or `/api/init-templates`. Anyone who can reach the port can create and delete spaces. Block or authenticate these paths at your reverse proxy in production.
+</Warning>
 
 ## List spaces
 
-```http
-GET /api/spaces
-```
+Returns every registered space with file counts and size.
+
+**`GET /api/spaces`**
 
 ```bash
 curl -s 'http://localhost:3333/api/spaces'
 ```
 
+<ResponseField name="spaces" type="object[]">
+  <Expandable title="space">
+    <ResponseField name="name" type="string">Space name used in `/api/kiwi/{space}/...` and `X-Kiwi-Space`.</ResponseField>
+    <ResponseField name="root" type="string">Folder on disk.</ResponseField>
+    <ResponseField name="fileCount" type="integer">Files under the root, excluding dot-directories such as `.kiwi` and `.git`.</ResponseField>
+    <ResponseField name="sizeBytes" type="integer">Total size of those files.</ResponseField>
+    <ResponseField name="lastModified" type="string">Most recent file modification time. Omitted for an empty space.</ResponseField>
+  </Expandable>
+</ResponseField>
+
 ```json Response
 {
   "spaces": [
     {
-      "name": "engineering",
-      "root": "/data/eng-wiki",
+      "name": "default",
+      "root": "/data/knowledge",
       "fileCount": 1420,
-      "sizeBytes": 45000000,
-      "lastModified": "2026-05-02T10:00:00Z"
+      "lastModified": "2026-10-02T10:00:00Z",
+      "sizeBytes": 45000000
     }
   ]
 }
 ```
 
-<ResponseField name="spaces[].name" type="string">Unique space identifier.</ResponseField>
-<ResponseField name="spaces[].root" type="string">Filesystem path for this space.</ResponseField>
-<ResponseField name="spaces[].fileCount" type="integer">Number of markdown files.</ResponseField>
-<ResponseField name="spaces[].sizeBytes" type="integer">Total size on disk.</ResponseField>
-<ResponseField name="spaces[].lastModified" type="string">Most recent file modification.</ResponseField>
+The primary space is named `default` unless `[space] name` is set in its config.
 
-## Get one space
+## Get a space
 
-```http
-GET /api/spaces/:name
-```
+Returns one space's metadata.
+
+**`GET /api/spaces/:name`**
+
+<ParamField path="name" type="string" required>
+  Space name.
+</ParamField>
 
 ```bash
 curl -s 'http://localhost:3333/api/spaces/engineering'
 ```
 
-Returns `404` if the name is unknown.
+Returns the same object as one entry of `spaces` above, or `404` if the name is unknown.
 
 ## List init templates
 
-```http
-GET /api/init-templates
-```
+Returns the scaffolds you can pass as `template` when creating a space.
+
+**`GET /api/init-templates`**
 
 ```bash
 curl -s 'http://localhost:3333/api/init-templates'
 ```
 
+<ResponseField name="templates" type="object[]">
+  <Expandable title="template">
+    <ResponseField name="id" type="string">Value to pass as `template`.</ResponseField>
+    <ResponseField name="label" type="string">Display name.</ResponseField>
+    <ResponseField name="description" type="string">One-line summary.</ResponseField>
+  </Expandable>
+</ResponseField>
+
 ```json Response
-[
-  {"id": "knowledge", "name": "Knowledge Base", "description": "LLM-maintained KB with schema, episodes, playbook"},
-  {"id": "wiki", "name": "Wiki", "description": "Team wiki with decisions, processes, reference docs"},
-  {"id": "runbook", "name": "Runbook", "description": "Ops procedures, incidents, postmortems"},
-  {"id": "research", "name": "Research", "description": "Notes, experiments, literature"},
-  {"id": "tasks", "name": "Tasks", "description": "Task tracking with workflow schema"},
-  {"id": "blank", "name": "Blank", "description": "Config only, no starter files"}
-]
+{
+  "templates": [
+    {"id": "adr", "label": "Architecture Decision Records", "description": "Architecture Decision Records with MADR format, status workflow, and JSON Schema"},
+    {"id": "kb", "label": "Knowledge Base", "description": "Curated knowledge base with article types, verification workflow, and freshness enforcement"},
+    {"id": "memory", "label": "Memory", "description": "Agent memory with episodic/semantic classification, consolidation, and retrieval"},
+    {"id": "blank", "label": "Blank", "description": "Empty workspace with Kiwi config only"}
+  ]
+}
 ```
 
-Use the template `id` when creating a space with `POST /api/spaces`.
+The full set is `adr`, `cms`, `data`, `kb`, `log`, `memory`, `prompt`, `research`, `runbook`, `tasks`, `wiki`, and `blank`, sorted by label with `blank` last.
 
 ## Create a space
 
-```http
-POST /api/spaces
-Content-Type: application/json
-```
+Scaffolds a folder from a template, builds its index and git repo, and registers it.
+
+**`POST /api/spaces`**
 
 <ParamField body="name" type="string" required>
-  Unique identifier for the new space.
+  Unique space name. Cannot contain `/`, `\`, spaces, or dots.
 </ParamField>
-
-<ParamField body="root" type="string" required>
-  Filesystem path for the space's knowledge root.
+<ParamField body="root" type="string">
+  Folder for the space. Defaults to `.spaces/{name}` inside the primary space's root, which hides it from the primary space's tree.
 </ParamField>
-
-<ParamField body="template" type="string">
-  Init template to scaffold the space with (e.g. `knowledge`, `wiki`, `tasks`). Use `GET /api/init-templates` to list available templates.
+<ParamField body="template" type="string" default="blank">
+  Init template ID from [`GET /api/init-templates`](#list-init-templates).
 </ParamField>
 
 ```bash
 curl -X POST 'http://localhost:3333/api/spaces' \
   -H 'Content-Type: application/json' \
-  -d '{"name":"research","root":"/data/research-wiki","template":"research"}'
+  -d '{"name": "research", "template": "research"}'
 ```
 
-Returns `201` with space metadata. Returns `409` if the name already exists.
+```json 201 Created
+{
+  "name": "research",
+  "root": "/data/knowledge/.spaces/research",
+  "fileCount": 9,
+  "lastModified": "2026-10-19T09:30:00Z",
+  "sizeBytes": 18234
+}
+```
 
-<Note>
-KiwiFS creates the root directory, initializes git and indexes, and persists the entry to `.kiwi/spaces.json`.
-</Note>
+Returns `409` if the name already exists, and `400` for an invalid name or template. The space is saved to `.kiwi/spaces.json` in the primary space and restored on restart.
 
 ## Delete a space
 
-```http
-DELETE /api/spaces/:name
-```
+Unregisters a space and moves its folder aside.
+
+**`DELETE /api/spaces/:name`**
+
+<ParamField path="name" type="string" required>
+  Space name.
+</ParamField>
 
 ```bash
 curl -X DELETE 'http://localhost:3333/api/spaces/research'
 ```
 
 ```json Response
-{ "deleted": "research" }
+{"deleted": "research"}
 ```
 
-<Warning>
-Removes the space from the manager but does **not** delete files on disk. Clean up the `root` directory separately if needed.
-</Warning>
+Returns `404` if the name is unknown.
 
-## Auth
+<Note>
+Deletion is a soft delete. KiwiFS renames the root to `{root}.deleted-{timestamp}` (for example `research.deleted-20261019T093000`), so you can recover the files or remove them yourself.
+</Note>
 
-<Tip>
-Protect `/api/spaces` in production. Creation and deletion are administrative operations. Per-space API keys (`auth.type = perspace`) apply to `/api/kiwi` routes after routing.
-</Tip>
-
-## Related documentation
+## Related
 
 <CardGroup cols={2}>
   <Card title="Multi-space" icon="layer-group" href="/concepts/multi-space">
-    Routing and configuration.
+    Routing, space selection, and per-space keys.
   </Card>
   <Card title="Configuration" icon="gear" href="/configuration#multi-space">
-    `[[spaces]]` config syntax.
+    Declare spaces with `[[spaces]]`.
   </Card>
 </CardGroup>
